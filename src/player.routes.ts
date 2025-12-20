@@ -1,69 +1,108 @@
-// player.routes.ts
 import express from "express";
 import { db } from "./db";
+import { getFinalPlayerStats } from "./services/playerService";
+import { getActiveBuffs } from "./services/buffService";
 
 const router = express.Router();
 
-// =======================
-// CURRENT USER DATA
-// =======================
 router.get("/me", async (req, res) => {
-  const pid = (req.session as any).playerId;
+  try {
+    const pid = (req.session as any).playerId;
+    if (!pid) return res.status(401).json({ error: "Not logged in" });
 
-  if (!pid) return res.status(401).json({ error: "Not logged in" });
+    const p = await getFinalPlayerStats(pid);
+    if (!p) return res.json(null);
 
-  const [[player]]: any = await db.query(`
-    SELECT
-      p.id,
-      p.name,
-      p.pclass,
-      p.level,
-      p.exper,
-      p.location,
-      p.attack,
-      p.defense,
-      p.agility,
-      p.vitality,
-      p.intellect,
-      p.crit,
-      p.hpoints,
-      p.maxhp,
-      p.spoints,
-      p.maxspoints,
-      p.gold,
-      p.stat_points,
-      g.name AS guild_name,
-      gm.guild_rank
-    FROM players p
-    LEFT JOIN guild_members gm ON gm.player_id = p.id
-    LEFT JOIN guilds g ON g.id = gm.guild_id
-    WHERE p.id = ?
-  `, [pid]);
+res.json({
+  id: p.id,
+  name: p.name,
+  pclass: p.pclass,
+  level: p.level,
+  exper: p.exper,
+  location: p.location,
 
-  console.log("ME ROUTE PLAYER:", player); // debug log
+  attack: p.attack,
+  defense: p.defense,
+  agility: p.agility,
+  vitality: p.vitality,
+  intellect: p.intellect,
+  crit: p.crit,
 
-  res.json(player);
+  hpoints: p.hpoints,
+  maxhp: p.maxhp,
+  spoints: p.spoints,
+  maxspoints: p.maxspoints,
+
+  spellPower: p.spellPower,
+  dodgeChance: p.dodgeChance,
+
+  gold: p.gold,
+  stat_points: p.stat_points,
+
+  guild_name: p.guild_name,
+  guild_rank: p.guild_rank,
+  portrait_url: p.portrait_url,
+  guild_banner: p.guild_banner,
+
+  // OPTIONAL: buffs for UI only
+  buffs: (await getActiveBuffs(pid)).map(b => ({
+    stat: b.stat,
+    value: b.value,
+    expires_at: b.expires_at
+  }))
 });
+
+
+  } catch (err) {
+    console.error("ME ROUTE ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+  
+});
+
+// =======================
+// GET AVAILABLE CLASSES
+// =======================
+router.get("/api/classes", async (req, res) => {
+  try {
+    const [classes]: any = await db.query(`
+      SELECT id, name
+      FROM classes
+      ORDER BY name ASC
+    `);
+
+    res.json(classes);
+  } catch (err) {
+    console.error("❌ CLASS LOAD FAILED:", err);
+    res.status(500).json([]);
+  }
+});
+
 
 // =======================
 // PLAYER HP
 // =======================
 router.get("/api/player/hp", async (req, res) => {
+  try {
+    const pid = (req.session as any)?.playerId;
+    if (!pid) return res.status(401).json({});
 
-  const pid = (req.session as any).playerId;
-  if (!pid) return res.status(401).json({});
+    const p = await getFinalPlayerStats(pid);
+    if (!p) return res.status(404).json({});
 
-  const [[player]]: any = await db.query(`
-    SELECT hpoints, maxhp FROM players WHERE id=?
-  `,[pid]);
-
-  res.json({
-    current: player.hpoints,
-    max: player.maxhp,
-    percent: Math.floor((player.hpoints / player.maxhp) * 100)
-  });
-
+    res.json({
+      current: p.hpoints,
+      max: p.maxhp,
+      percent: Math.floor((p.hpoints / p.maxhp) * 100)
+    });
+  } catch (err) {
+    console.error("HP ROUTE ERROR:", err);
+    res.status(500).json({});
+  }
 });
+
+
+
 
 // =======================
 // PROFILE PAGE (OPTIONAL FUTURE)
@@ -89,6 +128,8 @@ router.get("/profile", async (req, res) => {
     <p>Gold: ${player.gold}</p>
     <a href="/">Back</a>
   `);
+
 });
+
 
 export default router;

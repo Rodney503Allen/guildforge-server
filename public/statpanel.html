@@ -1,69 +1,80 @@
 <div id="statpanel">
+
+  <!-- CENTERED LOGO (absolute, over the bar) -->
+  <div id="statpanel-logo">
+    <div class="logo-text">GUILDFORGE</div>
+    <div class="logo-slogan">Rise. Fight. Forge Your Legend.</div>
+  </div>
+
+  <!-- LEFT SIDE GRID: only the player section lives here -->
   <div class="statpanel-grid">
 
-    <!-- PLAYER INFO (COLUMN 1) -->
-    <div class="player-info">
-      <div class="player-grid">
-        <div id="player-name"></div>
-        <div id="player-class"></div>
-        <div id="player-level"></div>
-        <div id="player-location"></div>
-      </div>
+    <!-- LEFT PLAYER INFO -->
+    <div class="left-section">
 
-      <!-- PROMINENT GUILD -->
-      <div class="guild-banner" id="player-guild"></div>
-    </div>
-
-    <!-- HEALTH / SP / EXP (COLUMN 2) -->
-    <div class="bars">
-
-      <div class="bar-row">
-        <span class="bar-label">HP</span>
-        <div class="bar">
-          <div id="hp-bar" class="hp-inner"></div>
-          <span class="bar-text" id="hp-text"></span>
+      <!-- Portrait -->
+      <a href="/character" class="portrait-link">
+        <div class="portrait-frame">
+          <img id="player-portrait" src="/images/portraits/default.png">
         </div>
-      </div>
+      </a>
 
-      <div class="bar-row">
-        <span class="bar-label">SP</span>
-        <div class="bar">
-          <div id="sp-bar" class="sp-inner"></div>
-          <span class="bar-text" id="sp-text"></span>
+      <!-- Player Info -->
+      <div class="player-info">
+        <div id="player-name" class="pi-name"></div>
+
+        <div class="pi-row">
+          <span id="player-class"></span>
+          • Lv. <span id="player-level"></span>
         </div>
+
+        <a id="player-guild" class="guild-banner-bar guild-link" href="/guild"></a>
+
+        <img id="guild-banner-img" class="guild-banner-img" src="/images/guilds/default-banner.png">
       </div>
 
-      <div class="bar-row">
-        <span class="bar-label">XP</span>
-        <div class="bar">
-          <div id="xp-bar" class="xp-inner"></div>
-          <span class="bar-text" id="xp-text"></span>
+      <!-- BARS -->
+      <div class="bars">
+
+        <div class="bar-row">
+          <div class="bar-label">HP</div>
+          <div class="bar">
+            <div id="hp-bar" class="hp-inner"></div>
+            <div id="hp-text" class="bar-text"></div>
+          </div>
         </div>
+
+        <div class="bar-row">
+          <div class="bar-label">SP</div>
+          <div class="bar">
+            <div id="sp-bar" class="sp-inner"></div>
+            <div id="sp-text" class="bar-text"></div>
+          </div>
+        </div>
+
+        <div class="bar-row">
+          <div class="bar-label">XP</div>
+          <div class="bar">
+            <div id="xp-bar" class="xp-inner"></div>
+            <div id="xp-text" class="bar-text"></div>
+          </div>
+        </div>
+        <div id="buff-container">
+          <div id="buff-icon">
+            <div class="buff-icon-symbol">✨</div>
+            <div class="buff-icon-label">BUFFS</div>
+          </div>
+
+  <div id="buff-tooltip"></div>
+</div>
       </div>
-
     </div>
 
-    <!-- LOGO (COLUMN 3 - FIXED LOCATION ✅) -->
-    <div class="center-logo">
-      <div class="logo-text">GUILDFORGE</div>
-      <div class="logo-slogan">Forged in Battle · Bound by Guild</div>
-    </div>
+  </div> <!-- end .statpanel-grid -->
 
-    <!-- STATS (COLUMN 4) -->
-    <div class="stats">
-      <div class="stat">ATK<br><span id="player-atk"></span></div>
-      <div class="stat">DEF<br><span id="player-def"></span></div>
-      <div class="stat">AGI<br><span id="player-agility"></span></div>
-      <div class="stat">VIT<br><span id="player-vitality"></span></div>
-      <div class="stat">INT<br><span id="player-intellect"></span></div>
-      <div class="stat">CRIT<br><span id="player-crit"></span></div>
-      <div class="stat">GOLD<br><span id="player-gold"></span></div>
-    </div>
-
-    <!-- LEVEL UP BUTTON (COLUMN 5) -->
-    <div id="levelup-box">
-      <a href="/levelup" id="levelup-btn">LEVEL UP</a>
-    </div>
-
+  <!-- RIGHT-SIDE ACTION BUTTONS (absolute, hard-right) -->
+  <div class="right-actions">
+    <a id="logout-btn" class="action-btn" href="/logout">Logout</a>
   </div>
+
 </div>

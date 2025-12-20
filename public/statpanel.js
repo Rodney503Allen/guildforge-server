@@ -10,90 +10,90 @@ function setText(id, val) {
   el.innerText = (val !== undefined && val !== null) ? val : "";
 }
 
-// =======================
-// LOAD PLAYER DATA
-// =======================
 function loadStatPanel() {
-
   fetch("/me")
     .then(res => res.json())
     .then(p => {
-      console.log("HUD RECEIVED:", p);
-
-      if (!p) {
-        console.error("No player data returned");
-        return;
-      }
+      if (!p) return;
 
       // =======================
       // BASIC INFO
       // =======================
       setText("player-name", p.name);
       setText("player-class", p.pclass);
-      setText("player-location", p.location);
       setText("player-level", p.level);
 
       // =======================
-      // SAFE NUMBERS
+      // PORTRAIT & GUILD
       // =======================
-      const hp = Number(p.hpoints || 0);
-      const maxhp = Number(p.maxhp || 1);
-      const sp = Number(p.spoints || 0);
-      const maxsp = Number(p.maxspoints || 1);
-      const exp = Number(p.exper || 0);
-      const level = Number(p.level || 1);
+      const portrait = document.getElementById("player-portrait");
+      if (portrait) {
+        portrait.src = p.portrait_url || "/images/portraits/default.png";
+      }
+
+      const banner = document.getElementById("guild-banner-img");
+      if (banner) {
+        banner.src = p.guild_banner || "/images/guilds/default-banner.png";
+      }
+
+      setText(
+        "player-guild",
+        p.guild_name
+          ? `${p.guild_name} (${p.guild_rank || "Member"})`
+          : "No Guild"
+      );
+
+      // =======================
+      // FINAL STATS (FROM ENGINE)
+      // =======================
+      const hp = Number(p.hpoints);
+      const maxhp = Number(p.maxhp);
+      const sp = Number(p.spoints);
+      const maxsp = Number(p.maxspoints);
+      
+
+
+      renderBuffs(p.buffs || []);
+
+
+
 
       // =======================
       // BARS
       // =======================
-      const hpPct = Math.max(0, Math.min(100, (hp / maxhp) * 100));
-      const spPct = Math.max(0, Math.min(100, (sp / maxsp) * 100));
-      const xpNeed = (level * 50) + (level * level * 50);
-      const xpPct = Math.max(0, Math.min(100, (exp / xpNeed) * 100));
+      const hpPct = maxhp > 0 ? (hp / maxhp) * 100 : 0;
+      const spPct = maxsp > 0 ? (sp / maxsp) * 100 : 0;
 
       const hpBar = document.getElementById("hp-bar");
       const spBar = document.getElementById("sp-bar");
-      const xpBar = document.getElementById("xp-bar");
 
-      if (hpBar) hpBar.style.width = hpPct + "%";
-      if (spBar) spBar.style.width = spPct + "%";
-      if (xpBar) xpBar.style.width = xpPct + "%";
+      if (hpBar) hpBar.style.width = `${hpPct}%`;
+      if (spBar) spBar.style.width = `${spPct}%`;
 
       setText("hp-text", `${hp} / ${maxhp}`);
       setText("sp-text", `${sp} / ${maxsp}`);
-      setText("xp-text", `${exp} / ${xpNeed}`);
 
       // =======================
-      // STATS
+      // XP BAR (UNCHANGED)
       // =======================
-      setText("player-atk", p.attack);
-      setText("player-def", p.defense);
-      setText("player-agility", p.agility);
-      setText("player-vitality", p.vitality);
-      setText("player-intellect", p.intellect);
-      setText("player-crit", p.crit);
-      setText("player-gold", p.gold);
+      const xpNeed = p.level * 50 + p.level * p.level * 50;
+      const xpPct = Math.min(100, (p.exper / xpNeed) * 100);
+
+      const xpBar = document.getElementById("xp-bar");
+      if (xpBar) xpBar.style.width = `${xpPct}%`;
+
+      setText("xp-text", `${p.exper} / ${xpNeed}`);
 
       // =======================
-      // GUILD
+      // OPTIONAL: DEBUG / FUTURE
       // =======================
-      if (p.guild_name) {
-        setText("player-guild", `${p.guild_name} (${p.guild_rank || "Member"})`);
-      } else {
-        setText("player-guild", "No Guild");
-      }
-
-      // =======================
-      // LEVEL UP BUTTON
-      // =======================
-      const levelBox = document.getElementById("levelup-box");
-      if (levelBox) {
-        levelBox.style.display = (p.stat_points > 0) ? "flex" : "none";
-      }
-
+      // p.spellPower
+      // p.dodgeChance
     })
     .catch(err => console.error("Statpanel load failed:", err));
+    
 }
+
 
 // =======================
 // INSERT HUD INTO PAGE
@@ -117,7 +117,54 @@ function loadHUD() {
     })
     .catch(err => console.error("HUD inject failed:", err));
 }
+function renderBuffs(buffs) {
+  const tooltip = document.getElementById("buff-tooltip");
+  if (!tooltip) return;
 
+  tooltip.innerHTML = "";
+
+  if (!buffs.length) {
+    tooltip.innerHTML = `<div class="buff-row">No active buffs</div>`;
+    return;
+  }
+
+  buffs.forEach(buff => {
+    const row = document.createElement("div");
+    row.className = "buff-row";
+
+    row.innerHTML = `
+      <div class="buff-stat">${buff.stat.toUpperCase()}</div>
+      <div class="buff-value">+${buff.value}</div>
+      <div class="buff-timer" data-exp="${buff.expires_at}"></div>
+    `;
+
+    tooltip.appendChild(row);
+  });
+
+  updateBuffTimers();
+}
+
+
+function updateBuffTimers() {
+  const timers = document.querySelectorAll(".buff-timer");
+
+  timers.forEach(t => {
+    const exp = new Date(t.dataset.exp).getTime();
+    const now = Date.now();
+    const diff = Math.max(0, Math.floor((exp - now) / 1000));
+
+    if (diff <= 0) {
+      t.textContent = "Expired";
+    } else if (diff < 60) {
+      t.textContent = `${diff}s`;
+    } else {
+      const m = Math.floor(diff / 60);
+      const s = diff % 60;
+      t.textContent = `${m}:${s.toString().padStart(2, "0")}`;
+    }
+  });
+}
+setInterval(updateBuffTimers, 1000);
 // =======================
 // AUTO LOAD
 // =======================

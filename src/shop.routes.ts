@@ -3,6 +3,44 @@ import { db } from "./db";
 
 const router = express.Router();
 
+const CLASS_LOADOUTS: Record<string, {
+  armor: string[];
+  weapons: string[];
+}> = {
+  Mage: {
+    armor: ["cloth", "orb"],
+    weapons: ["staff", "wand",]
+  },
+  Warlock: {
+    armor: ["cloth", "orb"],
+    weapons: ["staff", "wand"]
+  },
+  Warrior: {
+    armor: ["plate", "shield"],
+    weapons: ["sword", "axe"]
+  },
+  Berserker: {
+    armor: ["plate"],
+    weapons: ["axe", "sword"]
+  },
+  Ranger: {
+    armor: ["leather"],
+    weapons: ["bow", "dagger"]
+  },
+  Marksman: {
+    armor: ["leather"],
+    weapons: ["bow", "crossbow"]
+  },
+  Cleric: {
+    armor: ["blessed", "tome", "shield"],
+    weapons: ["mace"]
+  },
+  Druid: {
+    armor: ["blessed", "totem"],
+    weapons: ["staff"]
+  }
+};
+
 // ========================
 // VIEW SHOP
 // ========================
@@ -10,6 +48,14 @@ router.get("/shop/:id", async (req, res) => {
 
   const pid = (req.session as any).playerId;
   const shopId = req.params.id;
+  const [[player]]: any = await db.query(
+    "SELECT pclass FROM players WHERE id = ?",
+    [pid]
+  );
+
+if (!player) return res.redirect("/login.html");
+
+const loadout = CLASS_LOADOUTS[player.pclass];
 
   if (!pid) return res.redirect("/login.html");
 
@@ -24,28 +70,86 @@ router.get("/shop/:id", async (req, res) => {
   if (!shop) return res.send("Shop not found.");
 
   // Load shop items
-  const [items]: any = await db.query(`
-    SELECT
-      si.id AS shopItemId,
-      i.name,
-      i.icon,
-      i.rarity,
-      i.value,
-      si.price,
-      si.stock
-    FROM shop_items si
-    JOIN items i ON i.id = si.item_id
-    WHERE si.shop_id = ?
-  `, [shopId]);
+let itemQuery = `
+  SELECT
+    si.id AS shopItemId,
+    i.name,
+    i.icon,
+    i.rarity,
+    i.value,
+    si.price,
+    si.stock,
+    i.category,
+    i.item_type,
+
+    i.attack,
+    i.defense,
+    i.agility,
+    i.vitality,
+    i.intellect,
+    i.crit,
+
+    i.description
+  FROM shop_items si
+  JOIN items i ON i.id = si.item_id
+  WHERE si.shop_id = ?
+`;
+
+const params: any[] = [shopId];
+
+// Armor filtering
+if (shop.type === "armor") {
+  itemQuery += ` AND i.category = 'armor' AND i.item_type IN (?)`;
+  params.push(loadout.armor);
+}
+
+// Weapon filtering
+if (shop.type === "weapon") {
+  itemQuery += ` AND i.category = 'weapon' AND i.item_type IN (?)`;
+  params.push(loadout.weapons);
+}
+
+// General store = potions only (for now)
+if (shop.type === "general") {
+  itemQuery += ` AND i.category = 'consumable'`;
+}
+
+const [items]: any = await db.query(itemQuery, params);
+
+
 
   // HTML Rendering
-  const rows = items.map((i: any) => `
-    <div class="item">
-      <div class="name">${i.icon || "📦"} ${i.name}</div>
+const rows = items.map((i: any) => {
+
+  const stats = [
+    i.attack ? `⚔ Attack +${i.attack}` : null,
+    i.defense ? `🛡 Defense +${i.defense}` : null,
+    i.agility ? `🏃 Agility +${i.agility}` : null,
+    i.vitality ? `❤️ Vitality +${i.vitality}` : null,
+    i.intellect ? `🧠 Intellect +${i.intellect}` : null,
+    i.crit ? `🎯 Crit +${i.crit}%` : null,
+    i.effect_type === "heal"
+      ? `✨ Heals ${i.effect_value} ${i.effect_target === "hp" ? "HP" : "SP"}`
+      : null
+  ].filter(Boolean).join("<br>");
+
+  return `
+    <div class="item tooltip-parent">
+      <div class="name">
+        ${i.icon || "📦"} ${i.name}
+        <div class="tooltip">
+          <div class="t-name ${i.rarity}">${i.name}</div>
+          ${stats ? `<div class="t-stats">${stats}</div>` : ""}
+          ${i.description ? `<div class="t-desc">${i.description}</div>` : ""}
+        </div>
+      </div>
+
       <div class="price">💰 ${i.price}</div>
       <button onclick="buy(${i.shopItemId})">Buy</button>
     </div>
-  `).join("");
+  `;
+}).join("");
+
 
   res.send(`
 <!DOCTYPE html>
@@ -162,10 +266,68 @@ button:disabled {
   color: #888;
   font-style: italic;
 }
+  /* =============================
+   TOOLTIP SYSTEM
+============================= */
+.tooltip-parent {
+  position: relative;
+}
+
+.tooltip {
+  position: absolute;
+  left: 0;
+  top: 110%;
+  width: 260px;
+  background: linear-gradient(#120b06, #050302);
+  border: 2px solid gold;
+  border-radius: 10px;
+  padding: 10px;
+  color: #f5e1a4;
+  font-size: 13px;
+  box-shadow: 0 0 18px rgba(255,215,0,.6);
+  z-index: 999;
+
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-5px);
+  transition: 0.15s ease;
+}
+
+.tooltip-parent:hover .tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Tooltip text sections */
+.t-name {
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.t-stats {
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.t-desc {
+  font-style: italic;
+  color: #cbb98a;
+}
+
+/* Rarity colors */
+.common { color: #bbb; }
+.uncommon { color: #4cff4c; }
+.rare { color: #4cc3ff; }
+.epic { color: #c96cff; }
+.legendary { color: #ffae00; }
+
 </style>
 
 </head>
 <body>
+<div id="statpanel-root"></div>
+<link rel="stylesheet" href="/statpanel.css">
+<script src="/statpanel.js"></script>
 
 <div class="panel">
 <h2>${shop.name}</h2>

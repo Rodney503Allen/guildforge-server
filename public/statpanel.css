@@ -9,10 +9,11 @@
   border-bottom: 3px solid #c8a34b;
   box-shadow: 0 6px 12px rgba(0,0,0,.9);
   z-index: 3000;
-  overflow: hidden;
+  text-align: center;
+  overflow: visible;
   font-family: 'Cinzel', serif;
   color: #f5e6b2;
-  padding: 4px 24px;
+  padding: 4px 0;
   top: 0;
   pointer-events: auto;
 }
@@ -20,18 +21,101 @@
 /* GRID */
 .statpanel-grid {
   display: grid;
-  grid-template-columns: 
-  minmax(220px, 1.0fr) 
-  minmax(360px, 1.5fr) 
-  minmax(240px, 1.1fr) 
-  minmax(320px, 1.4fr) 
-  120px;
-  grid-template-rows: 1fr;
+  grid-template-columns: auto;
   align-items: center;
-  justify-content: center;
+  width: 100%;
 }
+
 .statpanel-grid > * {
   align-self: center;
+}
+.right-actions {
+  position: absolute;
+  top: 50%;
+  right: 24px;               /* distance from the right edge; set to 0 if you want truly flush */
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Generic button style */
+.action-btn {
+  background: linear-gradient(#ffd700, #ff9d00);
+  color: #000;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  box-shadow: 0 0 12px gold;
+  text-decoration: none;
+  transition: 0.15s;
+}
+
+.action-btn:hover {
+  background: gold;
+  box-shadow: 0 0 18px gold;
+  transform: scale(1.05);
+  color: black;
+}
+/* ===============================
+   LOGOUT BUTTON (PRIMARY ACTION)
+=============================== */
+
+#logout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 10px 18px;
+  min-width: 110px;
+
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+
+  color: #f5d27d;
+  text-decoration: none;
+
+  background: linear-gradient(to bottom, #3a1a10, #1a0804);
+  border: 2px solid #b14a2f;
+  border-radius: 10px;
+
+  box-shadow:
+    inset 0 0 6px rgba(255,140,80,.25),
+    0 0 10px rgba(180,60,40,.35);
+
+  transition: all 0.18s ease;
+}
+
+/* Hover */
+#logout-btn:hover {
+  background: linear-gradient(to bottom, #b14a2f, #5a1e10);
+  color: #000;
+
+  box-shadow:
+    0 0 16px rgba(255,90,60,.8),
+    inset 0 0 8px rgba(255,255,255,.35);
+
+  transform: scale(1.08);
+}
+
+/* Active (click) */
+#logout-btn:active {
+  transform: scale(0.96);
+  box-shadow: inset 0 0 10px rgba(0,0,0,.8);
+}
+
+
+
+
+#statpanel-logo {
+  position: absolute;
+  left: 50%;
+  top: 30%; /* adjust for vertical placement */
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
 }
 
 /* PLAYER INFO */
@@ -39,6 +123,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
 }
 
 .player-grid {
@@ -72,6 +157,7 @@
   gap: 6px;
   max-width: 380px;   /* lock bar size */
   width: 380px;
+  position: relative;
 }
 
 .bar-row {
@@ -97,9 +183,20 @@
   border: 1px solid #5a4521;
   overflow: hidden;
   box-shadow: inset 0 0 6px rgba(0,0,0,.9);
-}
 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 /* FILLS */
+.hp-inner,
+.sp-inner,
+.xp-inner {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+}
 .hp-inner {
   height: 100%;
   background: linear-gradient(to right, #8b0000, red);
@@ -115,7 +212,8 @@
 
 /* TEXT IN BAR */
 .bar-text {
-  position: absolute;
+  position: relative;       /* <-- sits above the fill now */
+  z-index: 2;
   width: 100%;
   text-align: center;
   font-size: 12px;
@@ -124,6 +222,7 @@
   text-shadow: 0 0 4px black;
   font-weight: bold;
   pointer-events: none;
+  white-space: nowrap;
 }
 
 /* =======================
@@ -204,6 +303,107 @@
   50% { box-shadow: 0 0 14px gold; }
   100% { box-shadow: 0 0 6px gold; }
 }
+/* WRAPPER */
+.player-info-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* PORTRAIT FRAME */
+.portrait-frame {
+  width: 72px;
+  height: 72px;
+  border: 2px solid gold;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 0 8px rgba(255,215,0,.4);
+}
+
+.portrait-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* PLAYER INFO TEXT */
+.pi-name {
+  font-size: 20px;
+  font-weight: bold;
+  color: gold;
+  letter-spacing: 1px;
+  text-shadow: 0 0 6px black;
+}
+
+.pi-row {
+  font-size: 13px;
+  color: #f5e6b2;
+}
+
+/* GUILD SECTION */
+.guild-section {
+  margin-top: 4px;
+  text-align: center;
+}
+
+.guild-banner-bar {
+  background: linear-gradient(#320000, #120000);
+  border: 1px solid gold;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: bold;
+  color: gold;
+  box-shadow: inset 0 0 6px rgba(255,215,0,.5);
+}
+
+/* Hanging banner */
+/* HANGING GUILD BANNER */
+.guild-banner-img {
+  position: absolute;
+  top: 100%;              /* directly below guild button */
+  left: 50%;
+  transform: translateX(-50%);
+
+  width: 180px;
+  max-width: 90%;
+  height: auto;
+
+  margin-top: 6px;        /* space below button */
+  z-index: 2900;
+
+  border: 2px solid #c8a34b;
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+
+  box-shadow:
+    0 10px 20px rgba(0,0,0,.9),
+    inset 0 0 12px rgba(255,215,140,.15);
+
+  background: #1b1205;
+}
+.guild-anchor {
+  position: relative;
+  display: inline-block;
+}
+.guild-link {
+  text-decoration: none;
+  color: gold;
+  display: block;
+  cursor: pointer;
+}
+.left-section {
+  display: flex;
+  align-items: center;
+  gap: 18px;  /* space between portrait → info → bars */
+}
+
+.guild-link:hover {
+  filter: brightness(1.2);
+  transform: scale(1.03);
+  transition: 0.12s;
+}
 
 /* PAGE OFFSET */
 body {
@@ -223,4 +423,165 @@ body {
     justify-content: center;
     text-align: center;
   }
+}
+/* Portrait positioning */
+.portrait-link {
+  display: inline-block;
+  margin-left: 10px; /* 👈 scoots it right */
+}
+
+/* Optional: subtle hover feedback */
+.portrait-link:hover .portrait-frame {
+  box-shadow: 0 0 12px rgba(255, 215, 120, 0.6);
+  transform: scale(1.02);
+  transition: 0.15s ease;
+}
+/* =========================
+   STAT POINTS GLOW (PORTRAIT)
+========================= */
+
+.portrait-glow {
+  box-shadow:
+    0 0 10px rgba(255, 215, 100, 0.9),
+    0 0 20px rgba(255, 215, 100, 0.7),
+    0 0 35px rgba(255, 215, 100, 0.6);
+  animation: statPulse 1.6s infinite ease-in-out;
+  border-radius: 10px;
+}
+
+@keyframes statPulse {
+  0% {
+    box-shadow:
+      0 0 8px rgba(255, 215, 100, 0.6),
+      0 0 16px rgba(255, 215, 100, 0.4);
+  }
+  50% {
+    box-shadow:
+      0 0 16px rgba(255, 215, 100, 1),
+      0 0 32px rgba(255, 215, 100, 0.9);
+  }
+  100% {
+    box-shadow:
+      0 0 8px rgba(255, 215, 100, 0.6),
+      0 0 16px rgba(255, 215, 100, 0.4);
+  }
+}
+.portrait-glow {
+  cursor: pointer;
+}
+
+#buff-bar {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.buff {
+  background: rgba(0,0,0,0.6);
+  border: 1px solid gold;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  text-align: center;
+  min-width: 60px;
+}
+
+.buff span {
+  display: block;
+  font-size: 11px;
+}
+
+.buff-timer {
+  color: #9ff;
+}
+/* =========================
+   BUFF ICON CONTAINER
+========================= */
+
+#buff-container {
+  position: absolute;
+  right: -70px;               /* pushes it to the right of bars */
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: default;
+}
+
+/* ICON */
+#buff-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.buff-icon-symbol {
+  font-size: 22px;
+  filter: drop-shadow(0 0 4px gold);
+}
+
+.buff-icon-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #f5e1a4;
+}
+
+/* =========================
+   BUFF TOOLTIP
+========================= */
+
+#buff-tooltip {
+  position: fixed;               /* 👈 anchor to viewport, not panel */
+  right: 16px;                   /* 👈 keeps it onscreen */
+  top: 12px;                     /* 👈 clamp to top of window */
+
+  max-height: calc(100vh - 24px); /* 👈 never exceed viewport */
+  overflow-y: auto;              /* 👈 scroll instead of overflow */
+
+  min-width: 160px;
+
+  background: rgba(0, 0, 0, 0.92);
+  border: 1px solid #c8a34b;
+  border-radius: 8px;
+  padding: 8px;
+
+  display: none;
+  z-index: 9999;
+}
+#buff-tooltip::-webkit-scrollbar {
+  width: 6px;
+}
+
+#buff-tooltip::-webkit-scrollbar-thumb {
+  background: #c8a34b;
+  border-radius: 4px;
+}
+
+/* Show on hover */
+#buff-container:hover #buff-tooltip {
+  display: block;
+}
+
+/* Individual buff rows */
+.buff-row {
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.buff-row:last-child {
+  border-bottom: none;
+}
+
+.buff-stat {
+  font-weight: bold;
+  color: #f5e1a4;
+}
+
+.buff-value {
+  color: #9ff;
+}
+
+.buff-timer {
+  font-size: 11px;
+  color: #7fd;
 }

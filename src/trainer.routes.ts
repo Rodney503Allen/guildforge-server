@@ -183,6 +183,8 @@ body {
 </head>
 <body>
 
+<div id="statpanel-root"></div>
+
 <div class="panel">
 <h2>Spell Trainer</h2>
 <div class="sub">Available spells for the ${player.pclass}</div>
@@ -224,6 +226,9 @@ ${spells.map((s:any)=>{
 <button class="returnBtn" onclick="location.href='/town'">⬅ Return to Town</button>
 
 </div>
+
+<link rel="stylesheet" href="/statpanel.css">
+<script src="/statpanel.js"></script>
 
 </body>
 </html>

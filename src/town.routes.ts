@@ -193,9 +193,6 @@ h2 {
   <h2>${town.name}</h2>
   <div class="desc">${town.description || "A place of faith, shelter, and fate."}</div>
 
-  <a href="/inventory.html?from=town">🎒 Inventory</a>
-  <a href="/equipment">⚔ Equipment</a>
-
 
   <hr>
 

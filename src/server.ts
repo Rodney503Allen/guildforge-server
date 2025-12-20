@@ -12,10 +12,10 @@ import guildRoutes from "./guild.routes";
 import worldRoutes from "./world.routes";
 import townRoutes from "./town.routes";
 import inventoryRoutes from "./inventory.routes";
-import combatRoutes from "./combat.routes";
 import chatRoutes from "./chat.routes";
-
-
+import characterRoutes from "./character.routes";
+import combatRoutes from "./combat.routes";
+import spellRoutes from "./spell.routes";
 
 import { db } from "./db";
 
@@ -47,9 +47,10 @@ app.use("/travel", travelRoutes);
 app.use(worldRoutes);
 app.use(townRoutes);
 app.use(inventoryRoutes);
-app.use(combatRoutes);
 app.use(chatRoutes);
-
+app.use(characterRoutes);
+app.use(combatRoutes);
+app.use(spellRoutes);
 
 // =======================
 // GLOBAL DEATH CHECK
@@ -110,62 +111,11 @@ app.get("/api/test", (req, res) => {
 // =======================
 // MAIN PAGE
 // =======================
-app.get("/", async (req, res) => {
+app.get("/", (req, res) => {
   const pid = (req.session as any).playerId;
   if (!pid) return res.redirect("/login.html");
 
-  const [[player]]: any = await db.query(
-    "SELECT name,level,pclass,location,gold FROM players WHERE id=?",
-    [pid]
-    
-  );
-if (player.location === "world") {
-  return res.redirect("/world");
-}
-
-  res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-<title>Guildforge</title>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
-<style>
-body { background:#050509; color:#f5e6b2; font-family:Cinzel,serif; text-align:center; }
-a { display:block; margin:10px; color:gold; font-size:18px; text-decoration:none; }
-.panel { width:420px; margin:80px auto; padding:20px; border:1px solid gold; background:rgba(0,0,0,.7); border-radius:10px; }
-</style>
-</head>
-<body>
-<div id="statpanel-root"></div>
-<div class="panel">
-<h2>${player.name}</h2>
-<p>${player.pclass} – Level ${player.level}</p>
-<p>Location: ${player.location}</p>
-<p>Gold: ${player.gold}</p>
-<a href="/equipment" class="char-btn">Equipment</a>
-<hr>
-
-<a href="/world">🌍 World Map</a>
-<a href="/inventory">🎒 Inventory</a>
-<a href="/quests">📜 Quest Log</a>
-<a href="/church">⛪ Sanctuary of Light</a>
-<a href="/combat">⚔ Arena</a>
-${player.location !== "world" ? `
-  <a href="/shop">Shop</a>
-  <a href="/trainer">Spell Trainer</a>
-` : ""}
-
-</div>
-
-</body>
-<link rel="stylesheet" href="/statpanel.css">
-<script src="/statpanel.js"></script>
-<script>
-<script src="/world-chat.js"></script>
-
-
-</html>
-`);
+  return res.redirect("/town");
 });
 
 
@@ -205,68 +155,6 @@ app.get("/quests", async(req,res)=>{
   );
   res.send(`<h2>Quest Log</h2>` + rows.map((q:any)=>`${q.title} - ${q.status}<br>`).join("") + `<a href="/">Return</a>`);
 });
-// =======================
-// LEVEL UP
-// =======================
-app.get("/levelup", async (req,res)=>{
-  const pid = (req.session as any).playerId;
-  if(!pid) return res.redirect("/login.html");
-
-  const [[player]]:any = await db.query(`
-    SELECT level, stat_points, attack, defense, agility, vitality, intellect
-    FROM players WHERE id=?
-  `,[pid]);
-
-  res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-<title>Level Up</title>
-<link rel="stylesheet" href="/levelup.css">
-</head>
-<body>
-
-<h2>LEVEL UP</h2>
-<p>Points available: ${player.stat_points}</p>
-
-<form method="POST" action="/levelup">
-<table>
-<tr><td>Attack</td><td>${player.attack} <button name="stat" value="attack">+</button></td></tr>
-<tr><td>Defense</td><td>${player.defense} <button name="stat" value="defense">+</button></td></tr>
-<tr><td>Agility</td><td>${player.agility} <button name="stat" value="agility">+</button></td></tr>
-<tr><td>Vitality</td><td>${player.vitality} <button name="stat" value="vitality">+</button></td></tr>
-<tr><td>Intellect</td><td>${player.intellect} <button name="stat" value="intellect">+</button></td></tr>
-</table>
-
-<br>
-<a href="/">Done</a>
-</form>
-
-</body>
-</html>
-`);
-});
-
-app.post("/levelup", async (req,res)=>{
-  const pid = (req.session as any).playerId;
-  const { stat } = req.body;
-
-  if(!["attack","defense","agility","vitality","intellect"].includes(stat))
-    return res.send("Invalid stat.");
-
-  const [[player]]:any = await db.query("SELECT stat_points FROM players WHERE id=?", [pid]);
-
-  if (player.stat_points <= 0) return res.send("No stat points available.");
-
-  await db.query(`
-    UPDATE players
-    SET ${stat} = ${stat} + 1,
-        stat_points = stat_points - 1
-    WHERE id=?
-  `,[pid]);
-
-  res.redirect("/levelup");
-});
 
 // =======================
 // DEATH SCREEN
@@ -290,6 +178,23 @@ app.get("/death", async (req, res) => {
   res.sendFile(process.cwd() + "/public/death.html");
 });
 
+// =======================
+// LOGOUT
+// =======================
+app.get("/logout", (req, res) => {
+  req.session.destroy(err => {
+    if (err) {
+      console.error("Logout error:", err);
+      return res.redirect("/");
+    }
+
+    // Clear cookie explicitly
+    res.clearCookie("connect.sid");
+
+    // Send player back to login screen
+    res.redirect("/login.html");
+  });
+});
 
 
 

@@ -137,12 +137,9 @@ button:hover {
   <input id="name" placeholder="Username">
   <input id="email" placeholder="Email">
 
-  <select id="class">
-    <option value="Warrior">Warrior</option>
-    <option value="Wizard">Wizard</option>
-    <option value="Assassin">Assassin</option>
-    <option value="Knight">Knight</option>
-  </select>
+<select id="class">
+  <option disabled selected>Loading Classes...</option>
+</select>
 
   <input type="password" id="pass1" placeholder="Password">
   <input type="password" id="pass2" placeholder="Confirm Password">
@@ -155,6 +152,31 @@ button:hover {
     <a href="/login.html">Return to Gate</a>
   </div>
 </div>
+<script>
+async function loadClasses() {
+  try {
+    const res = await fetch("/api/classes");
+    const classes = await res.json();
+
+    const select = document.getElementById("class");
+    select.innerHTML = "";
+
+    classes.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = c.name;       // OR c.id (see note below)
+      opt.textContent = c.name;
+      select.appendChild(opt);
+    });
+
+  } catch (err) {
+    console.error("Failed to load classes", err);
+    document.getElementById("class").innerHTML =
+      "<option>Error loading classes</option>";
+  }
+}
+
+window.addEventListener("DOMContentLoaded", loadClasses);
+</script>
 
 <script>
 async function register() {

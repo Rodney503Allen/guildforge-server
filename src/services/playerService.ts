@@ -1,47 +1,110 @@
 import { db } from "../db";
+import { computePlayerStats, type ItemMods, type DerivedStats } from "./statEngine";
+import { getActiveBuffs } from "./buffService";
 
-// ==============================
-// PLAYER WITH EQUIPMENT STATS
-// ==============================
-export async function getPlayerWithEquipment(playerId: number) {
+/**
+ * FINAL, AUTHORITATIVE PLAYER SHAPE
+ * This is what UI + combat + church should use
+ */
+export type PlayerComputed = DerivedStats & {
+  exper: number;
+  gold: number;
+  stat_points: number;
+  location?: string;
 
-  // Base stats
-  const [[base]]: any = await db.query(`
-    SELECT *
-    FROM players
-    WHERE id = ?
-  `, [playerId]);
+  guild_name?: string | null;
+  guild_rank?: string | null;
 
+  portrait_url?: string | null;
+  guild_banner?: string | null;
+};
+
+/**
+ * RAW PLAYER ONLY (NO DERIVED STATS)
+ * Use this ONLY when you explicitly want raw DB values
+ */
+export async function getBasePlayer(playerId: number) {
+  const [[base]]: any = await db.query(
+    `SELECT * FROM players WHERE id=?`,
+    [playerId]
+  );
+  return base ?? null;
+}
+
+/**
+ * FINAL PLAYER STATS (BASE + GEAR + BUFFS + DERIVED)
+ * ⚠️ THIS IS THE ONLY PLACE computePlayerStats IS CALLED
+ */
+export async function getFinalPlayerStats(
+  playerId: number
+): Promise<PlayerComputed | null> {
+  const base = await getBasePlayer(playerId);
   if (!base) return null;
 
-  // All equipped items
-  const [gear]: any = await db.query(`
+  // ======================
+  // EQUIPPED GEAR
+  // ======================
+  const [gear]: any = await db.query(
+    `
     SELECT i.*
     FROM inventory inv
     JOIN items i ON i.id = inv.item_id
-    WHERE inv.player_id = ? AND inv.equipped = 1
-  `, [playerId]);
+    WHERE inv.player_id=? AND inv.equipped=1
+    `,
+    [playerId]
+  );
 
-  // Clone base stats so we don't overwrite DB object
-  const final = { ...base };
+  const gearMods: ItemMods[] = gear.map((g: any) => ({
+    attack: g.attack || 0,
+    defense: g.defense || 0,
+    agility: g.agility || 0,
+    vitality: g.vitality || 0,
+    intellect: g.intellect || 0,
+    crit: g.crit || 0
+  }));
 
-  // Apply all equipment modifiers
-  for (const g of gear) {
-    final.attack    += g.attack || 0;
-    final.defense   += g.defense || 0;
-    final.agility   += g.agility || 0;
-    final.vitality  += g.vitality || 0;
-    final.intellect += g.intellect || 0;
-    final.crit      += g.crit || 0;
-  }
+  // ======================
+  // ACTIVE BUFFS
+  // ======================
+  const buffs = await getActiveBuffs(playerId);
+  const buffMods: ItemMods[] = buffs.map(b => ({
+    [b.stat]: b.value
+  }));
 
-  return final;
-}
+  // ======================
+  // FINAL COMPUTE (ONCE)
+  // ======================
+  const computed = computePlayerStats(base, gearMods, buffMods);
 
+  // ======================
+  // GUILD INFO
+  // ======================
+  const [[guildRow]]: any = await db.query(
+    `
+    SELECT
+      g.name AS guild_name,
+      gr.name AS guild_rank
+    FROM guild_members gm
+    LEFT JOIN guild_roles gr ON gr.id = gm.role_id
+    LEFT JOIN guilds g ON g.id = gm.guild_id
+    WHERE gm.player_id=?
+    LIMIT 1
+    `,
+    [playerId]
+  );
 
-// ==============================
-// LEGACY SUPPORT (OPTIONAL)
-// ==============================
-export async function getPlayerById(id: number) {
-  return getPlayerWithEquipment(id);
+  return {
+    ...(computed as any),
+
+    exper: Number(base.exper || 0),
+    gold: Number(base.gold || 0),
+    stat_points: Number(base.stat_points || 0),
+    location: base.location,
+
+    guild_name: guildRow?.guild_name ?? null,
+    guild_rank: guildRow?.guild_rank ?? null,
+
+    portrait_url: base.portrait_url ?? null,
+    guild_banner: base.guild_banner ?? null
+  };
 }
