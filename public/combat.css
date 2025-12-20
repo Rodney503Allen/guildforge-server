@@ -1,0 +1,61 @@
+body {
+  background:#050509;
+  font-family: Cinzel, serif;
+  color:#f5e1a4;
+}
+
+/* Main arena box */
+.combat-container {
+  max-width: 720px;
+  margin: 100px auto 40px;
+  padding: 20px;
+  background: rgba(0,0,0,0.85);
+  border: 2px solid #d4af37;
+  border-radius: 10px;
+  box-shadow: 0 0 15px rgba(212,175,55,0.4);
+  text-align:center;
+}
+
+.fighter {
+  margin: 10px 0;
+  font-size: 16px;
+}
+
+/* Buttons */
+.actions {
+  margin-top: 12px;
+}
+
+.combat-btn,
+.actions button {
+  background: #000;
+  color: gold;
+  border: 1px solid gold;
+  padding: 8px 12px;
+  margin: 4px;
+  font-family: Cinzel, serif;
+  cursor: pointer;
+}
+
+.combat-btn:hover,
+.actions button:hover {
+  background:#111;
+}
+
+/* Log */
+#log {
+  margin-top: 12px;
+  height: 150px;
+  overflow-y: auto;
+  text-align: left;
+  padding: 8px;
+  background: #070707;
+  border: 1px solid #333;
+  font-size: 13px;
+}
+
+/* Buttons stack cleaner */
+#log button {
+  width: 100%;
+  margin: 2px 0;
+}

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Guildforge Inventory</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      background: radial-gradient(circle at top, #111 0%, #050509 100%);
+      color: #f5e6b2;
+      font-family: 'Cinzel', serif;
+      margin: 0;
+      padding: 0;
+      text-align: center;
+    }
+
+    .panel {
+      width: 900px;
+      margin: 80px auto;
+      padding: 24px;
+      background: rgba(0,0,0,.85);
+      border: 2px solid gold;
+      border-radius: 14px;
+      box-shadow: 0 0 40px rgba(255,215,100,.15);
+    }
+
+    h2 {
+      text-shadow: 0 0 6px rgba(255,215,100,.4);
+      letter-spacing: 3px;
+      margin-bottom: 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 14px;
+    }
+
+    .item {
+      background: #050505;
+      border: 2px solid #444;
+      border-radius: 10px;
+      padding: 10px;
+      position: relative;
+      box-shadow: inset 0 0 10px #000;
+      cursor: pointer;
+    }
+
+    .item:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 12px rgba(255,215,100,.8);
+    }
+
+    .item-name {
+      font-size: 13px;
+    }
+
+    .qty {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      font-size: 12px;
+      color: gold;
+    }
+
+    .rarity-common { border-color: #999; }
+    .rarity-rare { border-color: #3fa9f5; }
+    .rarity-elite { border-color: #a65cff; }
+    .rarity-legendary { border-color: gold; }
+
+    .action-bar {
+      margin-top: 20px;
+    }
+
+    button {
+      background: linear-gradient(#d4af37, #8d6b1f);
+      border: 2px solid gold;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: Cinzel, serif;
+      margin: 6px;
+      font-size: 14px;
+    }
+
+    #detail {
+      margin-top: 20px;
+      min-height: 40px;
+    }
+
+    a {
+      color: gold;
+      display: inline-block;
+      margin-top: 16px;
+      text-decoration: none;
+    }
+
+  </style>
+</head>
+
+<body>
+
+<div class="panel">
+
+  <h2>Inventory</h2>
+
+  <div id="grid" class="grid"></div>
+
+  <div id="detail"></div>
+
+  <div class="action-bar">
+    <button onclick="useItem()">Use</button>
+    <button onclick="closeInventory()">Close</button>
+  </div>
+
+</div>
+
+<script>
+let selected = null;
+
+async function loadInventory() {
+  const res = await fetch("/api/inventory");
+  const items = await res.json();
+
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+
+  items.forEach(i => {
+    const div = document.createElement("div");
+    div.className = `item rarity-${i.rarity || 'common'}`;
+    div.innerHTML = `
+      <div class="qty">x${i.quantity}</div>
+      <div class="item-name">${i.name}</div>
+    `;
+    div.onclick = () => selectItem(i);
+    grid.appendChild(div);
+  });
+}
+
+function selectItem(item) {
+  selected = item;
+
+  document.getElementById("detail").innerHTML = `
+    <b>${item.name}</b><br>
+    Type: ${item.category}<br>
+    Value: ${item.value}<br>
+    Rarity: ${item.rarity}
+  `;
+}
+
+async function useItem() {
+  if (!selected) return alert("Select an item.");
+
+  const res = await fetch("/api/inventory/use", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ invId: selected.id })
+  });
+
+  const data = await res.json();
+  if (data.success) {
+    loadInventory();
+    document.getElementById("detail").innerHTML = "✅ Used successfully.";
+  } else {
+    alert(data.error);
+  }
+}
+
+function closeInventory() {
+  const params = new URLSearchParams(window.location.search);
+  const from = params.get("from");
+
+  if (from === "town") {
+    window.location.href = "/town";
+  } else {
+    window.location.href = "/world";
+  }
+}
+
+
+loadInventory();
+</script>
+
+</body>
+</html>

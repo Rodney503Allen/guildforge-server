@@ -1,0 +1,226 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap');
+
+/* MAIN PANEL */
+#statpanel {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 92px;
+  background: linear-gradient(to bottom, #1b1205, #050200);
+  border-bottom: 3px solid #c8a34b;
+  box-shadow: 0 6px 12px rgba(0,0,0,.9);
+  z-index: 3000;
+  overflow: hidden;
+  font-family: 'Cinzel', serif;
+  color: #f5e6b2;
+  padding: 4px 24px;
+  top: 0;
+  pointer-events: auto;
+}
+
+/* GRID */
+.statpanel-grid {
+  display: grid;
+  grid-template-columns: 
+  minmax(220px, 1.0fr) 
+  minmax(360px, 1.5fr) 
+  minmax(240px, 1.1fr) 
+  minmax(320px, 1.4fr) 
+  120px;
+  grid-template-rows: 1fr;
+  align-items: center;
+  justify-content: center;
+}
+.statpanel-grid > * {
+  align-self: center;
+}
+
+/* PLAYER INFO */
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.player-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+}
+
+.player-grid div {
+  font-size: 14px;
+  color: #f8e8b8;
+  white-space: nowrap;
+}
+
+/* GUILD */
+.guild-banner {
+  background: linear-gradient(#320000, #120000);
+  border: 1px solid gold;
+  padding: 4px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: bold;
+  border-radius: 6px;
+  box-shadow: inset 0 0 6px rgba(255,215,0,.5);
+}
+
+/* BARS */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 380px;   /* lock bar size */
+  width: 380px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.bar-label {
+  color: gold;
+  font-size: 12px;
+  text-align: right;
+}
+
+/* BAR */
+.bar {
+  position: relative;
+  height: 16px;
+  width: 100%;
+  background: #120c04;
+  border-radius: 999px;
+  border: 1px solid #5a4521;
+  overflow: hidden;
+  box-shadow: inset 0 0 6px rgba(0,0,0,.9);
+}
+
+/* FILLS */
+.hp-inner {
+  height: 100%;
+  background: linear-gradient(to right, #8b0000, red);
+}
+.sp-inner {
+  height: 100%;
+  background: linear-gradient(to right, #0033aa, #00aeff);
+}
+.xp-inner {
+  height: 100%;
+  background: linear-gradient(to right, #b8860b, gold);
+}
+
+/* TEXT IN BAR */
+.bar-text {
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  line-height: 16px;
+  color: #fff6cc;
+  text-shadow: 0 0 4px black;
+  font-weight: bold;
+  pointer-events: none;
+}
+
+/* =======================
+   CENTER LOGO
+======================= */
+
+.center-logo {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  pointer-events: none;
+  justify-self: center;
+  align-self: center;
+}
+
+.logo-text {
+  font-size: 32px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  color: gold;
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow:
+    0 0 8px rgba(255,215,0,.75),
+    0 0 14px rgba(255,180,0,.45),
+    0 0 20px rgba(0,0,0,.9);
+}
+
+.logo-slogan {
+  font-size: 11px;
+  letter-spacing: 1px;
+  margin-top: 2px;
+  line-height: 1;
+  white-space: nowrap;
+  color: #d8b056;
+  opacity: 0.95;
+}
+
+
+/* STATS */
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.stat {
+  width: 88px;
+  border: 1px solid rgba(255,215,0,.4);
+  border-radius: 6px;
+  text-align: center;
+  background: rgba(0,0,0,.6);
+  color: #ffd36a;
+  font-size: 13px;
+  padding: 4px;
+}
+
+/* LEVEL BUTTON */
+#levelup-box {
+  display: flex;
+  justify-content: flex-end;
+}
+#levelup-btn {
+  background: linear-gradient(#ffd700,#ff9d00);
+  color: #000;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  box-shadow: 0 0 12px gold;
+  text-decoration: none;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 6px gold; }
+  50% { box-shadow: 0 0 14px gold; }
+  100% { box-shadow: 0 0 6px gold; }
+}
+
+/* PAGE OFFSET */
+body {
+  padding-top: 70px;
+  margin: 0;
+}
+
+/* MOBILE */
+@media (max-width: 900px) {
+  .statpanel-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .player-grid,
+  .stats {
+    justify-content: center;
+    text-align: center;
+  }
+}

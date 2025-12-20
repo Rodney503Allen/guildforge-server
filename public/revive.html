@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Sanctuary of Light</title>
+<link rel="stylesheet" href="/statpanel.css">
+<style>
+body {
+  background:#040409;
+  color:#f5e6b2;
+  font-family:Cinzel,serif;
+  text-align:center;
+}
+.panel {
+  margin-top:120px;
+}
+button {
+  padding:12px 24px;
+  background:black;
+  color:gold;
+  border:1px solid gold;
+  cursor:pointer;
+  margin:10px;
+}
+#error {
+  color:red;
+}
+</style>
+</head>
+
+<body>
+<div class="panel">
+<h1>⛪ Sanctuary of Light</h1>
+<p>You are bound between life and death.</p>
+
+<button onclick="revive()">✨ Receive Blessing (100 gold)</button>
+<br>
+<button onclick="wait()">🕯 Wait 5 minutes</button>
+
+<div id="error"></div>
+</div>
+
+<script>
+function revive(){
+
+fetch("/revive",{method:"POST"})
+  .then(r=>r.json())
+  .then(d=>{
+    if(d.error){
+      document.getElementById("error").innerText = "Not enough gold.";
+    } else {
+      location.href = "/church";
+    }
+  });
+}
+
+function wait(){
+
+fetch("/revive-wait",{method:"POST"})
+  .then(() => {
+    document.getElementById("error").innerText = "Return in 5 minutes...";
+  });
+}
+</script>
+
+</body>
+</html>

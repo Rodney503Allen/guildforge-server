@@ -1,0 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap');
+
+body {
+  background:#050509;
+  color:#f5e6b2;
+  font-family:'Cinzel',serif;
+  margin:0;
+}
+
+/* MAIN CONTAINER */
+.guild-container {
+  max-width: 940px;
+  margin: 120px auto;
+  padding: 25px;
+  background: rgba(0,0,0,.85);
+  border: 2px solid #c8a34b;
+  border-radius: 14px;
+  box-shadow: 0 0 18px rgba(0,0,0,.8);
+}
+
+/* HEADERS */
+.guild-title {
+  font-size: 26px;
+  text-align:center;
+  color: #ffd36a;
+  margin-bottom: 8px;
+}
+
+.guild-sub {
+  text-align:center;
+  font-size: 14px;
+  opacity: .85;
+  margin-bottom: 10px;
+}
+
+/* BUTTONS */
+.guild-actions {
+  text-align:center;
+  margin: 14px 0;
+}
+
+.guild-actions a, .guild-actions button {
+  background:black;
+  border: 1px solid gold;
+  color: gold;
+  padding: 8px 14px;
+  margin: 5px;
+  border-radius: 6px;
+  text-decoration:none;
+  display:inline-block;
+  transition:.2s;
+}
+
+.guild-actions a:hover,
+.guild-actions button:hover {
+  background:#221;
+}
+
+/* PANELS */
+.guild-panel {
+  border-top:1px solid rgba(255,255,255,.2);
+  margin-top:18px;
+  padding-top:12px;
+}
+
+/* TABLE */
+.guild-table {
+  width:100%;
+  border-collapse: collapse;
+}
+
+.guild-table th,
+.guild-table td {
+  padding: 8px;
+  border-bottom:1px solid rgba(255,255,255,.15);
+  text-align:left;
+}
+
+.guild-table th {
+  color: #ffd36a;
+  font-weight: normal;
+}
+
+.guild-table tr:hover {
+  background: rgba(255,215,0,.1);
+}
+
+/* FORM */
+.guild-form input,
+.guild-form textarea {
+  width:100%;
+  padding:10px;
+  margin:6px 0;
+  background:black;
+  border:1px solid gold;
+  color: gold;
+}
+
+/* Normalize button + link to same size */
+.guild-actions a,
+.guild-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 40px;
+  padding: 8px 16px;
+
+  font-size: 15px;
+  line-height: 1;
+  box-sizing: border-box;
+
+  background: #000;
+  color: gold;
+  border: 1px solid gold;
+  border-radius: 6px;
+  text-decoration: none;
+
+  cursor: pointer;
+  transition: background .2s, box-shadow .2s, transform .05s;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: 'Cinzel', serif !important;
+}
+/* Remove native button quirks */
+.guild-actions button {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #000;
+}
+
+/* Hover + active for both */
+.guild-actions a:hover,
+.guild-actions button:hover {
+  background: #221;
+  box-shadow: 0 0 6px rgba(255,215,0,.4);
+}
+
+.guild-actions a:active,
+.guild-actions button:active {
+  transform: translateY(1px);
+}

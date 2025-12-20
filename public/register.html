@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Guildforge - Register</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+  box-sizing: border-box;
+}
+    body {
+      background: radial-gradient(circle at top, #111 0%, #050509 100%);
+      color: gold;
+      font-family: 'Cinzel', serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+.box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  border: 2px solid gold;
+  padding: 26px;
+  width: 340px;
+  background: rgba(0,0,0,.85);
+  border-radius: 12px;
+  text-align: center;
+  box-shadow:
+    0 0 40px rgba(255,215,100,.2),
+    inset 0 0 14px rgba(255,215,100,.05);
+}
+
+
+    h2 {
+      margin-bottom: 14px;
+      text-shadow: 0 0 6px rgba(255,215,100,.4);
+      letter-spacing: 3px;
+    }
+
+input, select {
+  padding: 12px;
+  background: rgba(0,0,0,.6);
+  color: gold;
+  border: 2px solid gold;
+  border-radius: 8px;
+  font-family: Cinzel, serif;
+  font-size: 15px;
+  box-shadow: inset 0 0 8px rgba(255,215,120,.18);
+}
+input, select, button {
+  display: block;
+  width: 100%;
+  margin: 10px auto;
+  text-align: center;
+}
+
+    input::placeholder {
+      color: #aa952d;
+    }
+
+    select {
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, gold 50%),
+        linear-gradient(135deg, gold 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) calc(50% - 4px),
+        calc(100% - 12px) calc(50% - 4px);
+      background-size: 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 28px;
+      cursor: pointer;
+    }
+
+button {
+  width: 100%;
+  padding: 13px;
+  margin-top: 14px;
+  font-size: 15px;
+  background: linear-gradient(#d4af37, #8d6b1f);
+  border: 2px solid gold;
+  border-radius: 9px;
+  cursor: pointer;
+  font-family: Cinzel, serif;
+  letter-spacing: 2px;
+}
+
+input:focus, select:focus {
+  box-shadow: 0 0 14px rgba(255,215,120,.75);
+}
+
+button:hover {
+  transform: scale(1.04);
+}
+
+
+    button:hover {
+      box-shadow: 0 0 10px rgba(255,215,100,.7);
+      transform: scale(1.04);
+    }
+
+    #msg {
+      margin-top: 10px;
+      font-size: 13px;
+      min-height: 18px;
+    }
+
+    .login-link {
+      margin-top: 16px;
+      font-size: 12px;
+      letter-spacing: 1.5px;
+    }
+
+    .login-link a {
+      color: #d6b75c;
+      text-decoration: none;
+      transition: .15s;
+    }
+
+    .login-link a:hover {
+      color: gold;
+      text-shadow: 0 0 8px rgba(255,215,100,.8);
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="box">
+  <h2>Create Adventurer</h2>
+
+  <input id="name" placeholder="Username">
+  <input id="email" placeholder="Email">
+
+  <select id="class">
+    <option value="Warrior">Warrior</option>
+    <option value="Wizard">Wizard</option>
+    <option value="Assassin">Assassin</option>
+    <option value="Knight">Knight</option>
+  </select>
+
+  <input type="password" id="pass1" placeholder="Password">
+  <input type="password" id="pass2" placeholder="Confirm Password">
+
+  <button onclick="register()">Forge Character</button>
+
+  <div id="msg"></div>
+
+  <div class="login-link">
+    <a href="/login.html">Return to Gate</a>
+  </div>
+</div>
+
+<script>
+async function register() {
+  const name = document.getElementById("name").value;
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("pass1").value;
+  const confirm = document.getElementById("pass2").value;
+  const pclass = document.getElementById("class").value;
+
+  const res = await fetch("/api/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, password, confirm, pclass })
+  });
+
+  const data = await res.json();
+
+  document.getElementById("msg").innerText =
+    data.error || "✅ Adventurer created. Redirecting...";
+
+  if (data.success) {
+    setTimeout(() => window.location = "/login.html", 1200);
+  }
+}
+</script>
+
+</body>
+</html>
