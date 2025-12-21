@@ -1,3 +1,11 @@
+import { Router, Request, Response } from "express";
+import { db } from "../db";
+import { hasPermission, canActOnRole } from "./guildPermissionService";
+import { GUILD_PERMISSIONS } from "./guildPermissions";
+import { getMemberWithRole } from "./guildMemberService"; // make sure this file exists
+
+const router = Router();
+
 router.put("/guild/members/:memberId/role", async (req, res) => {
   const actorId = (req.session as any).playerId;
   const memberId = Number(req.params.memberId);
