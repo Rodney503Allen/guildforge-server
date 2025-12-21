@@ -20,7 +20,10 @@ import spellRoutes from "./spell.routes";
 import { db } from "./db";
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Guildforge running on port ${PORT}`);
+});
 
 
 // =======================
