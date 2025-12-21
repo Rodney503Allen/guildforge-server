@@ -19,7 +19,13 @@ import spellRoutes from "./spell.routes";
 
 import { db } from "./db";
 
+
 const app = express();
+
+app.get("/api/test", (_req, res) => {
+  res.json({ status: "API OK" });
+});
+
 const PORT = Number(process.env.PORT) || 3000;
 
 // =======================
@@ -82,19 +88,25 @@ app.use(async (req, res, next) => {
   }
 
   // Must be logged in
-  const pid = (req.session as any).playerId;
-  if (!pid) return next();
+  const pid = (req.session as any)?.playerId;
+  if (!pid || !Number.isInteger(pid)) {
+    return next();
+  }
+
 
   // Fetch health
+try {
   const [[life]]: any = await db.query(
     "SELECT hpoints FROM players WHERE id=?",
     [pid]
   );
 
-  // Force church if dead
   if (life && life.hpoints <= 0) {
     return res.redirect("/death");
   }
+} catch (err) {
+  console.error("Death check failed:", err);
+}
 
   next();
 });
