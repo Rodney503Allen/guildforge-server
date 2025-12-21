@@ -20,7 +20,7 @@ import spellRoutes from "./spell.routes";
 import { db } from "./db";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // =======================
 // MIDDLEWARE
@@ -204,6 +204,6 @@ app.get("/logout", (req, res) => {
 // =======================
 // START
 // =======================
-app.listen(PORT,()=>{
-  console.log("Guildforge engine running at http://localhost:3000");
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Guildforge engine running on port ${PORT}`);
 });
