@@ -1,5 +1,9 @@
 import mysql from "mysql2/promise";
 
+export const db = mysql.createPool(
+  process.env.DATABASE_URL as string
+);
+/*
 export const db = mysql.createPool({
   host: "localhost",
   user: "root",
@@ -7,6 +11,7 @@ export const db = mysql.createPool({
   database: "guildforge",
   connectionLimit: 10
 });
+*/
 
 db.getConnection()
   .then(() => console.log("✅ Connected to MySQL"))
