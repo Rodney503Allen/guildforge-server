@@ -1,5 +1,6 @@
 import express from "express";
 import session from "express-session";
+import { db } from "./db";
 
 const app = express();
 
@@ -7,10 +8,19 @@ const app = express();
  * =======================
  * HEALTH CHECK (ALWAYS FIRST)
  * =======================
- * This must NEVER be blocked by middleware, DB, or auth.
  */
 app.get("/api/test", (_req, res) => {
   res.json({ status: "API OK" });
+});
+
+app.get("/api/dbcheck", async (_req, res) => {
+  try {
+    const [[row]]: any = await db.query("SELECT 1 AS ok");
+    res.json(row);
+  } catch (err) {
+    console.error("DB check failed:", err);
+    res.status(500).json({ error: "DB failed" });
+  }
 });
 
 /**
@@ -32,17 +42,10 @@ app.use(
     secret: process.env.SESSION_SECRET || "dev_secret",
     resave: false,
     saveUninitialized: false,
-    cookie: {
-      secure: false, // Railway terminates HTTPS before Node
-    },
+    cookie: { secure: false },
   })
 );
 
-/**
- * =======================
- * OPTIONAL ROOT (FOR SANITY)
- * =======================
- */
 app.get("/", (_req, res) => {
   res.send("Guildforge server online");
 });
