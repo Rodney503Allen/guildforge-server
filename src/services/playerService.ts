@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { computePlayerStats, type ItemMods, type DerivedStats } from "./statEngine";
 import { getActiveBuffs } from "./buffService";
+import type { Archetype } from "./archetypeScaling";
 
 /**
  * FINAL, AUTHORITATIVE PLAYER SHAPE
@@ -12,6 +13,9 @@ export type PlayerComputed = DerivedStats & {
   stat_points: number;
   location?: string;
 
+  class_name: string;
+  archetype: Archetype; // ✅ change from string → Archetype
+
   guild_name?: string | null;
   guild_rank?: string | null;
 
@@ -19,17 +23,35 @@ export type PlayerComputed = DerivedStats & {
   guild_banner?: string | null;
 };
 
+const ARCHETYPES = ["Arcanist", "Divine", "Brute", "Skirmisher"] as const;
+
+function asArchetype(v: any): Archetype {
+  return ARCHETYPES.includes(v) ? v : "Arcanist"; // safe default
+}
+
+
+
 /**
  * RAW PLAYER ONLY (NO DERIVED STATS)
  * Use this ONLY when you explicitly want raw DB values
  */
 export async function getBasePlayer(playerId: number) {
   const [[base]]: any = await db.query(
-    `SELECT * FROM players WHERE id=?`,
+    `
+    SELECT
+      p.*,
+      c.name AS class_name,
+      c.archetype
+    FROM players p
+    JOIN classes c ON c.name = p.pclass
+    WHERE p.id = ?
+    `,
     [playerId]
   );
-  return base ?? null;
-}
+
+    return base ?? null;
+  }
+
 
 /**
  * FINAL PLAYER STATS (BASE + GEAR + BUFFS + DERIVED)
@@ -71,6 +93,7 @@ export async function getFinalPlayerStats(
     [b.stat]: b.value
   }));
 
+
   // ======================
   // FINAL COMPUTE (ONCE)
   // ======================
@@ -93,18 +116,23 @@ export async function getFinalPlayerStats(
     [playerId]
   );
 
-  return {
-    ...(computed as any),
+return {
+  ...(computed as any),
 
-    exper: Number(base.exper || 0),
-    gold: Number(base.gold || 0),
-    stat_points: Number(base.stat_points || 0),
-    location: base.location,
+  exper: Number(base.exper || 0),
+  gold: Number(base.gold || 0),
+  stat_points: Number(base.stat_points || 0),
+  location: base.location,
 
-    guild_name: guildRow?.guild_name ?? null,
-    guild_rank: guildRow?.guild_rank ?? null,
+  class_name: base.class_name,
+  archetype: asArchetype(base.archetype), // ✅ typed + safe
 
-    portrait_url: base.portrait_url ?? null,
-    guild_banner: base.guild_banner ?? null
-  };
+  guild_name: guildRow?.guild_name ?? null,
+  guild_rank: guildRow?.guild_rank ?? null,
+
+  portrait_url: base.portrait_url ?? null,
+  guild_banner: base.guild_banner ?? null
+};
+
+
 }

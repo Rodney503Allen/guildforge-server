@@ -23,6 +23,8 @@ export async function getActiveBuffs(playerId: number): Promise<Buff[]> {
 
 /**
  * Apply a new buff
+ * - Buffs overwrite ONLY buffs with the same (stat + source)
+ * - Duration refreshes instead of stacking
  */
 export async function applyBuff(
   playerId: number,
@@ -31,10 +33,32 @@ export async function applyBuff(
   durationSeconds: number,
   source?: string
 ) {
+  const normalizedStat = stat.toLowerCase();
+  const normalizedSource = source ?? null;
+
+  // 1️⃣ Remove existing buff from SAME source on SAME stat
   await db.query(`
-    INSERT INTO player_buffs (player_id, stat, value, expires_at, source)
-    VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), ?)
-  `, [playerId, stat.toLowerCase(), value, durationSeconds, source || null]);
+    DELETE FROM player_buffs
+    WHERE player_id = ?
+      AND stat = ?
+      AND (
+        source <=> ?
+      )
+  `, [playerId, normalizedStat, normalizedSource]);
+
+  // 2️⃣ Insert refreshed buff
+  await db.query(`
+    INSERT INTO player_buffs
+      (player_id, stat, value, expires_at, source)
+    VALUES
+      (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), ?)
+  `, [
+    playerId,
+    normalizedStat,
+    value,
+    durationSeconds,
+    normalizedSource
+  ]);
 }
 
 /**

@@ -1,3 +1,4 @@
+console.log("🔥 world-combat.js LOADED");
 // =======================================
 // WORLD COMBAT (MODAL-ONLY, CLEAN)
 // =======================================
@@ -6,52 +7,170 @@ let currentEnemy = null;
 let enemyAttackTimer = null;
 const spellCooldowns = {}; 
 // { spellId: timestamp_when_ready }
+// =======================
+// STATUS POLLING
+// =======================
+let statusPollInterval = null;
 
+function startStatusPolling() {
+  if (statusPollInterval) return;
+
+  console.log("🔥 startStatusPolling");
+
+  statusPollInterval = setInterval(async () => {
+    try {
+      const r = await fetch("/combat/poll");
+      const data = await r.json();
+
+      console.log("[POLL]", data);
+
+      if (data.enemyDead || data.enemyHP <= 0) {
+        stopStatusPolling();
+        stopEnemyAutoAttack();
+
+        updateEnemyHUD(0, data.enemyMaxHP || 1);
+
+        logCombat("🏆 Enemy defeated!");
+
+        if (data.exp) {
+          logCombat(`✨ You gained ${data.exp} EXP`);
+        }
+
+        if (data.gold) {
+          logCombat(`💰 You gained ${data.gold} gold`);
+        }
+
+        if (data.levelUp) {
+          logCombat("⬆ LEVEL UP!");
+        }
+
+        return setTimeout(() => {
+          closeCombatModal();
+          location.reload();
+        }, 1600);
+      }
+
+
+      if (data.stop) {
+        stopStatusPolling();
+        return;
+      }
+
+      updateEnemyHUD(data.enemyHP, data.enemyMaxHP);
+    } catch (err) {
+      console.error("Status polling failed:", err);
+      stopStatusPolling();
+    }
+  }, 1000);
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+function updateEnemyHUD(hp, maxHP) {
+  const bar = document.getElementById("enemyHPBar");
+  const hpText = document.getElementById("enemyHP");
+  const maxText = document.getElementById("enemyMaxHP");
+
+  if (!bar || !currentEnemy) return;
+
+  // 🔥 UPDATE CANONICAL STATE
+  currentEnemy.hp = hp;
+  if (Number.isFinite(maxHP)) {
+    currentEnemy.maxHP = maxHP;
+  }
+
+  if (hpText) hpText.innerText = hp;
+  if (maxText) maxText.innerText = currentEnemy.maxHP;
+
+  if (currentEnemy.maxHP > 0) {
+    bar.style.width =
+      Math.max(0, (hp / currentEnemy.maxHP) * 100) + "%";
+  }
+}
 
 /* ===============================
    COMBAT MODAL CONTROL
 ================================ */
-window.openCombatModal = function (enemy) {
+
+window.openCombatModal = async function (enemy) {
+  await waitForEl("combatModal");
+  startStatusPolling();
+  // ✅ Always show modal immediately (so user sees it)
+  document.getElementById("combatModal").classList.remove("hidden");
+
+  // ✅ Reset log immediately
+  clearCombatLog();
+  logCombat(`⚠ ${enemy?.name ?? "Enemy"} engages you!`);
+
+  // ✅ Build a safe enemy object NOW (no NaN)
+  const hp = Number(enemy?.hp);
+  const max = Number(enemy?.maxHP ?? enemy?.maxhp ?? enemy?.max_hp ?? enemy?.maxhp ?? enemy?.hp);
+
   currentEnemy = {
-    ...enemy,
-    maxHP: enemy.hp
+    id: enemy?.id,
+    name: enemy?.name ?? "Enemy",
+    hp: Number.isFinite(hp) ? hp : 0,
+    maxHP: Number.isFinite(max) ? max : (Number.isFinite(hp) ? hp : 1)
   };
-  fetch("/me")
-    .then(r => r.json())
-    .then(player => {
-      // PLAYER INFO
-      setText("playerName", player.name);
-      setText("playerClass", player.pclass);
-      setText("playerLevel", player.level);
-      setText("playerHP", player.hpoints);
-      setText("playerMaxHP", player.maxhp);
-      setText("playerSP", player.spoints);
-      setText("playerMaxSP", player.maxspoints);
 
-      // ENEMY INFO
-      setText("enemyName", enemy.name);
-      setText("enemyHP", enemy.hp);
+  // ✅ Update ENEMY UI immediately (DO NOT wait on /me)
+  setText("enemyName", currentEnemy.name);
+  setText("enemyHP", currentEnemy.hp);
+  setText("enemyMaxHP", currentEnemy.maxHP);
+  updateBar("enemyHPBar", currentEnemy.hp, currentEnemy.maxHP);
 
-      // RESET LOG
-      clearCombatLog();
-      logCombat(`⚠ ${enemy.name} engages you!`);
+  // ✅ Start enemy loop AFTER enemy exists
+  startEnemyAutoAttack();
 
-      // SHOW MODAL
-      document.getElementById("combatModal").classList.remove("hidden");
+  // ✅ In parallel: load player stats (doesn't block enemy UI)
+  try {
+    const player = await fetch("/me", { credentials: "include" }).then(r => r.json());
 
-      // START ENEMY ATTACK LOOP
-      startEnemyAutoAttack();
+    setText("playerName", player.name);
+    setText("playerClass", player.pclass);
+    setText("playerLevel", player.level);
+    setText("playerHP", player.hpoints);
+    setText("playerMaxHP", player.maxhp);
+    setText("playerSP", player.spoints);
+    setText("playerMaxSP", player.maxspoints);
 
-      // TRACK HEALTH BARS
-      updateBar("playerHPBar", player.hpoints, player.maxhp);
-      updateBar("playerSPBar", player.spoints, player.maxspoints);
+    updateBar("playerHPBar", player.hpoints, player.maxhp);
+    updateBar("playerSPBar", player.spoints, player.maxspoints);
+
+    window.playerMaxHP = player.maxhp;
+    window.playerMaxSP = player.maxspoints;
+  } catch (e) {
+    console.error("Failed to load player in combat modal", e);
+  }
+
+  // ✅ OPTIONAL BUT STRONG: Immediately sync enemy from authoritative server state
+  // (prevents NaN / stale state if enemy payload was incomplete)
+  try {
+    const state = await fetch("/combat/state", { credentials: "include" }).then(r => r.json());
+    if (state?.inCombat && state?.enemy) {
+      const ehp = Number(state.enemy.hp);
+      const emax = Number(state.enemy.maxHP ?? state.enemy.maxhp);
+
+      if (Number.isFinite(ehp)) {
+        currentEnemy.hp = ehp;
+        setText("enemyHP", ehp);
+      }
+      if (Number.isFinite(emax)) {
+        currentEnemy.maxHP = emax;
+        setText("enemyMaxHP", emax);
+      }
+
       updateBar("enemyHPBar", currentEnemy.hp, currentEnemy.maxHP);
+    }
+  } catch (e) {
+    console.warn("combat/state sync failed (non-fatal)", e);
+  }
+};
 
-      window.playerMaxHP = player.maxhp;
-      window.playerMaxSP = player.maxspoints;
-    });
-
-}
 window.openSpellsModal = function () {
   document.getElementById("spellsModal").classList.remove("hidden");
   loadCombatSpells();
@@ -92,7 +211,7 @@ async function combatAttack() {
   }
 
   if (data.enemyHP !== undefined) {
-    setText("enemyHP", data.enemyHP);
+    updateEnemyHP(data.enemyHP);
   }
 
 if (data.dead) {
@@ -155,9 +274,10 @@ function startEnemyAutoAttack() {
 
       if (data.log) logCombat(data.log);
 
-      if (data.playerHP !== undefined) {
-        await refreshPlayerCaps();
-      }
+    if (data.playerHP !== undefined) {
+      updatePlayerHP(data.playerHP);
+      logCombat(`💥 ${currentEnemy.name} hits you for ${data.damage}`);
+    }
 
       if (data.dead) {
         logCombat("☠ You were slain!");
@@ -200,11 +320,30 @@ window.moveWorld = function (dir) {
   }
   originalMoveWorld(dir);
 };
+
 document.addEventListener("DOMContentLoaded", async () => {
-  const res = await fetch("/combat-modal.html");
-  const html = await res.text();
-  document.getElementById("combat-root").innerHTML = html;
+  const res = await fetch("/combat/state");
+  const state = await res.json();
+
+  if (state.inCombat && state.enemy) {
+    openCombatModal(state.enemy);
+  }
 });
+
+function waitForEl(id, tries = 40) {
+  return new Promise((resolve, reject) => {
+    const t = setInterval(() => {
+      const el = document.getElementById(id);
+      if (el) {
+        clearInterval(t);
+        resolve(el);
+      } else if (--tries <= 0) {
+        clearInterval(t);
+        reject(new Error(`Missing element: ${id}`));
+      }
+    }, 25);
+  });
+}
 window.openCombatModal = openCombatModal;
 /* ===============================
    LOAD/CAST SPELL
@@ -452,6 +591,13 @@ function startSpellCooldown(spellId, seconds) {
 
   tick();
 }
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  el.textContent =
+    value === undefined || value === null ? "" : String(value);
+}
 
 function updateBar(barId, current, max) {
   const bar = document.getElementById(barId);
@@ -461,10 +607,9 @@ function updateBar(barId, current, max) {
 }
 function updateEnemyHP(hp) {
   if (!currentEnemy) return;
-
-  setText("enemyHP", hp);
-  updateBar("enemyHPBar", hp, currentEnemy.maxHP);
+  updateEnemyHUD(hp, currentEnemy.maxHP);
 }
+
 
 
 function updatePlayerHP(currentHP) {

@@ -17,6 +17,7 @@ res.json({
   id: p.id,
   name: p.name,
   pclass: p.pclass,
+  archetype: p.archetype,
   level: p.level,
   exper: p.exper,
   location: p.location,

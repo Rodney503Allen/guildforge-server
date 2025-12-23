@@ -16,7 +16,7 @@ import chatRoutes from "./chat.routes";
 import characterRoutes from "./character.routes";
 import combatRoutes from "./combat.routes";
 import spellRoutes from "./spell.routes";
-
+import { startStatusHeartbeat } from "./services/statusHeartbeat";
 import { db } from "./db";
 
 
@@ -111,14 +111,6 @@ try {
   next();
 });
 
-
-// =======================
-// TEST ROUTE
-// =======================
-app.get("/api/test", (req, res) => {
-  res.json({ status: "API OK" });
-});
-
 // =======================
 // MAIN PAGE
 // =======================
@@ -204,4 +196,5 @@ app.get("/logout", (req, res) => {
 // =======================
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Guildforge engine running on port ${PORT}`);
+  startStatusHeartbeat();
 });

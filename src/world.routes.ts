@@ -338,7 +338,6 @@ html, body {
 
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>
-
 </body>
 
 </html>
@@ -407,13 +406,19 @@ router.get("/world/move/:dir", async (req, res) => {
   );
 
   // 🔥 Attempt spawn AFTER move
-  const enemy = await trySpawnEnemy(pid);
+const enemy = await trySpawnEnemy(
+  pid,
+  newX,
+  newY,
+  tile.terrain
+);
 
-  return res.json({
-    success: true,
-    inCombat: !!enemy,
-    enemy: enemy ?? null
-  });
+return res.json({
+  success: true,
+  inCombat: !!enemy,
+  enemy
+});
+
   
 });
 

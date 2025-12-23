@@ -4,6 +4,7 @@ import { db } from "./db";
 import { resolveAttack } from "./services/combatEngine";
 import { getFinalPlayerStats } from "./services/playerService";
 import { handleCreatureKill } from "./services/killService";
+import { getCreatureDebuffTotals } from "./services/creatureDebuffService";
 
 const router = Router();
 const playerAttackCooldowns = new Map<number, number>();
@@ -16,25 +17,109 @@ router.get("/combat/state", async (req, res) => {
   const pid = (req.session as any).playerId;
   if (!pid) return res.json({ inCombat: false });
 
-  const [[row]]: any = await db.query(`
-    SELECT pc.id, c.name, pc.hp
-    FROM player_creatures pc
-    JOIN creatures c ON c.id = pc.creature_id
-    WHERE pc.player_id = ?
-  `, [pid]);
+  const [[row]]: any = await db.query(
+    `
+SELECT
+  pc.id,
+  c.name,
+  pc.hp,
+  c.maxhp,
+  EXISTS (
+    SELECT 1
+    FROM player_creature_debuffs d
+    WHERE d.player_creature_id = pc.id
+      AND d.stat IN ('dot', 'hot')
+      AND d.expires_at > NOW()
+  ) AS hasStatus
+FROM player_creatures pc
+JOIN creatures c ON c.id = pc.creature_id
+WHERE pc.player_id = ?
 
-  if (!row) return res.json({ inCombat: false });
+  `,
+    [pid]
+  );
 
-  res.json({
-    inCombat: true,
-    enemy: {
-      id: row.id,
-      name: row.name,
-      hp: row.hp
-    }
-  });
+  if (!row) {
+    return res.json({ inCombat: false });
+  }
+
+res.json({
+  inCombat: true,
+  enemy: {
+    id: row.id,
+    name: row.name,
+    hp: row.hp,
+    maxHP: row.maxhp,
+    hasStatus: !!row.hasStatus
+  }
 });
 
+});
+
+/* ===========================
+   POLL COMBAT STATUS (HP SYNC)
+   Used by client while DOT/HOT active
+=========================== */
+router.get("/combat/poll", async (req, res) => {
+  try {
+    const pid = (req.session as any).playerId;
+    if (!pid) return res.status(401).json({ stop: true });
+
+    // Find current enemy instance (if any)
+    const [[enemy]]: any = await db.query(
+      `
+      SELECT
+        pc.id AS playerCreatureId,
+        pc.hp AS enemyHP,
+        c.maxhp AS enemyMaxHP
+      FROM player_creatures pc
+      JOIN creatures c ON c.id = pc.creature_id
+      WHERE pc.player_id = ?
+      LIMIT 1
+      `,
+      [pid]
+    );
+
+    // If not in combat anymore, stop polling
+    if (!enemy) {
+      return res.json({ stop: true });
+    }
+
+    // If enemy is dead, stop polling (UI can reload/close modal)
+if (Number(enemy.enemyHP) <= 0) {
+  // 🔥 Finalize combat HERE
+  const reward = await handleCreatureKill(pid, enemy.playerCreatureId);
+
+  return res.json({
+    stop: true,
+    enemyDead: true,
+    enemyHP: 0,
+    enemyMaxHP: Number(enemy.enemyMaxHP),
+    exp: reward?.expGained,
+    gold: reward?.goldGained,
+    levelUp: reward?.levelUp
+  });
+}
+
+
+
+    // Otherwise return current HP snapshot
+    return res.json({
+      stop: false,
+      enemyDead: false,
+      enemyHP: Number(enemy.enemyHP),
+      enemyMaxHP: Number(enemy.enemyMaxHP)
+    });
+  } catch (err) {
+    console.error("🔥 /combat/poll ERROR:", err);
+    return res.status(500).json({ stop: true });
+  }
+});
+
+
+/* ===========================
+   COMBAT SPELLS
+=========================== */
 router.get("/combat/spells", async (req, res) => {
   try {
     const pid = (req.session as any).playerId;
@@ -47,7 +132,8 @@ router.get("/combat/spells", async (req, res) => {
 
     if (!player) return res.json([]);
 
-    const [spells]: any = await db.query(`
+    const [spells]: any = await db.query(
+      `
       SELECT
         id,
         name,
@@ -62,7 +148,9 @@ router.get("/combat/spells", async (req, res) => {
       WHERE sclass = ?
         AND level <= ?
         AND is_combat = 1
-    `, [player.pclass, player.level]);
+    `,
+      [player.pclass, player.level]
+    );
 
     res.json(Array.isArray(spells) ? spells : []);
   } catch (err) {
@@ -77,65 +165,64 @@ router.get("/combat/spells", async (req, res) => {
 router.post("/combat/attack", async (req, res) => {
   const pid = (req.session as any).playerId;
   if (!pid) return res.status(401).json({ error: "Not logged in" });
-    const now = Date.now();
-    const nextAllowed = playerAttackCooldowns.get(pid) || 0;
 
-    if (now < nextAllowed) {
-      return res.json({
-        error: "cooldown",
-        remaining: Math.ceil((nextAllowed - now) / 1000)
-      });
-    }
+  const now = Date.now();
+  const nextAllowed = playerAttackCooldowns.get(pid) || 0;
 
-  // Load player base stats
-const attacker = await getFinalPlayerStats(pid);
-if (!attacker) return res.status(404).json({ error: "Player not found" });
+  if (now < nextAllowed) {
+    return res.json({
+      error: "cooldown",
+      remaining: Math.ceil((nextAllowed - now) / 1000)
+    });
+  }
 
-    const agility = Number(attacker.agility || 0);
+  const attacker = await getFinalPlayerStats(pid);
+  if (!attacker) {
+    return res.status(404).json({ error: "Player not found" });
+  }
 
-    const BASE_ATTACK_DELAY = 1200;
-    const MIN_ATTACK_DELAY = 400;
+  const agility = Number(attacker.agility || 0);
+  const delay = Math.max(400, 1200 - agility * 10);
+  playerAttackCooldowns.set(pid, now + delay);
 
-    const delay =
-      Math.max(
-        MIN_ATTACK_DELAY,
-        BASE_ATTACK_DELAY - agility * 10
-      );
-
-    playerAttackCooldowns.set(pid, now + delay);
-
-  // Load enemy
-  const [[enemyRow]]: any = await db.query(`
-    SELECT pc.id, pc.hp, c.attack, c.defense
+  const [[enemyRow]]: any = await db.query(
+    `
+    SELECT
+      pc.id,
+      pc.hp,
+      c.attack,
+      c.defense,
+      c.maxhp
     FROM player_creatures pc
     JOIN creatures c ON c.id = pc.creature_id
     WHERE pc.player_id = ?
-  `, [pid]);
+  `,
+    [pid]
+  );
 
   if (!enemyRow) {
     return res.json({ error: "No enemy" });
   }
 
-  // Minimal enemy stats (can expand later)
+  const debuffs = await getCreatureDebuffTotals(enemyRow.id);
+
   const defender = {
-    attack: enemyRow.attack,
-    defense: enemyRow.defense,
-    agility: 0,
-    vitality: 0,
-    intellect: 0,
-    crit: 0,
+    attack: Number(enemyRow.attack) + (debuffs["attack"] || 0),
+    defense: Number(enemyRow.defense) + (debuffs["defense"] || 0),
+    agility: debuffs["agility"] || 0,
+    vitality: debuffs["vitality"] || 0,
+    intellect: debuffs["intellect"] || 0,
+    crit: debuffs["crit"] || 0,
     hpoints: enemyRow.hp,
     spoints: 0,
-    maxhp: enemyRow.hp,
+    maxhp: enemyRow.maxhp,
     maxspoints: 0,
     level: 1,
     dodgeChance: 0,
     spellPower: 1
   };
 
-  // Resolve attack
   const result = resolveAttack(attacker, defender);
-
   const newHP = Math.max(0, enemyRow.hp - result.damage);
 
   await db.query(
@@ -143,33 +230,24 @@ if (!attacker) return res.status(404).json({ error: "Player not found" });
     [newHP, enemyRow.id]
   );
 
-  // Enemy defeated
+  let reward = null;
+  if (newHP <= 0) {
+    reward = await handleCreatureKill(pid, enemyRow.id);
+    playerAttackCooldowns.delete(pid);
+    enemyAttackCooldowns.delete(enemyRow.id);
+  }
 
-let reward = null;
-
-if (newHP <= 0) {
-  reward = await handleCreatureKill(pid, enemyRow.id);
-}
-
-res.json({
-  damage: result.damage,
-  crit: result.crit,
-  dodged: result.dodged,
-  enemyHP: newHP,
-  dead: newHP <= 0,
-  exp: reward?.expGained,
-  gold: reward?.goldGained,
-  levelUp: reward?.levelUp
+  res.json({
+    damage: result.damage,
+    crit: result.crit,
+    dodged: result.dodged,
+    enemyHP: newHP,
+    dead: newHP <= 0,
+    exp: reward?.expGained,
+    gold: reward?.goldGained,
+    levelUp: reward?.levelUp
+  });
 });
-
-
-
-});
-
-/* ===========================
-   CAST SPELL
-=========================== */
-
 
 /* ===========================
    ENEMY AUTO ATTACK
@@ -179,87 +257,60 @@ router.post("/combat/enemy-attack", async (req, res) => {
     const pid = (req.session as any).playerId;
     if (!pid) return res.status(401).json({ stop: true });
 
-    // Load player
     const player = await getFinalPlayerStats(pid);
     if (!player) return res.json({ stop: true });
 
-    // Load enemy
-    const [[enemy]]: any = await db.query(`
-      SELECT pc.id, pc.hp, c.attack, c.defense, c.agility, c.crit
+    const [[enemy]]: any = await db.query(
+      `
+      SELECT
+        pc.id,
+        pc.hp,
+        c.attack,
+        c.defense,
+        c.agility,
+        c.crit
       FROM player_creatures pc
       JOIN creatures c ON c.id = pc.creature_id
       WHERE pc.player_id = ?
-    `, [pid]);
-
+    `,
+      [pid]
+    );
     if (!enemy) {
       return res.json({ stop: true });
     }
 
-    // Compute player stats
-const playerStats = {
-  level: player.level,
 
-  attack: player.attack,
-  defense: player.defense,
-  agility: player.agility,
-  vitality: player.vitality,
-  intellect: player.intellect,
-  crit: player.crit,
+    const debuffs = await getCreatureDebuffTotals(enemy.id);
 
-  hpoints: player.hpoints,
-  spoints: player.spoints,
-  maxhp: player.maxhp,
-  maxspoints: player.maxspoints,
+    const enemyStats = {
+      level: 1,
+      attack: Number(enemy.attack ?? 1) + (debuffs.attack || 0),
+      defense: Number(enemy.defense ?? 0) + (debuffs.defense || 0),
+      agility: Number(enemy.agility ?? 0) + (debuffs.agility || 0),
+      vitality: debuffs.vitality || 0,
+      intellect: debuffs.intellect || 0,
+      crit: Number(enemy.crit ?? 0) + (debuffs.crit || 0),
+      hpoints: Number(enemy.hp),
+      spoints: 0,
+      maxhp: Number(enemy.hp),
+      maxspoints: 0,
+      dodgeChance: 0,
+      spellPower: 1
+    };
 
-  dodgeChance: player.dodgeChance ?? 0,
-  spellPower: player.spellPower ?? 1
-};
+    const now = Date.now();
+    const nextAllowed = enemyAttackCooldowns.get(enemy.id) || 0;
 
+    if (now < nextAllowed) {
+      return res.json({ skipped: true });
+    }
 
+    const delay = Math.max(600, 1800 - (enemy.agility ?? 0) * 15);
+    enemyAttackCooldowns.set(enemy.id, now + delay);
 
-    // Build enemy stats (FULLY SAFE)
-const enemyBase = {
-  level: 1,
-
-  attack: Number(enemy.attack ?? 1),
-  defense: Number(enemy.defense ?? 0),
-  agility: Number(enemy.agility ?? 0),
-  vitality: 0,
-  intellect: 0,
-  crit: Number(enemy.crit ?? 0),
-
-  hpoints: Number(enemy.hp),
-  spoints: 0,
-  maxhp: Number(enemy.hp),
-  maxspoints: 0,
-
-  // ✅ add these
-  dodgeChance: 0,
-  spellPower: 1
-};
-
-const enemyStats = enemyBase;
-
-const now = Date.now();
-const nextAllowed = enemyAttackCooldowns.get(enemy.id) || 0;
-
-if (now < nextAllowed) {
-  return res.json({ stop: false });
-}
-
-const BASE_DELAY = 1800;
-const delay = Math.max(600, BASE_DELAY - (enemy.agility ?? 0) * 15);
-enemyAttackCooldowns.set(enemy.id, now + delay);
-
-
-
-    // Resolve attack (enemy → player)
-const result = resolveAttack(enemyStats as any, playerStats as any);
-
-// ✅ clamp damage so HP can never increase from an "attack"
-const dmg = Math.max(0, Math.floor(Number(result.damage) || 0));
-const newHP = Math.max(0, Number(player.hpoints) - dmg);
-
+    const result = resolveAttack(enemyStats as any, player as any);
+    const dmg = Math.max(0, Math.floor(Number(result.damage) || 0));
+    const newHP = Math.max(0, Number(player.hpoints) - dmg);
 
     await db.query(
       "UPDATE players SET hpoints = ? WHERE id = ?",
@@ -267,12 +318,14 @@ const newHP = Math.max(0, Number(player.hpoints) - dmg);
     );
 
     res.json({
-      damage: result.damage,
+      type: "enemy-attack",
+      playerDead: newHP <= 0,
+      enemyDead: false,
+      damage: dmg,
       crit: result.crit,
       dodged: result.dodged,
       playerHP: newHP,
-      dead: newHP <= 0,
-      stop: newHP <= 0
+      playerMaxHP: player.maxhp
     });
 
   } catch (err) {
@@ -280,10 +333,6 @@ const newHP = Math.max(0, Number(player.hpoints) - dmg);
     res.status(500).json({ stop: true });
   }
 });
-
-
-
-
 
 /* ===========================
    FLEE COMBAT
@@ -296,8 +345,10 @@ router.post("/combat/flee", async (req, res) => {
     "DELETE FROM player_creatures WHERE player_id = ?",
     [pid]
   );
+
   playerAttackCooldowns.delete(pid);
   enemyAttackCooldowns.clear();
+
   res.json({ success: true });
 });
 

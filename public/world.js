@@ -1,3 +1,4 @@
+let pendingCombatEnemy = null;
 // =======================
 // WORLD MOVEMENT CONTROLS
 // =======================
@@ -154,13 +155,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 
-
+function queueCombatOpen() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (pendingCombatEnemy) {
+        openCombatModal(pendingCombatEnemy);
+        pendingCombatEnemy = null;
+      }
+    });
+  });
+}
 
 async function moveWorld(dir) {
-  // ⛔ HARD STOP if in combat
-  if (isInCombat()) {
-    return;
-  }
+  if (isInCombat()) return;
 
   try {
     const res = await fetch(`/world/move/${dir}`, {
@@ -170,19 +177,21 @@ async function moveWorld(dir) {
     const data = await res.json();
     if (!data.success) return;
 
-    // If combat starts → open modal and STOP
-    if (data.inCombat && data.enemy) {
-      openCombatModal(data.enemy);
-      return;
-    }
-
-    // Normal movement
+    // ✅ Fully resolve world FIRST
     await refreshWorld();
     loadRegionName();
+
+    // ✅ Schedule combat AFTER world is stable
+    if (data.inCombat && data.enemy) {
+      pendingCombatEnemy = data.enemy;
+      queueCombatOpen();
+    }
 
   } catch (err) {
     console.error("World movement failed", err);
   }
 }
+
+
 
 

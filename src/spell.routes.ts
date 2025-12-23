@@ -3,9 +3,11 @@ import { db } from "./db";
 import { applyBuff } from "./services/buffService";
 import { getFinalPlayerStats } from "./services/playerService";
 import { handleCreatureKill } from "./services/killService";
+import { applyCreatureDebuff } from "./services/creatureBuffService";
+import { ARCHETYPE_SCALING } from "./services/archetypeScaling";
 
 const router = express.Router();
-
+let reward: any = null;
 // ⏱️ playerId:spellId -> timestamp
 const spellCooldowns = new Map<string, number>();
 
@@ -14,9 +16,12 @@ router.post("/spells/cast", async (req, res) => {
     const pid = (req.session as any).playerId;
     const { spellId } = req.body;
 
+    let reward: any = null;        // ✅ request-scoped (NOT global)
+    let appliedStatus = false;     // ✅ only one variable
+
     if (!pid) return res.status(401).json({ error: "Not logged in" });
     if (!spellId) return res.status(400).json({ error: "Missing spellId" });
-
+    
     const cdKey = `${pid}:${spellId}`;
     const now = Date.now();
     const nextAllowed = spellCooldowns.get(cdKey) || 0;
@@ -64,15 +69,15 @@ router.post("/spells/cast", async (req, res) => {
 
     // 5️⃣ Load current enemy (if any)
     const [[enemy]]: any = await db.query(`
-      SELECT pc.id, pc.hp
+      SELECT pc.id, pc.hp, c.maxhp
       FROM player_creatures pc
+      JOIN creatures c ON c.id = pc.creature_id
       WHERE pc.player_id = ?
     `, [pid]);
 
     let log = "";
     let enemyHP = enemy?.hp;
     let playerHP = player.hpoints;
-
     // For damage spells, require enemy before spending SP
     if (spell.type === "damage" && !enemy) {
       return res.json({ error: "No enemy to target" });
@@ -95,22 +100,47 @@ router.post("/spells/cast", async (req, res) => {
       if (!enemy) {
         return res.json({ error: "No enemy to target" });
       }
-console.log("SPELL DEBUG:", {
-  spellId,
-  spellName: spell.name,
-  rawSvalue: spell.svalue,
-  parsedSvalue: Number(spell.svalue),
-  spellType: spell.type
-});
+      console.log("SPELL DEBUG:", {
+        spellId,
+        spellName: spell.name,
+        rawSvalue: spell.svalue,
+        parsedSvalue: Number(spell.svalue),
+        spellType: spell.type
+      });
 
-      const intellect = Number(player.intellect || 0);
+      const scalingStat = ARCHETYPE_SCALING[player.archetype];
+
+      let statValue = 0;
+      switch (scalingStat) {
+        case "attack":
+          statValue = player.attack;
+          break;
+        case "agility":
+          statValue = player.agility;
+          break;
+        case "intellect":
+          statValue = player.intellect;
+          break;
+      }
       const spellPower = Number(player.spellPower || 1);
 
       const dmg = Math.max(
         0,
-        Math.floor(svalue + intellect * 0.5 * spellPower)
+        Math.floor(svalue + statValue * 0.5 * spellPower)
       );
+
+      console.log("SPELL SCALING", {
+        spell: spell.name,
+        class: player.pclass,
+        archetype: player.archetype,
+        scalingStat,
+        statValue,
+        damage: dmg
+      });
       enemyHP = Math.max(0, Number(enemy.hp) - dmg);
+
+
+
 
 
       await db.query(
@@ -119,13 +149,32 @@ console.log("SPELL DEBUG:", {
       );
 
       log = `✨ You cast ${spell.name} for ${dmg} damage!`;
+      // ✅ Apply debuff to enemy (if configured)
+      const dStat = String(spell.debuff_stat || "").trim();
+      const dVal = Number(spell.debuff_value) || 0;
+      const dDur = Number(spell.debuff_duration) || 0;
+
+      if (dStat && dDur > 0 && dVal !== 0) {
+        await applyCreatureDebuff(
+          enemy.id,
+          dStat,
+          dVal,
+          dDur,
+          `spell:${spell.id}`
+        );
+
+        appliedStatus = true;
+
+
+        log += ` 🕸 Debuff applied: ${dStat.toUpperCase()} ${dVal > 0 ? "+" : ""}${dVal} (${dDur}s)`;
+      }
 
     
 
     if (enemyHP <= 0) {
-      const reward = await handleCreatureKill(pid, enemy.id);
+      reward = await handleCreatureKill(pid, enemy.id);
     }
-
+ 
     }
 
     // =========================
@@ -159,6 +208,21 @@ console.log("SPELL DEBUG:", {
       );
 
       log = `✨ You cast ${spell.name} and gain a buff!`;
+      if (
+        spell.debuff_stat &&
+        spell.debuff_value &&
+        spell.debuff_duration
+      ) {
+        await applyCreatureDebuff(
+          enemy.id,
+          spell.debuff_stat,
+          Number(spell.debuff_value),
+          Number(spell.debuff_duration),
+          `spell:${spell.id}`
+        );
+
+        log += ` 🔻 ${spell.debuff_stat.toUpperCase()} reduced!`;
+      }
     }
 
     // ⏱️ SET COOLDOWN (seconds → ms)
@@ -168,9 +232,14 @@ console.log("SPELL DEBUG:", {
     res.json({
       log,
       enemyHP,
+      enemyMaxHP: enemy?.maxhp,
       playerHP,
       playerSP: newSP,
+      appliedStatus,
       dead: enemyHP !== undefined && enemyHP <= 0,
+      exp: reward?.expGained,
+      gold: reward?.goldGained,
+      levelUp: reward?.levelUp,
       cooldown: cooldownSec
     });
 
@@ -178,6 +247,8 @@ console.log("SPELL DEBUG:", {
     console.error("SPELL CAST ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
+  
 });
+
 
 export default router;

@@ -20,6 +20,17 @@ function requireLogin(req: any, res: any, next: any) {
 // =======================
 router.get("/character", requireLogin, async (req, res) => {
   const pid = req.session.playerId as number;
+const [[basePlayer]]: any = await db.query(`
+  SELECT
+    attack,
+    defense,
+    agility,
+    vitality,
+    intellect,
+    crit
+  FROM players
+  WHERE id = ?
+`, [pid]);
 
   // ✅ LOAD FINAL STATS (base + gear + derived)
   // 1) Base + gear (no buffs)
@@ -53,17 +64,6 @@ const statBreakdown: Record<
   }
 >;
 
-STAT_KEYS.forEach((stat) => {
-  statBreakdown[stat] = {
-    base: Number(p[stat]) || 0,
-    gear: 0,
-    buff: 0,
-    total: Number(p[stat]) || 0
-  };
-});
-
-
-
   // ============================
   // EQUIPPED GEAR (display only)
   // ============================
@@ -76,6 +76,66 @@ STAT_KEYS.forEach((stat) => {
 
   const equipped: any = {};
   gear.forEach((g: any) => (equipped[g.slot] = g));
+
+  const gearBonus: Record<StatKey, number> = {
+    attack: 0,
+    defense: 0,
+    agility: 0,
+    vitality: 0,
+    intellect: 0,
+    crit: 0
+  };
+
+  gear.forEach((g: any) => {
+    STAT_KEYS.forEach(stat => {
+      if (g[stat]) {
+        gearBonus[stat] += Number(g[stat]) || 0;
+      }
+    });
+  });
+
+
+
+  // ============================
+  // BUFFS (display only)
+  // ============================
+const [buffs]: any = await db.query(`
+  SELECT stat, value
+  FROM player_buffs
+  WHERE player_id = ?
+    AND expires_at > NOW()
+`, [pid]);
+
+const buffBonus: Record<StatKey, number> = {
+  attack: 0,
+  defense: 0,
+  agility: 0,
+  vitality: 0,
+  intellect: 0,
+  crit: 0
+};
+
+buffs.forEach((b: any) => {
+  if (STAT_KEYS.includes(b.stat as StatKey)) {
+    buffBonus[b.stat as StatKey] += Number(b.value) || 0;
+  }
+});
+
+STAT_KEYS.forEach((stat) => {
+  const base = Number(basePlayer?.[stat]) || 0;
+  const gear = gearBonus[stat] || 0;
+  const buff = buffBonus[stat] || 0;
+
+  statBreakdown[stat] = {
+    base,
+    gear,
+    buff,
+    total: base + gear + buff
+  };
+});
+
+
+
 
   // ============================
   // INVENTORY (equipable only)

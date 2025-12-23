@@ -200,6 +200,7 @@
 }
 
 .bar {
+  position: relative;          /* anchor for fill */
   height: 14px;
   background: #1a1a1a;
   border-radius: 8px;
@@ -207,9 +208,15 @@
   border: 1px solid #333;
 }
 
+/* IMPORTANT: left-anchored fill */
 .bar-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+
   height: 100%;
   width: 100%;
+
   transition: width 0.3s ease;
 }
 
@@ -492,7 +499,7 @@
             <div id="enemyHPBar" class="bar-fill hp enemy"></div>
           </div>
           <div class="bar-text">
-            <span id="enemyHP"></span>
+            <span id="enemyHP"></span> / <span id="enemyMaxHP"></span>
           </div>
         </div>
       </div>
@@ -533,6 +540,8 @@
     <button class="modal-btn" onclick="closeSpellsModal()">Close</button>
   </div>
 </div>
+
+
 
 </body>
 </html>

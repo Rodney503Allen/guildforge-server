@@ -1,6 +1,11 @@
 import { db } from "../db";
 
-export async function trySpawnEnemy(playerId: number) {
+export async function trySpawnEnemy(
+  playerId: number,
+  mapX: number,
+  mapY: number,
+  terrain: string
+) {
   // Is player already in combat?
   const [[existing]]: any = await db.query(
     "SELECT id FROM player_creatures WHERE player_id = ?",
@@ -9,12 +14,10 @@ export async function trySpawnEnemy(playerId: number) {
   if (existing) return null;
 
   // Get player level + terrain + position
-  const [[player]]: any = await db.query(`
-    SELECT p.level, p.map_x, p.map_y, wm.terrain
-    FROM players p
-    JOIN world_map wm ON wm.x = p.map_x AND wm.y = p.map_y
-    WHERE p.id = ?
-  `, [playerId]);
+const [[player]]: any = await db.query(
+  "SELECT level FROM players WHERE id = ?",
+  [playerId]
+);
 
   if (!player) return null;
 
