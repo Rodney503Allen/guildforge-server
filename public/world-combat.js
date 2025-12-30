@@ -369,49 +369,77 @@ async function loadCombatSpells() {
     return;
   }
 
-  grid.innerHTML = "";
+grid.innerHTML = "";
 
-  if (spells.length === 0) {
-    grid.innerHTML = "<em>No spells available</em>";
-    return;
+if (spells.length === 0) {
+  grid.innerHTML = "<em>No spells available</em>";
+  return;
+}
+
+spells.forEach(s => {
+  let description = "";
+
+  switch (s.type) {
+    case "damage":
+      description = `DAMAGE: ${s.damage ?? 0}`;
+      break;
+
+    case "heal":
+      description = `HEAL: ${s.heal ?? 0}`;
+      break;
+
+    case "dot": {
+      const perTick = s.dot_damage ?? 0;
+      const dur = s.dot_duration ?? 0;
+      const tick = s.dot_tick_rate ?? 1;
+      description = `DOT: ${perTick} / ${tick}s for ${dur}s`;
+      break;
+    }
+
+    case "damage_dot": {
+      const dmg = s.damage ?? 0;
+      const perTick = s.dot_damage ?? 0;
+      const dur = s.dot_duration ?? 0;
+      const tick = s.dot_tick_rate ?? 1;
+      description = `DMG: ${dmg} + DOT: ${perTick}/${tick}s for ${dur}s`;
+      break;
+    }
+
+    case "buff":
+      description = `BUFF ${String(s.buff_stat || "").toUpperCase()} +${s.buff_value ?? 0} (${s.buff_duration ?? 0}s)`;
+      break;
+
+    case "debuff":
+      description = `DEBUFF ${String(s.debuff_stat || "").toUpperCase()} ${s.debuff_value ?? 0} (${s.debuff_duration ?? 0}s)`;
+      break;
+
+    default:
+      description = s.description || "";
   }
 
-  spells.forEach(s => {
-    let description = "";
-
-    // Damage / heal spells
-    if (s.type === "damage" || s.type === "heal") {
-      description = `${s.type.toUpperCase()}: ${s.svalue}`;
-    }
-
-    // Buff spells
-    if (s.type === "buff") {
-      description = `BUFF ${s.buff_stat.toUpperCase()} +${s.buff_value}`;
-    }
-
-    grid.innerHTML += `
-      <div class="spell-slot" onclick="castSpell(${s.id})">
-        <div class="spell-icon-wrapper">
-          <img class="spell-icon" src="/icons/spells/${s.icon}">
-          <div class="spell-cooldown hidden" id="spell-cd-${s.id}"></div>
-        </div>
-
-        <div class="spell-info">
-          <strong>${s.name}</strong>
-          <div>Cost: ${s.scost} SP</div>
-          <div>${description}</div>
-          ${s.cooldown ? `<div class="cooldown-text">CD: ${s.cooldown}s</div>` : ""}
-        </div>
+  grid.innerHTML += `
+    <div class="spell-slot" onclick="castSpell(${s.id})">
+      <div class="spell-icon-wrapper">
+        <img class="spell-icon" src="/icons/spells/${s.icon}">
+        <div class="spell-cooldown hidden" id="spell-cd-${s.id}"></div>
       </div>
-    `;
-    Object.entries(spellCooldowns).forEach(([spellId, endTime]) => {
-      const remaining = Math.ceil((endTime - Date.now()) / 1000);
-      if (remaining > 0) {
-        startSpellCooldown(spellId, remaining);
-      }
-    });
 
-  });
+      <div class="spell-info">
+        <strong>${s.name}</strong>
+        <div>Cost: ${s.scost} SP</div>
+        <div>${description}</div>
+        ${s.cooldown ? `<div class="cooldown-text">CD: ${s.cooldown}s</div>` : ""}
+      </div>
+    </div>
+  `;
+});
+Object.entries(spellCooldowns).forEach(([spellId, endTime]) => {
+  const remaining = Math.ceil((endTime - Date.now()) / 1000);
+  if (remaining > 0) {
+    startSpellCooldown(spellId, remaining);
+  }
+});
+
 }
 
 

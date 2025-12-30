@@ -52,12 +52,24 @@ router.post("/spells/cast", async (req, res) => {
         WHERE id = ?
       `, [spellId]);
 
+        console.log("🧪 SPELL CAST DEBUG", {
+          spellId: spell.id,
+          name: spell.name,
+          type: spell.type,
+          damage: spell.damage,
+          dot_damage: spell.dot_damage,
+          dot_duration: spell.dot_duration,
+          dot_tick_rate: spell.dot_tick_rate,
+          debuff_stat: spell.debuff_stat
+        });
+        
       if (!spell) {
         return res.status(404).json({ error: "Spell not found" });
       }
 
       const scost = Number(spell.scost) || 0;
-      const svalue = Number(spell.svalue) || 0;
+      const baseDamage = Number(spell.damage) || 0;
+      const baseHeal = Number(spell.heal) || 0;
       const cooldownSec = Number(spell.cooldown) || 0;
 
 
@@ -94,6 +106,47 @@ router.post("/spells/cast", async (req, res) => {
       [newSP, pid]
     );
     // =========================
+    // DOT SPELL
+    // =========================
+    if (spell.type === "dot" || spell.type === "damage_dot") {
+      if (!enemy) {
+        return res.json({ error: "No enemy to target" });
+      }
+
+      const dotDamage = Number(spell.dot_damage) || 0;
+      const dotDuration = Number(spell.dot_duration) || 0;
+      const tickRate = Number(spell.dot_tick_rate) || 1;
+
+      if (dotDamage <= 0 || dotDuration <= 0) {
+        return res.status(500).json({ error: "Invalid DOT spell config" });
+      }
+
+      await db.query(
+        `
+        INSERT INTO player_creature_dots
+          (player_creature_id, damage, tick_interval, next_tick_at, expires_at, source)
+        VALUES
+          (?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?)
+        `,
+        [
+          enemy.id,
+          dotDamage,
+          tickRate,
+          dotDuration,
+          `spell:${spell.id}`
+        ]
+      );
+
+      console.log("🔥 DOT APPLIED", {
+        enemyId: enemy.id,
+        damage: dotDamage,
+        duration: dotDuration,
+        tickRate
+      });
+
+      log = `☠ ${spell.name} afflicts the enemy!`;
+    }
+    // =========================
     // DAMAGE SPELL
     // =========================
     if (spell.type === "damage") {
@@ -126,7 +179,7 @@ router.post("/spells/cast", async (req, res) => {
 
       const dmg = Math.max(
         0,
-        Math.floor(svalue + statValue * 0.5 * spellPower)
+        Math.floor(baseDamage + statValue * 0.5 * spellPower)
       );
 
       console.log("SPELL SCALING", {
@@ -181,14 +234,14 @@ router.post("/spells/cast", async (req, res) => {
     // HEAL SPELL
     // =========================
     if (spell.type === "heal") {
-      playerHP = Math.min(player.maxhp, player.hpoints + svalue);
+      playerHP = Math.min(player.maxhp, player.hpoints + baseHeal);
 
       await db.query(
         "UPDATE players SET hpoints = ? WHERE id = ?",
         [playerHP, pid]
       );
 
-      log = `✨ You cast ${spell.name} and heal ${svalue} HP!`;
+      log = `✨ You cast ${spell.name} and heal ${baseHeal} HP!`;
     }
 
     // =========================

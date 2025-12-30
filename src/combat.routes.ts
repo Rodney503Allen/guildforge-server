@@ -25,12 +25,11 @@ SELECT
   pc.hp,
   c.maxhp,
   EXISTS (
-    SELECT 1
-    FROM player_creature_debuffs d
-    WHERE d.player_creature_id = pc.id
-      AND d.stat IN ('dot', 'hot')
-      AND d.expires_at > NOW()
-  ) AS hasStatus
+  SELECT 1
+  FROM player_creature_dots d
+  WHERE d.player_creature_id = pc.id
+    AND d.expires_at > NOW()
+) AS hasStatus
 FROM player_creatures pc
 JOIN creatures c ON c.id = pc.creature_id
 WHERE pc.player_id = ?
@@ -61,11 +60,12 @@ res.json({
    Used by client while DOT/HOT active
 =========================== */
 router.get("/combat/poll", async (req, res) => {
+  console.log("🧪 /combat/poll HIT");
+
   try {
     const pid = (req.session as any).playerId;
-    if (!pid) return res.status(401).json({ stop: true });
+    if (!pid) return res.json({ stop: true });
 
-    // Find current enemy instance (if any)
     const [[enemy]]: any = await db.query(
       `
       SELECT
@@ -80,46 +80,76 @@ router.get("/combat/poll", async (req, res) => {
       [pid]
     );
 
-    // If not in combat anymore, stop polling
-    if (!enemy) {
-      return res.json({ stop: true });
+    if (!enemy) return res.json({ stop: true });
+
+    let enemyHP = Number(enemy.enemyHP);
+    const combatLog: string[] = [];
+    let reward = null;
+
+    // 🔥 DOT TICKS
+    const [dots]: any = await db.query(
+      `
+      SELECT *
+      FROM player_creature_dots
+      WHERE player_creature_id = ?
+        AND next_tick_at <= NOW()
+        AND expires_at > NOW()
+      `,
+      [enemy.playerCreatureId]
+    );
+
+    for (const dot of dots) {
+      enemyHP = Math.max(0, enemyHP - Number(dot.damage));
+
+      await db.query(
+        "UPDATE player_creatures SET hp = ? WHERE id = ?",
+        [enemyHP, enemy.playerCreatureId]
+      );
+
+      await db.query(
+        `
+        UPDATE player_creature_dots
+        SET next_tick_at = DATE_ADD(next_tick_at, INTERVAL tick_interval SECOND)
+        WHERE id = ?
+        `,
+        [dot.id]
+      );
+
+      combatLog.push(`🔥 Enemy takes ${dot.damage} damage.`);
     }
 
-    // If enemy is dead, stop polling (UI can reload/close modal)
-if (Number(enemy.enemyHP) <= 0) {
-  // 🔥 Finalize combat HERE
-  const reward = await handleCreatureKill(pid, enemy.playerCreatureId);
+    await db.query(
+      "DELETE FROM player_creature_dots WHERE expires_at <= NOW()"
+    );
 
-  return res.json({
-    stop: true,
-    enemyDead: true,
-    enemyHP: 0,
-    enemyMaxHP: Number(enemy.enemyMaxHP),
-    exp: reward?.expGained,
-    gold: reward?.goldGained,
-    levelUp: reward?.levelUp
-  });
-}
+    // ☠ Death check AFTER DOTs
+    if (enemyHP <= 0 && enemy.enemyHP > 0) {
+      reward = await handleCreatureKill(pid, enemy.playerCreatureId);
+    }
 
-
-
-    // Otherwise return current HP snapshot
-    return res.json({
+    res.json({
       stop: false,
-      enemyDead: false,
-      enemyHP: Number(enemy.enemyHP),
-      enemyMaxHP: Number(enemy.enemyMaxHP)
+      enemyDead: enemyHP <= 0,
+      enemyHP,
+      enemyMaxHP: Number(enemy.enemyMaxHP),
+      log: combatLog,
+      exp: reward?.expGained,
+      gold: reward?.goldGained,
+      levelUp: reward?.levelUp
     });
+
   } catch (err) {
     console.error("🔥 /combat/poll ERROR:", err);
-    return res.status(500).json({ stop: true });
+    res.status(500).json({ stop: true });
   }
 });
+
 
 
 /* ===========================
    COMBAT SPELLS
 =========================== */
+// GET combat spells for current player
 router.get("/combat/spells", async (req, res) => {
   try {
     const pid = (req.session as any).playerId;
@@ -137,27 +167,46 @@ router.get("/combat/spells", async (req, res) => {
       SELECT
         id,
         name,
+        description,
         icon,
-        scost,
         type,
-        svalue,
+        scost,
+        cooldown,
+
+        -- direct effects
+        damage,
+        heal,
+
+        -- DOT system
+        dot_damage,
+        dot_duration,
+        dot_tick_rate,
+
+        -- buffs
         buff_stat,
         buff_value,
-        cooldown
+        buff_duration,
+
+        -- debuffs (NON-DOT ONLY)
+        debuff_stat,
+        debuff_value,
+        debuff_duration
       FROM spells
       WHERE sclass = ?
         AND level <= ?
         AND is_combat = 1
-    `,
+      ORDER BY level ASC
+      `,
       [player.pclass, player.level]
     );
 
-    res.json(Array.isArray(spells) ? spells : []);
+    res.json(spells ?? []);
   } catch (err) {
     console.error("🔥 /combat/spells ERROR:", err);
     res.status(500).json([]);
   }
 });
+
 
 /* ===========================
    PLAYER ATTACK
@@ -223,12 +272,17 @@ router.post("/combat/attack", async (req, res) => {
   };
 
   const result = resolveAttack(attacker, defender);
-  const newHP = Math.max(0, enemyRow.hp - result.damage);
-
   await db.query(
-    "UPDATE player_creatures SET hp = ? WHERE id = ?",
-    [newHP, enemyRow.id]
-  );
+  "UPDATE player_creatures SET hp = GREATEST(0, hp - ?) WHERE id = ?",
+  [result.damage, enemyRow.id]
+);
+
+const [[updated]]: any = await db.query(
+  "SELECT hp FROM player_creatures WHERE id = ?",
+  [enemyRow.id]
+);
+
+const newHP = updated.hp;
 
   let reward = null;
   if (newHP <= 0) {
