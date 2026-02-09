@@ -19,6 +19,7 @@ import spellRoutes from "./spell.routes";
 import { startStatusHeartbeat } from "./services/statusHeartbeat";
 import { db } from "./db";
 import combatPollRoutes from "./combatPoll.routes";
+import sellRoutes from "./sell.routes";
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use(characterRoutes);
 app.use(combatRoutes);
 app.use(spellRoutes);
 app.use(combatPollRoutes);
+app.use(sellRoutes);
 // =======================
 // GLOBAL DEATH CHECK
 // =======================

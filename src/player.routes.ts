@@ -64,10 +64,21 @@ res.json({
 // =======================
 // GET AVAILABLE CLASSES
 // =======================
-router.get("/api/classes", async (req, res) => {
+router.get("/api/classes", async (_req, res) => {
   try {
     const [classes]: any = await db.query(`
-      SELECT id, name
+      SELECT
+        id,
+        name,
+        archetype,
+        attack,
+        defense,
+        agility,
+        vitality,
+        intellect,
+        crit,
+        hpoints,
+        spoints
       FROM classes
       ORDER BY name ASC
     `);
@@ -78,6 +89,7 @@ router.get("/api/classes", async (req, res) => {
     res.status(500).json([]);
   }
 });
+
 
 
 // =======================

@@ -1,466 +1,515 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap');
 
-body {
-  background:#050509;
-  color:#f5e6b2;
-  font-family:'Cinzel',serif;
+*{ box-sizing:border-box; }
+
+:root{
+  --bg0:#07090c;
+  --bg1:#0b0f14;
+  --panel:#0e131a;
+  --panel2:#0a0f15;
+
+  --ink:#d7dbe2;
+  --muted:#9aa3af;
+
+  --iron:#2b3440;
+  --ember:#b64b2e;
+  --blood:#7a1e1e;
+  --bone:#c9b89a;
+
+  --shadow: rgba(0,0,0,.60);
+  --frame: rgba(255,255,255,.04);
+  --glass: rgba(0,0,0,.18);
+}
+
+body{
   margin:0;
+  color: var(--ink);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+
+  background:
+    radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
+    radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
+    linear-gradient(180deg, var(--bg1), var(--bg0));
 }
 
-/* MAIN CONTAINER */
-.guild-container {
-  max-width: 940px;
-  margin: 120px auto;
-  padding: 25px;
-  background: rgba(0,0,0,.85);
-  border: 2px solid #c8a34b;
-  border-radius: 14px;
-  box-shadow: 0 0 18px rgba(0,0,0,.8);
+/* grit overlay */
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  opacity:.10;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
+  mix-blend-mode: overlay;
 }
 
-/* HEADERS */
-.guild-title {
-  font-size: 26px;
+button, input, textarea, select{
+  font-family: 'Cinzel', ui-serif, Georgia, "Times New Roman", serif;
+}
+
+/* =========================
+   MAIN CONTAINER
+========================= */
+.guild-container{
+  width: min(1100px, 94vw);
+  margin: 0 auto;
+  padding-top: 120px; /* room for statpanel */
+  padding-bottom: 32px;
+  position: relative;
+  z-index: 1;
+}
+
+/* =========================
+   HEADERS
+========================= */
+.guild-title{
+  font-size: 22px;
   text-align:center;
-  color: #ffd36a;
-  margin-bottom: 8px;
-}
-
-.guild-sub {
-  text-align:center;
-  font-size: 14px;
-  opacity: .85;
+  color: var(--bone);
+  font-weight: 900;
+  letter-spacing: 2.6px;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 10px rgba(182,75,46,.20),
+    0 10px 18px rgba(0,0,0,.85);
   margin-bottom: 10px;
 }
 
-/* BUTTONS */
-.guild-actions {
+.guild-sub{
+  text-align:center;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+/* =========================
+   PANELS
+========================= */
+.guild-panel,
+.guild-announcement{
+  position:relative;
+  border-radius: 12px;
+  padding: 14px;
+  margin-top: 14px;
+
+  border: 1px solid rgba(43,52,64,.95);
+  background:
+    radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.10), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
+    linear-gradient(180deg, var(--panel), var(--panel2));
+
+  box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
+  overflow: visible;
+}
+
+.guild-panel::before,
+.guild-announcement::before{
+  content:"";
+  position:absolute;
+  inset:10px;
+  pointer-events:none;
+  border: 0;
+  border-radius: 10px;
+}
+
+.guild-panel h3{
+  position:relative;
+  z-index:1;
+  margin: 0 0 12px;
+
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--bone);
+}
+
+/* =========================
+   XP BAR
+========================= */
+.guild-xp-bar-wrapper{
+  width: min(720px, 92vw);
+  margin: 10px auto 0;
+  position: relative;
+  z-index: 1;
+}
+
+.guild-xp-bar{
+  width: 100%;
+  height: 14px;
+  background: rgba(0,0,0,.28);
+  border: 1px solid rgba(43,52,64,.95);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 0 10px rgba(0,0,0,.85);
+}
+
+.guild-xp-fill{
+  height: 100%;
+  background: linear-gradient(90deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
+  transition: width .4s ease;
+}
+
+/* =========================
+   ANNOUNCEMENT
+========================= */
+.announcement-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 10px;
+
+  position:relative;
+  z-index:1;
+
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(43,52,64,.85);
+}
+
+.announcement-title{
+  flex: 1;
+  text-align:center;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+  color: rgba(215,219,226,.95);
+  font-size: 12px;
+}
+
+.announcement-body{
+  position:relative;
+  z-index:1;
+  text-align: center;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(215,219,226,.92);
+}
+
+.announcement-meta{
+  position:relative;
+  z-index:1;
+  text-align:center;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+/* =========================
+   ACTIONS (links + buttons)
+========================= */
+.guild-actions{
   text-align:center;
   margin: 14px 0;
+  display:flex;
+  flex-wrap:wrap;
+  gap: 10px;
+  justify-content:center;
+  position: relative;
+  z-index: 1;
 }
 
-.guild-actions a, .guild-actions button {
-  background:black;
-  border: 1px solid gold;
-  color: gold;
-  padding: 8px 14px;
-  margin: 5px;
-  border-radius: 6px;
-  text-decoration:none;
-  display:inline-block;
-  transition:.2s;
-}
-
-.guild-actions a:hover,
-.guild-actions button:hover {
-  background:#221;
-}
-
-/* PANELS */
-.guild-panel {
-  border-top:1px solid rgba(255,255,255,.2);
-  margin-top:18px;
-  padding-top:12px;
-}
-
-/* TABLE */
-.guild-table {
-  width:100%;
-  border-collapse: collapse;
-}
-
-.guild-table th,
-.guild-table td {
-  padding: 8px;
-  border-bottom:1px solid rgba(255,255,255,.15);
-  text-align:left;
-}
-
-.guild-table th {
-  color: #ffd36a;
-  font-weight: normal;
-}
-
-.guild-table tr:hover {
-  background: rgba(255,215,0,.1);
-}
-
-/* FORM */
-.guild-form input,
-.guild-form textarea {
-  width:100%;
-  padding:10px;
-  margin:6px 0;
-  background:black;
-  border:1px solid gold;
-  color: gold;
-}
-
-/* Normalize button + link to same size */
 .guild-actions a,
-.guild-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.guild-actions button,
+.contrib-btn,
+.small-btn,
+.manage-btn,
+.donate-btn,
+.cancel-btn,
+.confirm-btn,
+.danger-btn,
+.perk-upgrade-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
 
   min-height: 40px;
-  padding: 8px 16px;
+  padding: 10px 12px;
 
-  font-size: 15px;
-  line-height: 1;
-  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(43,52,64,.95);
+  background: rgba(0,0,0,.18);
+  color: #f3e7db;
 
-  background: #000;
-  color: gold;
-  border: 1px solid gold;
-  border-radius: 6px;
-  text-decoration: none;
+  text-decoration:none;
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: .7px;
+  text-transform: uppercase;
 
   cursor: pointer;
-  transition: background .2s, box-shadow .2s, transform .05s;
+  box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+  transition: transform .12s ease, border-color .12s ease, filter .12s ease;
 }
 
-button,
-input,
-textarea,
-select {
-  font-family: 'Cinzel', serif !important;
-}
-/* Remove native button quirks */
-.guild-actions button {
-  appearance: none;
-  -webkit-appearance: none;
-  background: #000;
-}
-
-/* Hover + active for both */
 .guild-actions a:hover,
-.guild-actions button:hover {
-  background: #221;
-  box-shadow: 0 0 6px rgba(255,215,0,.4);
+.guild-actions button:hover,
+.contrib-btn:hover,
+.small-btn:hover,
+.manage-btn:hover,
+.donate-btn:hover,
+.cancel-btn:hover,
+.confirm-btn:hover,
+.danger-btn:hover,
+.perk-upgrade-btn:hover{
+  border-color: rgba(182,75,46,.45);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
 }
 
 .guild-actions a:active,
-.guild-actions button:active {
-  transform: translateY(1px);
-}
-.guild-xp-bar-wrapper {
-  width: 80%;
-  margin: 10px auto;
+.guild-actions button:active{
+  transform: translateY(0) scale(.99);
 }
 
-.guild-xp-bar {
+/* Primary (confirm/donate/perk) */
+.confirm-btn,
+.donate-btn,
+.perk-upgrade-btn{
+  border-color: rgba(182,75,46,.55);
+  background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
+}
+
+/* Danger */
+.danger-btn{
+  border-color: rgba(122,30,30,.70);
+  background: linear-gradient(180deg, rgba(122,30,30,.90), rgba(70,10,10,.92));
+}
+
+/* Disabled */
+button:disabled,
+.perk-upgrade-btn:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  transform:none;
+  filter:none;
+}
+
+/* =========================
+   TABLE
+========================= */
+.guild-table{
   width: 100%;
-  height: 16px;
-  background: #332200;
-  border: 1px solid gold;
-  border-radius: 8px;
-  overflow: hidden;
+  border-collapse: collapse;
+  margin-top: 10px;
+  position: relative;
+  z-index: 1;
+  overflow:hidden;
+  border-radius: 12px;
 }
 
-.guild-xp-fill {
-  height: 100%;
-  background: linear-gradient(to right, #b8860b, gold);
-  transition: width .4s ease;
-}
-.guild-panel {
-  border: 1px solid gold;
-  background: rgba(0,0,0,0.5);
-  padding: 16px;
-  margin: 20px auto;
-  border-radius: 10px;
-  width: 80%;
-  text-align: center;
+.guild-table th,
+.guild-table td{
+  padding: 10px;
+  border-bottom: 1px solid rgba(43,52,64,.70);
+  text-align:left;
+  font-size: 13px;
 }
 
-.guild-form input {
-  padding: 6px;
-  margin-top: 8px;
-  width: 50%;
-  border-radius: 6px;
-  background: #111;
-  color: gold;
-  border: 1px solid #b8860b;
+.guild-table th{
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+  background: rgba(0,0,0,.18);
 }
 
-.guild-actions button {
-  padding: 8px 16px;
-  background: linear-gradient(#b8860b, gold);
-  border-radius: 8px;
-  font-weight: bold;
-  cursor: pointer;
+.guild-table tr:hover td{
+  background: rgba(0,0,0,.14);
+}
+
+/* =========================
+   FORMS
+========================= */
+.guild-form{
+  position:relative;
+  z-index:1;
   margin-top: 10px;
 }
 
-.guild-actions button:hover {
-  transform: scale(1.05);
-  filter: brightness(1.2);
-}
+.guild-form input,
+.guild-form textarea,
+.modal-window input,
+.modal-window textarea,
+.modal-window select{
+  width:100%;
+  padding: 11px 12px;
+  margin: 10px 0;
 
-
-/* ===== MODAL SYSTEM ===== */
-
-.modal-hidden {
-  display: none !important;
-}
-.modal-visible {
-  display: flex !important;
-}
-#contribute-modal {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(2px);
-  justify-content: center;
-  align-items: center;
-  z-index: 5000;
-}
-#perks-modal {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(2px);
-  justify-content: center;
-  align-items: center;
-  z-index: 5000;
-}
-.modal-window {
-  background: #1a0f05;
-  border: 2px solid gold;
-  padding: 24px;
-  width: 360px;
   border-radius: 10px;
-  box-shadow: 0 0 20px rgba(255,200,50,0.5);
-  text-align: center;
+  border: 1px solid rgba(43,52,64,.95);
+  background: rgba(0,0,0,.22);
+  color: var(--ink);
+
+  outline:none;
+  box-shadow: inset 0 0 12px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.05);
+
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
-.modal-window h2 {
-  color: gold;
-  margin-bottom: 12px;
+.guild-form textarea{
+  min-height: 120px;
+  resize: vertical;
 }
 
-.modal-actions {
-  display: flex;
-  justify-content: space-between;
+.modal-window textarea{
+  resize: vertical;
+}
+
+/* =========================
+   PERKS
+========================= */
+.perk-section{
   margin-top: 14px;
+  text-align:left;
+  position:relative;
+  z-index:1;
 }
-/* ========== SCROLL MODAL LOOK ========== */
 
-.modal-window {
-  background: url('/images/parchment-texture.webp'), #f5deb3;
-  background-size: cover;
-  background-blend-mode: multiply;
+.perk-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 10px;
 
-  border: 4px solid #b38b2e;
+  padding: 10px;
+  margin: 8px 0;
+
   border-radius: 12px;
-  box-shadow: 0 0 25px rgba(0,0,0,0.7);
-
-  padding: 24px;
-  width: 420px;
-  text-align: center;
-
-  transform-origin: center;
-  transform: scaleY(0);
-  opacity: 0;
-  animation: none; /* animation added dynamically */
+  border: 1px solid rgba(43,52,64,.95);
+  background: rgba(0,0,0,.16);
 }
 
-/* Gold shine edges */
-.modal-window::before, 
-.modal-window::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  width: 100%;
-  height: 14px;
-  background: linear-gradient(to right, transparent, gold, transparent);
-  opacity: 0.4;
+.perk-info{
+  color: rgba(215,219,226,.92);
+  font-size: 13px;
 }
 
-.modal-window::before { top: -1px; }
-.modal-window::after { bottom: -1px; }
-
-
-/* ========== OPENING “SCROLL UNROLL” ANIMATION ========== */
-
-@keyframes scrollUnroll {
-  0% {
-    transform: scaleY(0.05);
-    opacity: 0;
-  }
-  60% {
-    transform: scaleY(1.08);
-    opacity: 1;
-  }
-  100% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
-
-/* Apply animation when modal becomes visible */
-.modal-visible .modal-window {
-  animation: scrollUnroll 0.45s ease-out forwards;
-}
-
-/* Closing animation */
-@keyframes scrollRollUp {
-  0% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-  100% {
-    transform: scaleY(0);
-    opacity: 0;
-  }
-}
-
-.modal-closing .modal-window {
-  animation: scrollRollUp 0.3s ease-in forwards;
-}
-
-.contrib-btn,
-.donate-btn,
-.cancel-btn {
-  background: linear-gradient(#302000, #150b00);
-  color: gold;
-  border: 1px solid gold;
-  padding: 8px 14px;
-  cursor: pointer;
-  border-radius: 6px;
-  font-family: Cinzel, serif;
-}
-
-.contrib-btn:hover,
-.donate-btn:hover,
-.cancel-btn:hover {
-  background: gold;
-  color: black;
-}
-.perk-section {
-  margin-top: 15px;
-  text-align: left;
-}
-
-.perk-row {
-  display: flex;
-  justify-content: space-between;
-  background: rgba(0,0,0,0.4);
-  padding: 8px;
-  margin: 6px 0;
-  border: 1px solid gold;
-  border-radius: 6px;
-}
-
-.perk-info {
-  color: gold;
-}
-
-.perk-desc {
+.perk-desc{
   font-size: 12px;
-  color: #d8c89a;
+  color: var(--muted);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
-.perk-upgrade-btn {
-  background: linear-gradient(#554000, #221600);
-  border: 1px solid gold;
-  color: gold;
-  border-radius: 6px;
-  padding: 4px 10px;
+/* =========================
+   ACTIVITY LOG
+========================= */
+.guild-activity{
+  list-style:none;
+  padding: 0;
+  margin: 10px 0 0;
+  font-size: 13px;
+  position:relative;
+  z-index:1;
 }
 
-.perk-upgrade-btn:hover {
-  background: gold;
-  color: black;
+.guild-activity li{
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(43,52,64,.70);
+  line-height: 1.35;
+  color: rgba(215,219,226,.92);
 }
-/* ============================
-   MODAL BACKDROP
-============================ */
-.modal-hidden {
-  display: none;
+.guild-activity li:last-child{ border-bottom:none; }
+
+.activity-time{
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .5px;
 }
 
-.modal-visible {
-  display: flex;
+/* =========================
+   MODALS (your JS uses modal-hidden / modal-visible / modal-closing)
+========================= */
+.modal-hidden{
+  display:none !important;
 }
 
-/* Backdrop */
-#manage-member-modal,
-#contribute-modal,
-#perks-modal,
-#log-modal,
-#announcement-modal {
+.modal-visible,
+.modal-closing{
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  z-index: 9999;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: rgba(0,0,0,.72);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index: 100000;
 }
 
 /* Modal window */
-.modal-window {
-  background-image: "images/parchment-texture.webp";
-  border: 2px solid #c8a34b;
-  border-radius: 10px;
-  padding: 20px;
-  color: #f5e1a4;
-  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
-}
-.guild-activity {
-  list-style: none;
-  padding: 0;
-  font-size: 14px;
-}
+.modal-window{
+  width: min(600px, 92vw);
+  max-height: 80vh;
+  overflow:auto;
 
-.guild-activity li {
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
+  border-radius: 14px;
+  border: 1px solid rgba(43,52,64,.95);
 
-.activity-time {
-  color: #999;
-  font-size: 12px;
-}
-.guild-announcement {
-  background: rgba(0,0,0,0.4);
-  border: 1px solid #c8a34b;
+  background:
+    radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
+    linear-gradient(180deg, var(--panel), var(--panel2));
+
+  box-shadow: 0 22px 60px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.06);
   padding: 14px;
-  border-radius: 8px;
-  margin-bottom: 15px;
+  position:relative;
 }
 
-.announcement-header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  margin-bottom: 8px;
+.modal-window::before{
+  content:"";
+  position:absolute;
+  inset:10px;
+  pointer-events:none;
+  border: 0;
+  border-radius: 12px;
 }
 
-.announcement-title {
-  flex: 1;
-  text-align: center; /* 👈 centers the title */
+.modal-window h2{
+  text-align:center;
+  margin: 0 0 10px;
+  font-weight: 900;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--bone);
+  position:relative;
+  z-index:1;
 }
 
-
-.announcement-body {
-  text-align: center;          /* 👈 center text */
-  white-space: pre-wrap;
-  font-size: 15px;
-  line-height: 1.5;
+.modal-actions{
+  display:flex;
+  gap: 10px;
+  justify-content:flex-end;
+  margin-top: 10px;
+  position:relative;
+  z-index:1;
 }
 
-.announcement-meta {
-  text-align: center;          /* 👈 optional, looks clean */
-  font-size: 12px;
-  color: #aaa;
-  margin-top: 6px;
+/* Open/close animation (keeps your JS timing: 300ms close) */
+.modal-visible .modal-window{
+  animation: modalIn .20s ease both;
 }
-.modal-window h2 {
-  text-align: center;
-  margin-bottom: 12px;
+.modal-closing .modal-window{
+  animation: modalOut .30s ease both;
+}
+
+@keyframes modalIn{
+  from{ opacity:0; transform: translateY(10px) scale(.98); }
+  to{ opacity:1; transform: translateY(0) scale(1); }
+}
+@keyframes modalOut{
+  from{ opacity:1; transform: translateY(0) scale(1); }
+  to{ opacity:0; transform: translateY(10px) scale(.98); }
+}
+
+/* Responsive table simplification */
+@media (max-width: 720px){
+  .guild-table th:nth-child(3),
+  .guild-table td:nth-child(3){
+    display:none;
+  }
 }

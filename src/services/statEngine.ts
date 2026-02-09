@@ -43,6 +43,13 @@ export type DerivedStats = BasePlayerStats & {
   dodgeChance: number;
 };
 
+export type PerkMultipliers = {
+  damageMult?: number; // 1.00 = no change, 1.05 = +5%
+  hpMult?: number;
+  critMult?: number;
+};
+
+
 function n(v: any, fallback = 0) {
   const x = Number(v);
   return Number.isFinite(x) ? x : fallback;
@@ -51,7 +58,8 @@ function n(v: any, fallback = 0) {
 export function computePlayerStats(
   base: BasePlayerStats,
   gearMods: ItemMods[] = [],
-  buffMods: BuffMods[] = []
+  buffMods: BuffMods[] = [],
+  perkMults: PerkMultipliers = {} // ✅ new
 ): DerivedStats {
   // 1) start from base
   const final: any = { ...base };
@@ -94,28 +102,37 @@ export function computePlayerStats(
 
 
 
-  // 3) apply derived scaling rules (FIRST VERSION)
-  // Vitality => +HP
-  const vitBonusHP = final.vitality * 10;          // tune later
-  // Intellect => +SP + spell power
-  const intBonusSP = final.intellect * 5;          // tune later
-  // Agility → crit chance bonus
-  const agilityCritBonus = final.agility * 0.001; // 0.1% per agility
+  // 3) derived scaling rules
+  const vitBonusHP = final.vitality * 10;
+  const intBonusSP = final.intellect * 5;
+  const agilityCritBonus = final.agility * 0.001;
+
   final.maxhp = Math.max(1, final.maxhp + vitBonusHP);
   final.maxspoints = Math.max(1, final.maxspoints + intBonusSP);
-  final.crit = Math.min(
-    0.5, // 50% hard cap
-    final.crit + agilityCritBonus
-);
+
+  final.crit = Math.min(0.5, final.crit + agilityCritBonus);
+  // ✅ 3.5) apply perk multipliers (AFTER totals exist)
+  const damageMult = n(perkMults.damageMult, 1);
+  const hpMult = n(perkMults.hpMult, 1);
+  const critMult = n(perkMults.critMult, 1);
+
+  // “Damage” perk → multiply attack (until you have a dedicated damage stat)
+  final.attack = Math.max(0, Math.round(final.attack * damageMult));
+
+
+  // HP perk → multiply maxhp
+  final.maxhp = Math.max(1, Math.floor(final.maxhp * hpMult));
+
+  // Crit perk → multiply crit chance fraction
+  final.crit = Math.min(0.5, final.crit * critMult);
+
   // clamp current resources to new maxes
-  final.hpoints = Math.min(final.hpoints, final.maxhp);
-  final.spoints = Math.min(final.spoints, final.maxspoints);
+  final.hpoints = Math.min(n(final.hpoints), final.maxhp);
+  final.spoints = Math.min(n(final.spoints), final.maxspoints);
 
-  // spell power (simple start)
-  final.spellPower = 1 + final.intellect * 0.05;   // multiplier, tune later
-
-  // agility placeholder (we’ll define this next step)
-  final.dodgeChance = Math.max(0, Math.min(0.35, final.agility * 0.002)); // 0–35%
+  // spell power / dodge unchanged
+  final.spellPower = 1 + final.intellect * 0.05;
+  final.dodgeChance = Math.max(0, Math.min(0.35, final.agility * 0.002));
 
   return final as DerivedStats;
 }

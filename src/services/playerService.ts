@@ -29,6 +29,42 @@ function asArchetype(v: any): Archetype {
   return ARCHETYPES.includes(v) ? v : "Arcanist"; // safe default
 }
 
+async function getGuildPerkMultipliers(playerId: number) {
+  const [rows]: any = await db.query(`
+    SELECT
+      pd.effect_type,
+      pd.effect_value,
+      gp.level
+    FROM guild_members gm
+    LEFT JOIN guild_perks gp ON gp.guild_id = gm.guild_id
+    LEFT JOIN perk_definitions pd ON pd.id = gp.perk_id
+    WHERE gm.player_id = ?
+      AND gp.level IS NOT NULL
+      AND pd.effect_type IS NOT NULL
+  `, [playerId]);
+
+  let damagePct = 0;
+  let hpPct = 0;
+  let critPct = 0;
+
+  for (const r of rows || []) {
+    const perLevel = Number(r.effect_value) || 0;     // ex: 1
+    const lvl = Number(r.level) || 0;                // ex: 3
+    const totalPct = perLevel * lvl;                 // ex: 3%
+
+    switch (r.effect_type) {
+      case "damage_pct": damagePct += totalPct; break;
+      case "hp_pct":     hpPct += totalPct; break;
+      case "crit_pct":   critPct += totalPct; break;
+    }
+  }
+
+  return {
+    damageMult: 1 + damagePct / 100,
+    hpMult: 1 + hpPct / 100,
+    critMult: 1 + critPct / 100
+  };
+}
 
 
 /**
@@ -95,9 +131,15 @@ export async function getFinalPlayerStats(
 
 
   // ======================
+  // GUILD PERK MULTS (percent)
+  // ======================
+  const perkMults = await getGuildPerkMultipliers(playerId);
+
+  // ======================
   // FINAL COMPUTE (ONCE)
   // ======================
-  const computed = computePlayerStats(base, gearMods, buffMods);
+  const computed = computePlayerStats(base, gearMods, buffMods, perkMults);
+
 
   // ======================
   // GUILD INFO

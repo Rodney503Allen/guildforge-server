@@ -1,4 +1,79 @@
 let pendingCombatEnemy = null;
+let lastMoveDir = null;
+let travelMessageTimer = null;
+
+// ✅ Movement cooldown
+const MOVE_COOLDOWN_MS = 500;
+let canMove = true;
+let moveCooldownTimer = null;
+
+let lastMoveAt = 0;
+let moveLock = false;
+
+// encounter pacing
+const ENCOUNTER_CHANCE = 0.01;     // 8% per step
+const ENCOUNTER_GAP_STEPS = 3;     // can't spawn again for 3 moves
+let stepsSinceEncounter = 999;
+
+// =======================
+// HUD/Nav functions
+// =======================
+function updateNavHUD(data) {
+  const haven = data?.poi?.haven;
+  const dungeon = data?.poi?.dungeon;
+
+  // Haven
+  const havenName = document.getElementById("nav-haven-name");
+  const havenDist = document.getElementById("nav-haven-dist");
+  const havenArrow = document.getElementById("nav-haven-arrow");
+
+  if (havenName) havenName.textContent = haven?.name ?? "—";
+  if (havenDist) havenDist.textContent = haven ? `${haven.distance} tiles` : "— tiles";
+  if (havenArrow) havenArrow.textContent = haven?.arrow ?? "•";
+
+  // Dungeon
+  const dunName = document.getElementById("nav-dungeon-name");
+  const dunDist = document.getElementById("nav-dungeon-dist");
+  const dunArrow = document.getElementById("nav-dungeon-arrow");
+
+  if (dungeon) {
+    if (dunName) dunName.textContent = dungeon.name ?? "Unknown";
+    if (dunDist) dunDist.textContent = `${dungeon.distance} tiles`;
+    if (dunArrow) dunArrow.textContent = dungeon.arrow ?? "•";
+  } else {
+    if (dunName) dunName.textContent = "Coming Soon";
+    if (dunDist) dunDist.textContent = "—";
+    if (dunArrow) dunArrow.textContent = "•";
+  }
+
+  // Travel flavor
+  const flavor = document.getElementById("movement-flavor");
+  if (flavor) flavor.textContent = data?.flavor ?? "You press onward.";
+}
+
+function animateStep(dir) {
+  const grid = document.getElementById("Grid");
+  if (!grid) return;
+
+  // quick nudge in the opposite direction (feels like the world shifts as you move)
+  const map = { north:[0, 10], south:[0, -10], west:[10,0], east:[-10,0] };
+  const v = map[dir] || [0,0];
+
+  grid.animate(
+    [
+      { transform: `translate(${v[0]}px, ${v[1]}px)` },
+      { transform: "translate(0px, 0px)" }
+    ],
+    { duration: 140, easing: "cubic-bezier(.2,.8,.2,1)" }
+  );
+}
+function dirToArrow(dir){
+  return dir === "north" ? "↑" :
+         dir === "south" ? "↓" :
+         dir === "west"  ? "←" :
+         dir === "east"  ? "→" : "";
+}
+
 // =======================
 // WORLD MOVEMENT CONTROLS
 // =======================
@@ -71,9 +146,11 @@ async function refreshWorld() {
       grid.innerHTML += `
         <div class="tile ${t.terrain} ${isPlayer ? "player" : ""}">
           <div class="owner">${owner}</div>
-          <div class="region">${t.region_name}</div>
+          ${isPlayer && lastMoveDir ? `<div class="move-arrow">${lastMoveDir}</div>` : ""}
         </div>
       `;
+
+
       const currentTile = tileMap[`${player.map_x},${player.map_y}`];
 const enterBtn = document.getElementById("enter-town-btn");
 
@@ -169,28 +246,45 @@ function queueCombatOpen() {
 async function moveWorld(dir) {
   if (isInCombat()) return;
 
-  try {
-    const res = await fetch(`/world/move/${dir}`, {
-      credentials: "include"
-    });
+  // movement cooldown (prevents spam)
+  const now = Date.now();
+  if (moveLock || (now - lastMoveAt) < MOVE_COOLDOWN_MS) return;
 
+  moveLock = true;
+  lastMoveAt = now;
+
+  try {
+    const res = await fetch(`/world/move/${dir}`, { credentials: "include" });
     const data = await res.json();
     if (!data.success) return;
 
-    // ✅ Fully resolve world FIRST
+    lastMoveDir = dirToArrow(dir);
+    animateStep(dir);
+
     await refreshWorld();
     loadRegionName();
 
-    // ✅ Schedule combat AFTER world is stable
-    if (data.inCombat && data.enemy) {
-      pendingCombatEnemy = data.enemy;
-      queueCombatOpen();
-    }
+    updateNavHUD(data);
+
+    // ---- encounter gating client-side (optional) ----
+    // (best is server-side, but this is fast to test)
+// If the server says you're in combat, always open it.
+if (data.inCombat && data.enemy) {
+  pendingCombatEnemy = data.enemy;
+  queueCombatOpen();
+}
+
 
   } catch (err) {
     console.error("World movement failed", err);
+  } finally {
+    setTimeout(() => { moveLock = false; }, MOVE_COOLDOWN_MS);
   }
 }
+
+
+
+
 
 
 

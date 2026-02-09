@@ -1,9 +1,8 @@
 // church.routes.ts
 import express from "express";
 import { db } from "./db";
-import { computePlayerStats, type ItemMods, type BasePlayerStats } from "./services/statEngine";
+import { getFinalPlayerStats } from "./services/playerService";
 
-import { getActiveBuffs } from "./services/buffService";
 
 
 const router = express.Router();
@@ -58,40 +57,12 @@ async function loadBasePlayer(pid: number): Promise<BasePlayerRow | null> {
   };
 }
 
-async function loadGearMods(pid: number): Promise<ItemMods[]> {
-  const [gear]: any = await db.query(
-    `
-    SELECT i.*
-    FROM inventory inv
-    JOIN items i ON i.id = inv.item_id
-    WHERE inv.player_id=? AND inv.equipped=1
-    `,
-    [pid]
-  );
 
-  return (gear || []).map((g: any) => ({
-    attack: Number(g.attack || 0),
-    defense: Number(g.defense || 0),
-    agility: Number(g.agility || 0),
-    vitality: Number(g.vitality || 0),
-    intellect: Number(g.intellect || 0),
-    crit: Number(g.crit || 0),
-  }));
+async function getFinalStatsForPlayer(pid: number) {
+  const player = await getFinalPlayerStats(pid);
+  return player; // includes maxhp/maxspoints already computed with guild perks
 }
 
-async function loadBuffMods(pid: number): Promise<ItemMods[]> {
-  const buffs = await getActiveBuffs(pid);
-  return (buffs || []).map((b: any) => ({
-    [b.stat]: Number(b.value || 0),
-  })) as ItemMods[];
-}
-
-async function getFinalStatsForPlayer(pid: number, base: BasePlayerRow) {
-  const gearMods = await loadGearMods(pid);
-  const buffMods = await loadBuffMods(pid);
-  // IMPORTANT: compute from RAW base + gear + buffs (no double-derivation)
-  return computePlayerStats(base as BasePlayerStats, gearMods, buffMods);
-}
 
 // =======================
 // SANCTUARY PAGE
@@ -100,16 +71,17 @@ router.get("/", async (req, res) => {
   const pid = (req.session as any).playerId as number;
   if (!pid) return res.redirect("/login.html");
 
-  const base = await loadBasePlayer(pid);
-  if (!base) return res.redirect("/login.html");
+const base = await loadBasePlayer(pid);
+if (!base) return res.redirect("/login.html");
 
-  const stats = await getFinalStatsForPlayer(pid, base);
-  if (!stats) return res.redirect("/login.html");
+const stats = await getFinalStatsForPlayer(pid);
+if (!stats) return res.redirect("/login.html");
 
-  // Clamp current values to computed max (prevents showing > max)
-  let hpoints = Math.min(base.hpoints, stats.maxhp);
-  let spoints = Math.min(base.spoints, stats.maxspoints);
-  let revive_at: number | null = base.revive_at;
+// use computed maxes
+let hpoints = Math.min(base.hpoints, stats.maxhp);
+let spoints = Math.min(base.spoints, stats.maxspoints);
+let revive_at: number | null = base.revive_at;
+
 
   // =======================
   // START TIMER AUTOMATICALLY IF DEAD
@@ -172,85 +144,330 @@ router.get("/", async (req, res) => {
     }
   }
 
-  res.send(`
+res.send(`
 <!DOCTYPE html>
 <html>
 <head>
+  <title>Sanctuary of Light</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/statpanel.css">
+  <style>
+    /* =========================
+       CHURCH / SANCTUARY — Grit Iron/Ember Theme
+       ========================= */
+    :root{
+      --bg0:#07090c;
+      --bg1:#0b0f14;
+      --panel:#0e131a;
+      --panel2:#0a0f15;
 
-<title>Sanctuary of Light</title>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
-<style>
-body { 
-  background:#050509; 
-  color:#f5e1a4; 
-  font-family:Cinzel, serif;
-  text-align:center;
-}
-.church {
-  width:430px;
-  margin:80px auto;
-  border:2px solid gold;
-  background:rgba(0,0,0,.75);
-  padding:20px;
-  border-radius:12px;
-  box-shadow:0 0 25px gold;
-}
-button {
-  width:100%;
-  padding:12px;
-  margin-top:8px;
-  background:#6b4226;
-  border:2px solid gold;
-  color:white;
-  font-weight:bold;
-  font-size:16px;
-  cursor:pointer;
-}
-button:disabled {
-  opacity:0.5;
-  cursor:not-allowed;
-}
-button:hover { box-shadow:0 0 12px gold; }
-.stat { margin-top:8px; }
-a { color:gold; display:block; margin-top:15px; }
-</style>
+      --ink:#d7dbe2;
+      --muted:#9aa3af;
+
+      --iron:#2b3440;
+      --ember:#b64b2e;
+      --blood:#7a1e1e;
+      --bone:#c9b89a;
+
+      --shadow: rgba(0,0,0,.60);
+      --frame: rgba(255,255,255,.04);
+      --glass: rgba(0,0,0,.18);
+    }
+
+    *{ box-sizing:border-box; }
+
+    body{
+      margin:0;
+      color: var(--ink);
+      font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
+      text-align:center;
+
+      background:
+        radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
+        radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
+        linear-gradient(180deg, var(--bg1), var(--bg0));
+    }
+
+    /* grit overlay */
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      opacity:.10;
+      background:
+        repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
+        repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
+      mix-blend-mode: overlay;
+    }
+
+    .wrap{
+      width: min(980px, 94vw);
+      margin: 0 auto;
+      padding: 22px 0 28px;
+    }
+
+    .church{
+      position:relative;
+      width: min(520px, 94vw);
+      margin: 18px auto 14px;
+      padding: 18px;
+      border-radius: 12px;
+
+      border: 1px solid rgba(43,52,64,.95);
+      background:
+        radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
+        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
+        linear-gradient(180deg, var(--panel), var(--panel2));
+
+      box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
+    }
+
+    .church::before{
+      content:"";
+      position:absolute;
+      inset:10px;
+      pointer-events:none;
+      border: 0;
+      border-radius: 10px;
+    }
+
+    h2{
+      margin: 0 0 8px;
+      letter-spacing: 2.6px;
+      text-transform: uppercase;
+      color: var(--bone);
+      text-shadow:
+        0 0 10px rgba(182,75,46,.20),
+        0 10px 18px rgba(0,0,0,.85);
+      font-size: 20px;
+      position:relative;
+      z-index:1;
+    }
+
+    .quote{
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+      position:relative;
+      z-index:1;
+    }
+
+    .status{
+      margin: 10px 0 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(43,52,64,.95);
+      background: rgba(0,0,0,.18);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size: 13px;
+      color: var(--ink);
+      position:relative;
+      z-index:1;
+    }
+
+    .status.danger{
+      border-color: rgba(122,30,30,.65);
+      box-shadow: 0 0 0 1px rgba(122,30,30,.14);
+    }
+    .status.danger b{ color: #ffd6d6; }
+
+    .rule{
+      height:1px;
+      border:none;
+      margin: 14px 0;
+      background: linear-gradient(90deg, transparent, rgba(182,75,46,.65), transparent);
+      opacity:.85;
+      position:relative;
+      z-index:1;
+    }
+
+    .stats{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin: 6px 0 12px;
+      position:relative;
+      z-index:1;
+      text-align:left;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    .stat{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(43,52,64,.95);
+      background: rgba(0,0,0,.18);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .stat .k{
+      color: var(--muted);
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      font-weight: 800;
+      font-size: 12px;
+      display:flex;
+      align-items:center;
+      gap: 8px;
+    }
+    .stat .v{
+      color: rgba(255,255,255,.92);
+      font-weight: 900;
+    }
+
+    .actions{
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+      position:relative;
+      z-index:1;
+      margin-top: 10px;
+    }
+
+    button{
+      width:100%;
+      padding: 12px 12px;
+
+      border-radius: 10px;
+      border: 1px solid rgba(43,52,64,.95);
+
+      background: rgba(0,0,0,.18);
+      color: var(--ink);
+
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+
+      cursor:pointer;
+      box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+      transition: transform .12s ease, border-color .12s ease, filter .12s ease;
+    }
+
+    button:hover{
+      border-color: rgba(182,75,46,.45);
+      transform: translateY(-1px);
+    }
+
+    button:active{ transform: translateY(0px) scale(.99); }
+
+    button:disabled{
+      opacity: .55;
+      cursor:not-allowed;
+      transform:none;
+      filter:none;
+    }
+
+    /* Make the REVIVE button “primary” */
+    .primary{
+      border-color: rgba(182,75,46,.55);
+      background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
+      color: #f3e7db;
+      box-shadow: 0 14px 28px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.12);
+    }
+    .primary:hover{ filter: brightness(1.06); }
+
+    a{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap: 8px;
+
+      margin-top: 14px;
+      padding: 10px 12px;
+
+      border-radius: 10px;
+      border: 1px solid rgba(43,52,64,.95);
+      background: rgba(0,0,0,.18);
+      color: #f3e7db;
+
+      text-decoration:none;
+
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+
+      box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+      transition: transform .12s ease, border-color .12s ease;
+      position:relative;
+      z-index:1;
+    }
+
+    a:hover{
+      border-color: rgba(182,75,46,.45);
+      transform: translateY(-1px);
+    }
+
+    /* Mobile */
+    @media (max-width: 520px){
+      .church{ margin-top: 70px; padding: 16px; }
+      h2{ font-size: 18px; letter-spacing: 2px; }
+    }
+      
+  </style>
 </head>
 <body>
 
-<div id="statpanel-root"></div>
+  <div id="statpanel-root"></div>
 
-<div class="church">
-  <h2>Sanctuary of Light</h2>
-  <p><i>"Rest... your soul lingers here."</i></p>
+  <div class="wrap">
+    <div class="church">
+      <h2>Sanctuary of Light</h2>
+      <p class="quote"><i>"Rest... your soul lingers here."</i></p>
 
-  ${deadMessage}
-  ${waitMessage}
+      ${isDead ? `<div class="status danger">${deadMessage}${waitMessage}</div>` : ""}
 
-  <div class="stat">❤️ Health: ${hpoints} / ${stats.maxhp}</div>
-  <div class="stat">✨ Spirit: ${spoints} / ${stats.maxspoints}</div>
-  <div class="stat">💰 Gold: ${base.gold}</div>
+      <hr class="rule">
 
-  <form method="POST" action="/church/heal">
-    <button ${disableButtons}>Restore Health (10 gold)</button>
-  </form>
+      <div class="stats">
+        <div class="stat">
+          <div class="k">❤️ Health</div>
+          <div class="v">${hpoints} / ${stats.maxhp}</div>
+        </div>
+        <div class="stat">
+          <div class="k">✨ Spirit</div>
+          <div class="v">${spoints} / ${stats.maxspoints}</div>
+        </div>
+        <div class="stat">
+          <div class="k">💰 Gold</div>
+          <div class="v">${base.gold}</div>
+        </div>
+      </div>
 
-  <form method="POST" action="/church/restore">
-    <button ${disableButtons}>Restore Spirit (10 gold)</button>
-  </form>
+      <div class="actions">
+        <form method="POST" action="/church/heal">
+          <button ${disableButtons}>Restore Health (10 gold)</button>
+        </form>
 
-  <form method="POST" action="/church/revive">
-    <button>Revival Blessing (${REVIVE_COST} gold)</button>
-  </form>
+        <form method="POST" action="/church/restore">
+          <button ${disableButtons}>Restore Spirit (10 gold)</button>
+        </form>
 
-  ${isDead ? "" : `<a href="/town">⬅ Return to Town</a>`}
-</div>
+        <form method="POST" action="/church/revive">
+          <button class="primary">Revival Blessing (${REVIVE_COST} gold)</button>
+        </form>
+      </div>
 
-<link rel="stylesheet" href="/statpanel.css">
-<script src="/statpanel.js"></script>
-
+      ${isDead ? "" : `<a href="/town">⬅ Return to Town</a>`}
+    </div>
+  </div>
+  <script src="/statpanel.js"></script>
+  
 </body>
 </html>
-  `);
+`);
+
 });
 
 // =======================
@@ -263,7 +480,8 @@ router.post("/heal", async (req, res) => {
   const base = await loadBasePlayer(pid);
   if (!base) return res.redirect("/login.html");
 
-  const stats = await getFinalStatsForPlayer(pid, base);
+  const stats = await getFinalStatsForPlayer(pid);
+
   if (!stats) return res.redirect("/login.html");
 
   if (base.hpoints <= 0) return res.redirect("/church");
@@ -287,7 +505,8 @@ router.post("/restore", async (req, res) => {
   const base = await loadBasePlayer(pid);
   if (!base) return res.redirect("/login.html");
 
-  const stats = await getFinalStatsForPlayer(pid, base);
+  const stats = await getFinalStatsForPlayer(pid);
+
   if (!stats) return res.redirect("/login.html");
 
   if (base.hpoints <= 0) return res.redirect("/church");
@@ -311,7 +530,8 @@ router.post("/revive", async (req, res) => {
   const base = await loadBasePlayer(pid);
   if (!base) return res.redirect("/login.html");
 
-  const stats = await getFinalStatsForPlayer(pid, base);
+  const stats = await getFinalStatsForPlayer(pid);
+
   if (!stats) return res.redirect("/login.html");
 
   if (base.hpoints > 0) return res.redirect("/church");

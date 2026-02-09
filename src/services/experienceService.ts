@@ -26,9 +26,9 @@ export async function checkAndApplyLevelUp(playerId: number) {
   if (!leveledUp) return null;
 
   // level rewards
-  const hpGain = 10;
-  const spGain = 5;
-  const statPoints = 2;
+  const hpGain = 25;
+  const spGain = 10;
+  const statPoints = 5;
 
   await db.query(`
     UPDATE players

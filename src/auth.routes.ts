@@ -1,6 +1,7 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import { db } from "./db";
+import { getFinalPlayerStats } from "./services/playerService";
 
 const router = express.Router();
 
@@ -62,47 +63,131 @@ res.json({ success: true, redirect });
 // REGISTER
 // =======================
 router.post("/register", async (req, res) => {
+  try {
+    const { name, email, password, confirm, pclass } = req.body;
 
-  const { name, email, password, confirm, pclass } = req.body;
+    if (!name || !password || !confirm || !pclass) {
+      return res.json({ error: "Missing fields" });
+    }
 
-  if (!name || !password || !confirm || !pclass)
-    return res.json({ error: "Missing fields" });
+    if (password !== confirm) {
+      return res.json({ error: "Passwords do not match" });
+    }
 
-  if (password !== confirm)
-    return res.json({ error: "Passwords do not match" });
+    const [[existing]]: any = await db.query(
+      "SELECT id FROM players WHERE name=? LIMIT 1",
+      [name]
+    );
 
-  const [[existing]]: any = await db.query(
-    "SELECT id FROM players WHERE name=? LIMIT 1",
-    [name]
-  );
+    if (existing) {
+      return res.json({ error: "Username already taken" });
+    }
 
-  if (existing)
-    return res.json({ error: "Username already taken" });
+    // Pull FULL base stats from classes
+    const [[base]]: any = await db.query(
+      `
+      SELECT
+        name,
+        archetype,
+        attack,
+        defense,
+        agility,
+        vitality,
+        intellect,
+        crit,
+        hpoints,
+        spoints
+      FROM classes
+      WHERE name=?
+      LIMIT 1
+      `,
+      [pclass]
+    );
 
-  const [[base]]: any = await db.query(
-    "SELECT * FROM classes WHERE name=?",
-    [pclass]
-  );
+    if (!base) {
+      return res.json({ error: "Invalid class" });
+    }
 
-  if (!base)
-    return res.json({ error: "Invalid class" });
+    const hash = await bcrypt.hash(password, 10);
 
-  const hash = await bcrypt.hash(password, 10);
+const [result]: any = await db.query(
+  `
+  INSERT INTO players
+  (
+    name,
+    email,
+    password,
+    level,
+    exper,
 
-  await db.query(`
-    INSERT INTO players
-    (name,email,password,level,exper,attack,defense,hpoints,maxhp,spoints,maxspoints,gold,pclass,location)
-    VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, 100, ?, 'Crocania')
-  `, [
-    name, email, hash,
-    base.attack, base.defense,
-    base.hpoints, base.hpoints,
-    base.spoints, base.spoints,
+    attack,
+    defense,
+    agility,
+    vitality,
+    intellect,
+    crit,
+
+    hpoints,
+    maxhp,
+    spoints,
+    maxspoints,
+
+    gold,
+    pclass,
+    location
+  )
+  VALUES
+  (
+    ?, ?, ?, 1, 0,
+    ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?,
+    100, ?, 'Crocania'
+  )
+  `,
+  [
+    name,
+    email || null,
+    hash,
+
+    base.attack,
+    base.defense,
+    base.agility,
+    base.vitality,
+    base.intellect,
+    base.crit,
+
+    base.hpoints,
+    base.hpoints,
+    base.spoints,
+    base.spoints,
+
     pclass
-  ]);
+  ]
+);
 
-  res.json({ success: true });
+    const playerId = result.insertId;
+
+    const p = await getFinalPlayerStats(playerId);
+    if (!p) throw new Error("Failed to compute stats for new player");
+
+    // full resources on creation
+    await db.query(
+      `UPDATE players
+      SET hpoints = ?, spoints = ?
+      WHERE id = ?`,
+      [p.maxhp, p.maxspoints, playerId]
+    );
+
+
+
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("REGISTER ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
+
 
 
 // =======================

@@ -1,587 +1,531 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap');
+/* =========================
+   GUILDFORGE STATPANEL v2
+   - same HTML/JS functionality
+   - gritty iron/ember theme
+   - responsive layout
+========================= */
+
+/* If statpanel is loaded on pages that don't have your site :root tokens,
+   these provide safe fallbacks. If your main site defines these already,
+   these values will simply be overridden by the page's :root. */
+:root{
+  --bg0:#07090c;
+  --bg1:#0b0f14;
+  --panel:#0e131a;
+  --panel2:#0a0f15;
+
+  --ink:#d7dbe2;
+  --muted:#9aa3af;
+
+  --iron:#2b3440;
+  --iron2:#1b232d;
+
+  --ember:#b64b2e;
+  --blood:#7a1e1e;
+  --bone:#c9b89a;
+
+  --shadow: rgba(0,0,0,.60);
+
+  /* statpanel-specific */
+  --sp-height: 92px;
+  --sp-pad-y: 10px;
+  --sp-pad-x: 18px;
+  --sp-radius: 0px;
+}
+
+/* PAGE OFFSET (keeps your existing behavior but makes it responsive) */
+body{
+  padding-top: var(--sp-height);
+  margin: 0;
+}
 
 /* MAIN PANEL */
-#statpanel {
+#statpanel{
   position: fixed;
   inset: 0 0 auto 0;
-  height: 92px;
-  background: linear-gradient(to bottom, #1b1205, #050200);
-  border-bottom: 3px solid #c8a34b;
-  box-shadow: 0 6px 12px rgba(0,0,0,.9);
+  height: var(--sp-height);
   z-index: 3000;
-  text-align: center;
+
+  display: block;
   overflow: visible;
-  font-family: 'Cinzel', serif;
-  color: #f5e6b2;
-  padding: 4px 0;
-  top: 0;
   pointer-events: auto;
+
+  color: var(--ink);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+
+  background:
+    radial-gradient(900px 240px at 20% 0%, rgba(182,75,46,.16), transparent 60%),
+    linear-gradient(180deg, rgba(14,19,26,.98), rgba(9,12,16,.94));
+
+  border-bottom: 1px solid var(--iron);
+  box-shadow: 0 14px 34px var(--shadow);
+
+  padding: var(--sp-pad-y) var(--sp-pad-x);
+}
+
+/* Subtle inner frame */
+#statpanel::before{
+  content:"";
+  position:absolute;
+  inset:10px;
+  pointer-events:none;
+  border:0;
+  border-radius: 10px;
 }
 
 /* GRID */
-.statpanel-grid {
+.statpanel-grid{
   display: grid;
   grid-template-columns: auto;
   align-items: center;
   width: 100%;
-}
-
-.statpanel-grid > * {
-  align-self: center;
-}
-.right-actions {
-  position: absolute;
-  top: 50%;
-  right: 24px;               /* distance from the right edge; set to 0 if you want truly flush */
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Generic button style */
-.action-btn {
-  background: linear-gradient(#ffd700, #ff9d00);
-  color: #000;
-  padding: 8px 14px;
-  border-radius: 10px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  box-shadow: 0 0 12px gold;
-  text-decoration: none;
-  transition: 0.15s;
-}
-
-.action-btn:hover {
-  background: gold;
-  box-shadow: 0 0 18px gold;
-  transform: scale(1.05);
-  color: black;
-}
-/* ===============================
-   LOGOUT BUTTON (PRIMARY ACTION)
-=============================== */
-
-#logout-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  padding: 10px 18px;
-  min-width: 110px;
-
-  font-size: 14px;
-  font-weight: bold;
-  letter-spacing: 1.5px;
-
-  color: #f5d27d;
-  text-decoration: none;
-
-  background: linear-gradient(to bottom, #3a1a10, #1a0804);
-  border: 2px solid #b14a2f;
-  border-radius: 10px;
-
-  box-shadow:
-    inset 0 0 6px rgba(255,140,80,.25),
-    0 0 10px rgba(180,60,40,.35);
-
-  transition: all 0.18s ease;
-}
-
-/* Hover */
-#logout-btn:hover {
-  background: linear-gradient(to bottom, #b14a2f, #5a1e10);
-  color: #000;
-
-  box-shadow:
-    0 0 16px rgba(255,90,60,.8),
-    inset 0 0 8px rgba(255,255,255,.35);
-
-  transform: scale(1.08);
-}
-
-/* Active (click) */
-#logout-btn:active {
-  transform: scale(0.96);
-  box-shadow: inset 0 0 10px rgba(0,0,0,.8);
-}
-
-
-
-
-#statpanel-logo {
-  position: absolute;
-  left: 50%;
-  top: 30%; /* adjust for vertical placement */
-  transform: translateX(-50%);
-  text-align: center;
-  pointer-events: none;
-}
-
-/* PLAYER INFO */
-.player-info {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  position: relative;
-}
-
-.player-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px 12px;
-}
-
-.player-grid div {
-  font-size: 14px;
-  color: #f8e8b8;
-  white-space: nowrap;
-}
-
-/* GUILD */
-.guild-banner {
-  background: linear-gradient(#320000, #120000);
-  border: 1px solid gold;
-  padding: 4px;
-  text-align: center;
-  font-size: 14px;
-  font-weight: bold;
-  border-radius: 6px;
-  box-shadow: inset 0 0 6px rgba(255,215,0,.5);
-}
-
-/* BARS */
-.bars {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-width: 380px;   /* lock bar size */
-  width: 380px;
-  position: relative;
-}
-
-.bar-row {
-  display: grid;
-  grid-template-columns: 36px 1fr;
-  gap: 8px;
-  align-items: center;
-}
-
-.bar-label {
-  color: gold;
-  font-size: 12px;
-  text-align: right;
-}
-
-/* BAR */
-.bar {
-  position: relative;
-  height: 16px;
-  width: 100%;
-  background: #120c04;
-  border-radius: 999px;
-  border: 1px solid #5a4521;
-  overflow: hidden;
-  box-shadow: inset 0 0 6px rgba(0,0,0,.9);
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-/* FILLS */
-.hp-inner,
-.sp-inner,
-.xp-inner {
-  position: absolute;
-  left: 0;
-  top: 0;
   height: 100%;
 }
-.hp-inner {
-  height: 100%;
-  background: linear-gradient(to right, #8b0000, red);
-}
-.sp-inner {
-  height: 100%;
-  background: linear-gradient(to right, #0033aa, #00aeff);
-}
-.xp-inner {
-  height: 100%;
-  background: linear-gradient(to right, #b8860b, gold);
-}
+.statpanel-grid > *{ align-self:center; }
 
-/* TEXT IN BAR */
-.bar-text {
-  position: relative;       /* <-- sits above the fill now */
-  z-index: 2;
-  width: 100%;
-  text-align: center;
-  font-size: 12px;
-  line-height: 16px;
-  color: #fff6cc;
-  text-shadow: 0 0 4px black;
-  font-weight: bold;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-/* =======================
-   CENTER LOGO
-======================= */
-
-.center-logo {
-  display: grid;
-  place-items: center;
-  height: 100%;
-  pointer-events: none;
-  justify-self: center;
-  align-self: center;
-}
-
-.logo-text {
-  font-size: 32px;
-  font-weight: bold;
-  letter-spacing: 4px;
-  color: gold;
-  line-height: 1;
-  white-space: nowrap;
-  text-shadow:
-    0 0 8px rgba(255,215,0,.75),
-    0 0 14px rgba(255,180,0,.45),
-    0 0 20px rgba(0,0,0,.9);
-}
-
-.logo-slogan {
-  font-size: 11px;
-  letter-spacing: 1px;
-  margin-top: 2px;
-  line-height: 1;
-  white-space: nowrap;
-  color: #d8b056;
-  opacity: 0.95;
-}
-
-
-/* STATS */
-.stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-end;
-}
-
-.stat {
-  width: 88px;
-  border: 1px solid rgba(255,215,0,.4);
-  border-radius: 6px;
-  text-align: center;
-  background: rgba(0,0,0,.6);
-  color: #ffd36a;
-  font-size: 13px;
-  padding: 4px;
-}
-
-/* LEVEL BUTTON */
-#levelup-box {
-  display: flex;
-  justify-content: flex-end;
-}
-#levelup-btn {
-  background: linear-gradient(#ffd700,#ff9d00);
-  color: #000;
-  padding: 8px 14px;
-  border-radius: 10px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  box-shadow: 0 0 12px gold;
-  text-decoration: none;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% { box-shadow: 0 0 6px gold; }
-  50% { box-shadow: 0 0 14px gold; }
-  100% { box-shadow: 0 0 6px gold; }
-}
-/* WRAPPER */
-.player-info-wrapper {
-  display: flex;
-  align-items: center;
+/* LEFT SECTION */
+.left-section{
+  display:flex;
+  align-items:center;
   gap: 14px;
-}
-
-/* PORTRAIT FRAME */
-.portrait-frame {
-  width: 72px;
-  height: 72px;
-  border: 2px solid gold;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #000;
-  box-shadow: 0 0 8px rgba(255,215,0,.4);
-}
-
-.portrait-frame img {
-  width: 100%;
   height: 100%;
+}
+
+/* CENTERED LOGO (keep absolute behavior, reskin) */
+#statpanel-logo{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform: translate(-50%, -50%);
+  text-align:center;
+  pointer-events:none;
+  user-select:none;
+}
+
+.logo-text{
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-weight: 900;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--bone);
+  text-shadow:
+    0 0 10px rgba(182,75,46,.20),
+    0 8px 18px rgba(0,0,0,.85);
+}
+
+.logo-slogan{
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: .8px;
+  color: var(--muted);
+  opacity: .95;
+  white-space: nowrap;
+}
+
+/* RIGHT ACTIONS */
+.right-actions{
+  position:absolute;
+  top:50%;
+  right: 16px;
+  transform: translateY(-50%);
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+/* Keep your class names, reskin buttons */
+.action-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+
+  padding: 9px 14px;
+  min-width: 104px;
+
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+
+  color: var(--ink);
+  text-decoration: none;
+
+  background: rgba(0,0,0,.18);
+  border: 1px solid rgba(43,52,64,.9);
+  border-radius: 8px;
+
+  box-shadow: 0 12px 24px var(--shadow), inset 0 1px 0 rgba(255,255,255,.06);
+  transition: transform .12s ease, border-color .12s ease, filter .12s ease;
+}
+.action-btn:hover{
+  border-color: rgba(182,75,46,.45);
+  transform: translateY(-1px);
+}
+
+/* LOGOUT PRIMARY (keep #logout-btn but match your new UI) */
+#logout-btn{
+  border-color: rgba(182,75,46,.45);
+  background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
+  color: #f3e7db;
+  box-shadow: 0 14px 28px var(--shadow), inset 0 1px 0 rgba(255,255,255,.12);
+}
+#logout-btn:hover{ filter: brightness(1.06); }
+#logout-btn:active{ transform: translateY(0px) scale(.98); }
+
+/* PORTRAIT */
+.portrait-link{
+  display:inline-block;
+  margin-left: 0;
+}
+.portrait-frame{
+  width: 68px;
+  height: 68px;
+  border: 1px solid rgba(43,52,64,.9);
+  border-radius: 10px;
+  overflow:hidden;
+  background: rgba(0,0,0,.35);
+  box-shadow: 0 14px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+  transition: transform .12s ease, border-color .12s ease;
+}
+.portrait-frame img{
+  width:100%;
+  height:100%;
   object-fit: cover;
 }
-
-/* PLAYER INFO TEXT */
-.pi-name {
-  font-size: 20px;
-  font-weight: bold;
-  color: gold;
-  letter-spacing: 1px;
-  text-shadow: 0 0 6px black;
+.portrait-link:hover .portrait-frame{
+  border-color: rgba(182,75,46,.35);
+  transform: translateY(-1px);
 }
 
-.pi-row {
-  font-size: 13px;
-  color: #f5e6b2;
-}
-
-/* GUILD SECTION */
-.guild-section {
-  margin-top: 4px;
-  text-align: center;
-}
-
-.guild-banner-bar {
-  background: linear-gradient(#320000, #120000);
-  border: 1px solid gold;
-  padding: 4px 6px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: bold;
-  color: gold;
-  box-shadow: inset 0 0 6px rgba(255,215,0,.5);
-}
-
-/* Hanging banner */
-/* HANGING GUILD BANNER */
-.guild-banner-img {
-  position: absolute;
-  top: 100%;              /* directly below guild button */
-  left: 50%;
-  transform: translateX(-50%);
-
-  width: 180px;
-  max-width: 90%;
-  height: auto;
-
-  margin-top: 6px;        /* space below button */
-  z-index: 2900;
-
-  border: 2px solid #c8a34b;
-  border-top: none;
-  border-radius: 0 0 12px 12px;
-
+/* STAT POINTS GLOW (portrait) — keep class name, change visuals */
+.portrait-glow{
+  cursor:pointer;
   box-shadow:
-    0 10px 20px rgba(0,0,0,.9),
-    inset 0 0 12px rgba(255,215,140,.15);
-
-  background: #1b1205;
-}
-.guild-anchor {
-  position: relative;
-  display: inline-block;
-}
-.guild-link {
-  text-decoration: none;
-  color: gold;
-  display: block;
-  cursor: pointer;
-}
-.left-section {
-  display: flex;
-  align-items: center;
-  gap: 18px;  /* space between portrait → info → bars */
-}
-
-.guild-link:hover {
-  filter: brightness(1.2);
-  transform: scale(1.03);
-  transition: 0.12s;
-}
-
-/* PAGE OFFSET */
-body {
-  padding-top: 70px;
-  margin: 0;
-}
-
-/* MOBILE */
-@media (max-width: 900px) {
-  .statpanel-grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .player-grid,
-  .stats {
-    justify-content: center;
-    text-align: center;
-  }
-}
-/* Portrait positioning */
-.portrait-link {
-  display: inline-block;
-  margin-left: 10px; /* 👈 scoots it right */
-}
-
-/* Optional: subtle hover feedback */
-.portrait-link:hover .portrait-frame {
-  box-shadow: 0 0 12px rgba(255, 215, 120, 0.6);
-  transform: scale(1.02);
-  transition: 0.15s ease;
-}
-/* =========================
-   STAT POINTS GLOW (PORTRAIT)
-========================= */
-
-.portrait-glow {
-  box-shadow:
-    0 0 10px rgba(255, 215, 100, 0.9),
-    0 0 20px rgba(255, 215, 100, 0.7),
-    0 0 35px rgba(255, 215, 100, 0.6);
+    0 0 0 2px rgba(182,75,46,.22),
+    0 0 18px rgba(182,75,46,.55),
+    0 14px 24px rgba(0,0,0,.55),
+    inset 0 1px 0 rgba(255,255,255,.06);
   animation: statPulse 1.6s infinite ease-in-out;
   border-radius: 10px;
 }
-
-@keyframes statPulse {
-  0% {
+@keyframes statPulse{
+  0%{
     box-shadow:
-      0 0 8px rgba(255, 215, 100, 0.6),
-      0 0 16px rgba(255, 215, 100, 0.4);
+      0 0 0 2px rgba(182,75,46,.16),
+      0 0 12px rgba(182,75,46,.35),
+      0 14px 24px rgba(0,0,0,.55);
   }
-  50% {
+  50%{
     box-shadow:
-      0 0 16px rgba(255, 215, 100, 1),
-      0 0 32px rgba(255, 215, 100, 0.9);
+      0 0 0 2px rgba(182,75,46,.28),
+      0 0 22px rgba(182,75,46,.70),
+      0 14px 24px rgba(0,0,0,.55);
   }
-  100% {
+  100%{
     box-shadow:
-      0 0 8px rgba(255, 215, 100, 0.6),
-      0 0 16px rgba(255, 215, 100, 0.4);
+      0 0 0 2px rgba(182,75,46,.16),
+      0 0 12px rgba(182,75,46,.35),
+      0 14px 24px rgba(0,0,0,.55);
   }
 }
-.portrait-glow {
-  cursor: pointer;
-}
 
-#buff-bar {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
+/* PLAYER INFO */
+.player-info{
+  display:flex;
+  flex-direction:column;
+  gap: 4px;
+  position: relative;
+  min-width: 170px;
 }
-
-.buff {
-  background: rgba(0,0,0,0.6);
-  border: 1px solid gold;
-  border-radius: 6px;
-  padding: 4px 6px;
+.pi-name{
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: .6px;
+  color: var(--bone);
+  text-shadow: 0 10px 18px rgba(0,0,0,.75);
+  white-space: nowrap;
+}
+.pi-row{
   font-size: 12px;
-  text-align: center;
-  min-width: 60px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
-.buff span {
-  display: block;
+/* GUILD LINK + BANNER */
+.guild-link{
+  text-decoration:none;
+  display:inline-block;
+}
+.guild-banner-bar{
+  background: rgba(0,0,0,.18);
+  border: 1px solid rgba(43,52,64,.9);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  color: var(--ink);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.guild-link:hover{
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  transition: 0.12s;
+}
+.guild-link:hover .guild-banner-bar{
+  border-color: rgba(182,75,46,.35);
+}
+
+/* Hanging guild banner image (same behavior, reskinned frame) */
+.guild-banner-img{
+  position:absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 180px;
+  max-width: 90%;
+  height:auto;
+  margin-top: 6px;
+  z-index: 2900;
+
+  border: 1px solid rgba(43,52,64,.9);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+
+  background: rgba(0,0,0,.35);
+  box-shadow: 0 18px 40px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+/* BARS */
+.bars{
+  display:flex;
+  flex-direction:column;
+  gap: 6px;
+
+  width: 360px;          /* baseline desktop width */
+  max-width: 360px;
+  position: relative;
+}
+.bar-row{
+  display:grid;
+  grid-template-columns: 34px 1fr;
+  gap: 8px;
+  align-items:center;
+}
+.bar-label{
+  color: var(--muted);
   font-size: 11px;
+  text-align:right;
+  letter-spacing: .8px;
+  text-transform: uppercase;
 }
 
-.buff-timer {
-  color: #9ff;
-}
-/* =========================
-   BUFF ICON CONTAINER
-========================= */
+.bar{
+  position:relative;
+  height: 16px;
+  width:100%;
 
-#buff-container {
-  position: absolute;
-  right: -70px;               /* pushes it to the right of bars */
+  background: rgba(0,0,0,.22);
+  border-radius: 999px;
+  border: 1px solid rgba(43,52,64,.9);
+  overflow:hidden;
+
+  box-shadow: inset 0 0 10px rgba(0,0,0,.85);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* FILLS */
+.hp-inner, .sp-inner, .xp-inner{
+  position:absolute;
+  left:0; top:0;
+  height:100%;
+}
+.hp-inner{ background: linear-gradient(90deg, rgba(122,30,30,.95), rgba(182,75,46,.92)); }
+.sp-inner{ background: linear-gradient(90deg, rgba(0,51,170,.85), rgba(0,174,255,.78)); }
+.xp-inner{ background: linear-gradient(90deg, rgba(184,134,11,.85), rgba(201,184,154,.70)); }
+
+/* TEXT IN BAR */
+.bar-text{
+  position:relative;
+  z-index:2;
+  width:100%;
+  text-align:center;
+  font-size: 12px;
+  line-height: 16px;
+  color: rgba(255,255,255,.92);
+  text-shadow: 0 2px 6px rgba(0,0,0,.95);
+  font-weight: 800;
+  pointer-events:none;
+  white-space:nowrap;
+}
+
+/* BUFFS */
+#buff-container{
+  position:absolute;
+  right: -64px;
   top: 50%;
   transform: translateY(-50%);
   cursor: default;
 }
-
-/* ICON */
-#buff-icon {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+#buff-icon{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
   gap: 2px;
 }
-
-.buff-icon-symbol {
-  font-size: 22px;
-  filter: drop-shadow(0 0 4px gold);
+.buff-icon-symbol{
+  font-size: 20px;
+  filter: drop-shadow(0 0 6px rgba(182,75,46,.45));
 }
-
-.buff-icon-label {
+.buff-icon-label{
   font-size: 10px;
   letter-spacing: 1px;
-  color: #f5e1a4;
+  color: var(--muted);
+  text-transform: uppercase;
 }
 
-/* =========================
-   BUFF TOOLTIP
-========================= */
+/* Tooltip stays fixed (your intended behavior), just reskinned */
+#buff-tooltip{
+  position: fixed;
+  right: 16px;
+  top: 12px;
 
-#buff-tooltip {
-  position: fixed;               /* 👈 anchor to viewport, not panel */
-  right: 16px;                   /* 👈 keeps it onscreen */
-  top: 12px;                     /* 👈 clamp to top of window */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  min-width: 170px;
 
-  max-height: calc(100vh - 24px); /* 👈 never exceed viewport */
-  overflow-y: auto;              /* 👈 scroll instead of overflow */
+  background: rgba(9,12,16,.96);
+  border: 1px solid rgba(43,52,64,.95);
+  border-radius: 10px;
+  padding: 10px;
 
-  min-width: 160px;
-
-  background: rgba(0, 0, 0, 0.92);
-  border: 1px solid #c8a34b;
-  border-radius: 8px;
-  padding: 8px;
-
-  display: none;
+  display:none;
   z-index: 9999;
-}
-#buff-tooltip::-webkit-scrollbar {
-  width: 6px;
-}
 
-#buff-tooltip::-webkit-scrollbar-thumb {
-  background: #c8a34b;
+  box-shadow: 0 18px 40px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.06);
+}
+#buff-tooltip::-webkit-scrollbar{ width: 6px; }
+#buff-tooltip::-webkit-scrollbar-thumb{
+  background: rgba(182,75,46,.65);
   border-radius: 4px;
 }
+#buff-container:hover #buff-tooltip{ display:block; }
 
-/* Show on hover */
-#buff-container:hover #buff-tooltip {
-  display: block;
-}
-
-/* Individual buff rows */
-.buff-row {
+.buff-row{
   font-size: 12px;
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.buff-row:last-child{ border-bottom:none; }
+
+.buff-stat{
+  font-weight: 900;
+  color: var(--bone);
+  letter-spacing: .4px;
+}
+.buff-value{ color: rgba(160,220,255,.95); }
+.buff-timer{ font-size: 11px; color: rgba(160,255,210,.90); }
+
+/* -------------------------
+   RESPONSIVE BEHAVIOR
+------------------------- */
+
+/* Medium screens: tighten widths, reduce logo footprint */
+@media (max-width: 1100px){
+  :root{
+    --sp-height: 88px;
+    --sp-pad-x: 14px;
+  }
+
+  .bars{ width: 320px; max-width: 320px; }
+  .logo-text{ font-size: 20px; letter-spacing: 2.6px; }
 }
 
-.buff-row:last-child {
-  border-bottom: none;
+/* Small screens: allow wrapping, remove slogan, avoid overlap */
+@media (max-width: 780px){
+  :root{
+    --sp-height: 112px; /* more room because we wrap */
+    --sp-pad-y: 10px;
+  }
+
+  #statpanel{
+    height: var(--sp-height);
+  }
+
+  /* Make the logo less intrusive on small screens */
+  .logo-slogan{ display:none; }
+  .logo-text{ font-size: 18px; letter-spacing: 2px; opacity: .9; }
+
+  /* Allow the left section to wrap */
+  .left-section{
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 10px 12px;
+  }
+
+  .player-info{ min-width: 0; }
+  .pi-name{ font-size: 16px; }
+
+  /* Shorten bar width */
+  .bars{
+    width: min(320px, 72vw);
+    max-width: none;
+  }
+
+  /* Pull buff icon closer so it doesn't go offscreen */
+  #buff-container{ right: -48px; }
 }
 
-.buff-stat {
-  font-weight: bold;
-  color: #f5e1a4;
+/* Very small screens: prioritize essentials */
+@media (max-width: 520px){
+  :root{ --sp-height: 124px; }
+
+  /* Keep the logo present but subtle */
+  #statpanel-logo{ top: 14px; transform: translateX(-50%); }
+  .logo-text{ font-size: 16px; }
+
+  /* Keep logout reachable without stealing space */
+  #logout-btn{
+    min-width: 86px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  /* Hide bar labels to save horizontal space */
+  .bar-row{ grid-template-columns: 1fr; }
+  .bar-label{ display:none; }
+
+  .bars{ width: min(360px, 86vw); }
+
+  /* Move buff icon below bars so it never clips */
+  #buff-container{
+    position: static;
+    transform: none;
+    margin-top: 6px;
+    align-self: flex-end;
+  }
+}
+/* --- STATPANEL: lock alignment so pages can't mess with it --- */
+#statpanel { text-align: center; }
+#statpanel #statpanel-logo { text-align: center; } /* logo only */
+/* =========================
+   HARD GUARANTEE: statpanel never enters document flow
+========================= */
+#statpanel{
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: auto !important;
+  z-index: 99999 !important;
 }
 
-.buff-value {
-  color: #9ff;
-}
-
-.buff-timer {
-  font-size: 11px;
-  color: #7fd;
+/* The container that receives injected HTML should NOT add spacing */
+#statpanel-root{
+  display: contents; /* prevents the root div from adding layout */
 }

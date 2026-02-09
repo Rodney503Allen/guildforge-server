@@ -150,7 +150,7 @@ const member = await loadMyGuildMember(pid);
 <!DOCTYPE html>
 <html>
 <head>
-<title>Guild Invitations</title>
+<title>Guildforge | Guild Invitations</title>
 <link rel="stylesheet" href="/guild.css">
 <link rel="stylesheet" href="/statpanel.css">
 </head>
@@ -266,7 +266,7 @@ perkLevelsRows.forEach((p: any) => perkLevels[p.perk_id] = p.level);
 <!DOCTYPE html>
 <html>
 <head>
-<title>${guild.name} — Guild</title>
+<title>Guildforge | ${guild.name} — Guild</title>
 <link rel="stylesheet" href="/guild.css">
 <link rel="stylesheet" href="/statpanel.css">
 </head>
@@ -493,6 +493,42 @@ perkLevelsRows.forEach((p: any) => perkLevels[p.perk_id] = p.level);
 
   </div>
 </div>
+<!-- LEAVE GUILD BLOCKED MODAL -->
+<div id="leave-blocked-modal" class="modal-hidden">
+  <div class="modal-window" style="width:520px; text-align:center;">
+    <h2>Can't Leave Guild</h2>
+    <p style="margin-top:10px;">
+      You are the <strong>Guild Master</strong>.
+      Appoint a new Guild Master before leaving the guild.
+    </p>
+
+    <div class="modal-actions" style="justify-content:center;">
+      <button type="button" id="close-leave-blocked" class="cancel-btn">Close</button>
+    </div>
+  </div>
+</div>
+<!-- DELETE GUILD CONFIRM MODAL -->
+<div id="delete-guild-modal" class="modal-hidden">
+  <div class="modal-window" style="width:520px; text-align:center;">
+    <h2 style="color:#ff6666;">Delete Guild?</h2>
+
+    <p style="margin-top:10px;">
+      This will <strong>permanently delete</strong> the guild for <strong>ALL members</strong>.
+      This cannot be undone.
+    </p>
+
+    <p style="margin-top:10px; opacity:.9;">
+      Confirm available in <strong><span id="delete-guild-timer">5</span></strong> seconds...
+    </p>
+
+    <div class="modal-actions" style="justify-content:center; gap:10px;">
+      <button type="button" id="cancel-delete-guild" class="cancel-btn">Cancel</button>
+      <button type="button" id="confirm-delete-guild" class="danger-btn" disabled>
+        Delete Guild
+      </button>
+    </div>
+  </div>
+</div>
 
 
 <p style="text-align:center">${guild.description || "No guild description."}</p>
@@ -504,13 +540,20 @@ ${hasPerm(member.permissions, PERMS.INVITE) ? `
 
 ${hasPerm(member.permissions, PERMS.ADMIN_GUILD) ? `
   <a href="/guild/delete"
-     style="color:red"
-     onclick="return confirm('This will delete the guild for ALL members. Are you sure?')">
-     Delete Guild
+    id="delete-guild-link"
+    style="color:red">
+    Delete Guild
   </a>
 ` : ""}
 
-<a href="/guild/leave">Leave Guild</a>
+<a
+  href="/guild/leave"
+  id="leave-guild-link"
+  ${Number(member.owner_id) === Number(member.player_id) ? `data-owner="1"` : ``}
+>
+  Leave Guild
+</a>
+
 <a href="/">Return</a>
 </div>
 
@@ -698,6 +741,86 @@ document
         })
       }).then(() => location.reload());
     });
+      /* ============================
+       BLOCK OWNER LEAVE (MODAL)
+  ============================ */
+  const leaveLink = document.getElementById("leave-guild-link");
+  const leaveBlockedModal = document.getElementById("leave-blocked-modal");
+  const closeLeaveBlocked = document.getElementById("close-leave-blocked");
+
+  leaveLink?.addEventListener("click", (e) => {
+    const isOwner = leaveLink.dataset.owner === "1";
+    if (!isOwner) return; // normal leave
+
+    e.preventDefault();
+    openModal(leaveBlockedModal);
+  });
+
+  closeLeaveBlocked?.addEventListener("click", () =>
+    closeModal(leaveBlockedModal)
+  );
+  /* ============================
+   DELETE GUILD CONFIRM (5s)
+============================ */
+const deleteLink = document.getElementById("delete-guild-link");
+const deleteModal = document.getElementById("delete-guild-modal");
+const cancelDeleteBtn = document.getElementById("cancel-delete-guild");
+const confirmDeleteBtn = document.getElementById("confirm-delete-guild");
+const timerEl = document.getElementById("delete-guild-timer");
+
+let deleteHref = "";
+let countdownTimer = null;
+let countdown = 5;
+
+function resetDeleteCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+  countdown = 5;
+  if (timerEl) timerEl.textContent = String(countdown);
+  if (confirmDeleteBtn) confirmDeleteBtn.disabled = true;
+}
+
+function startDeleteCountdown() {
+  resetDeleteCountdown();
+  countdownTimer = setInterval(() => {
+    countdown -= 1;
+    if (timerEl) timerEl.textContent = String(Math.max(0, countdown));
+
+    if (countdown <= 0) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+      if (confirmDeleteBtn) confirmDeleteBtn.disabled = false;
+      if (timerEl) timerEl.textContent = "0";
+    }
+  }, 1000);
+}
+
+deleteLink?.addEventListener("click", (e) => {
+  e.preventDefault();
+  if (!deleteModal) return;
+
+  deleteHref = deleteLink.getAttribute("href") || "/guild/delete";
+  openModal(deleteModal);
+  startDeleteCountdown();
+});
+
+cancelDeleteBtn?.addEventListener("click", () => {
+  if (!deleteModal) return;
+  resetDeleteCountdown();
+  closeModal(deleteModal);
+});
+
+confirmDeleteBtn?.addEventListener("click", () => {
+  if (confirmDeleteBtn.disabled) return;
+  // navigate to server route to actually delete
+  window.location.href = deleteHref || "/guild/delete";
+});
+
+// Optional: if you allow closing by clicking outside, make sure countdown stops
+// (Only needed if your modal supports backdrop click-to-close)
+
 });
 
 
@@ -1010,7 +1133,7 @@ router.get("/guild/create", requireLogin, (req,res)=>{
 <!DOCTYPE html>
 <html>
 <head>
-<title>Create Guild</title>
+<title>Guildforge | Create Guild</title>
 <link rel="stylesheet" href="/guild.css">
 <link rel="stylesheet" href="/statpanel.css">
 </head>
@@ -1195,7 +1318,7 @@ if (!hasPerm(member.permissions, PERMS.INVITE)) {
 <!DOCTYPE html>
 <html>
 <head>
-<title>Invite Player</title>
+<title>Guildforge | Invite Player</title>
 <link rel="stylesheet" href="/guild.css">
 <link rel="stylesheet" href="/statpanel.css">
 </head>
@@ -1347,6 +1470,7 @@ router.get("/guild/leave", requireLogin, async (req, res) => {
 
   res.redirect("/");
 });
+
 
 /* =======================
    DELETE GUILD (MASTER ONLY)

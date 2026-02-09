@@ -14,7 +14,13 @@ function requireLogin(req: any, res: any, next: any) {
   }
   next();
 }
-
+function resolveIcon(icon: any) {
+  const raw = (icon ?? "").toString().trim();
+  if (!raw) return "";
+  if (raw.startsWith("http")) return raw;
+  // ensure it starts with exactly one leading slash
+  return "/" + raw.replace(/^\/+/, "");
+}
 // =======================
 // CHARACTER PAGE
 // =======================
@@ -64,6 +70,101 @@ const statBreakdown: Record<
   }
 >;
 
+const [[potionCols]]: any = await db.query(
+  `SELECT equip_potion_hp_inventory_id AS hpInv,
+          equip_potion_sp_inventory_id AS spInv
+   FROM players WHERE id=?`,
+  [pid]
+);
+
+async function loadPotion(invId: number | null, expectedTarget: "hp" | "sp") {
+  if (!invId) return null;
+
+  const [[row]]: any = await db.query(
+    `
+    SELECT
+      inv.inventory_id AS inventoryId,
+      inv.quantity AS qty,
+      i.name,
+      i.icon,
+      i.type,
+      i.effect_target,
+      i.is_combat
+    FROM inventory inv
+    JOIN items i ON i.id = inv.item_id
+    WHERE inv.inventory_id = ?
+      AND inv.player_id = ?
+    LIMIT 1
+    `,
+    [invId, pid]
+  );
+
+  if (!row || Number(row.qty) <= 0) return null;
+  if (String(row.type) !== "potion") return null;
+  if (Number(row.is_combat) !== 1) return null;
+  if (String(row.effect_target).toLowerCase() !== expectedTarget) return null;
+
+  return row;
+}
+
+const hpPotion = await loadPotion(potionCols?.hpInv ?? null, "hp");
+const spPotion = await loadPotion(potionCols?.spInv ?? null, "sp");
+
+
+// =======================
+// EQUIPPED POTIONS (API for combat hotbar)
+// =======================
+router.get("/api/potions/equipped", requireLogin, async (req, res) => {
+  const pid = req.session.playerId as number;
+
+  const [[cols]]: any = await db.query(
+    `SELECT equip_potion_hp_inventory_id AS hpInv,
+            equip_potion_sp_inventory_id AS spInv
+     FROM players WHERE id=?`,
+    [pid]
+  );
+
+  async function loadPotion(invId: number | null, expectedTarget: "hp" | "sp") {
+    if (!invId) return null;
+
+    const [[row]]: any = await db.query(
+      `
+      SELECT
+        inv.inventory_id AS inventoryId,
+        inv.quantity AS qty,
+        i.name,
+        i.icon,
+        i.type,
+        i.effect_target,
+        i.is_combat
+      FROM inventory inv
+      JOIN items i ON i.id = inv.item_id
+      WHERE inv.inventory_id = ?
+        AND inv.player_id = ?
+      LIMIT 1
+      `,
+      [invId, pid]
+    );
+
+    if (!row || Number(row.qty) <= 0) return null;
+    if (String(row.type) !== "potion") return null;
+    if (Number(row.is_combat) !== 1) return null;
+    if (String(row.effect_target).toLowerCase() !== expectedTarget) return null;
+
+    return {
+      inventoryId: Number(row.inventoryId),
+      qty: Number(row.qty),
+      name: row.name,
+      icon: row.icon
+    };
+  }
+
+  const hp = await loadPotion(cols?.hpInv ?? null, "hp");
+  const sp = await loadPotion(cols?.spInv ?? null, "sp");
+
+  res.json({ hp, sp });
+});
+
   // ============================
   // EQUIPPED GEAR (display only)
   // ============================
@@ -71,8 +172,11 @@ const statBreakdown: Record<
     SELECT inv.inventory_id AS instance_id, i.*
     FROM inventory inv
     JOIN items i ON i.id = inv.item_id
-    WHERE inv.player_id=? AND inv.equipped=1
+    WHERE inv.player_id=? 
+      AND inv.equipped=1
+      AND i.slot IS NOT NULL
   `, [pid]);
+
 
   const equipped: any = {};
   gear.forEach((g: any) => (equipped[g.slot] = g));
@@ -140,12 +244,25 @@ STAT_KEYS.forEach((stat) => {
   // ============================
   // INVENTORY (equipable only)
   // ============================
-  const [inv]: any = await db.query(`
-    SELECT inv.inventory_id AS instance_id, inv.equipped, i.*
-    FROM inventory inv
-    JOIN items i ON i.id = inv.item_id
-    WHERE inv.player_id=? AND i.slot IS NOT NULL
-  `, [pid]);
+const [inv]: any = await db.query(`
+  SELECT
+    i.id AS item_id,
+    MIN(CASE WHEN inv.equipped = 0 THEN inv.inventory_id END) AS instance_id,
+    SUM(CASE WHEN inv.equipped = 0 THEN inv.quantity ELSE 0 END) AS quantity,
+    i.*
+
+  FROM inventory inv
+  JOIN items i ON i.id = inv.item_id
+  WHERE inv.player_id = ?
+  GROUP BY i.id
+  HAVING quantity > 0
+  ORDER BY
+    CASE WHEN i.slot IS NOT NULL THEN 0 ELSE 1 END,
+    i.category ASC,
+    i.name ASC
+`, [pid]);
+
+
 
   // ============================
   // RENDER PAGE
@@ -154,132 +271,530 @@ STAT_KEYS.forEach((stat) => {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>${p.name} — Character</title>
+  <title>Guildforge | ${p.name} — Character</title>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/statpanel.css">
-  <style>
-    body {
-      background:#08080d;
-      color:#f5e6b2;
-      font-family:Cinzel, serif;
-      margin:0;
-    }
-    .page-wrap {
-      padding-top:120px;
-      width:90%;
-      max-width:1100px;
-      margin:auto;
-      display:flex;
-      gap:25px;
-    }
-    .left-panel { width:350px; }
-    .right-panel { flex:1; }
-    .char-box {
-      border:1px solid gold;
-      background:rgba(0,0,0,.85);
-      padding:14px;
-      border-radius:12px;
-      margin-bottom:20px;
-    }
-    .stat-row {
-      display:flex;
-      justify-content:space-between;
-      margin:6px 0;
-    }
-    .stat-row button {
-      background:gold;
-      border:none;
-      border-radius:4px;
-      cursor:pointer;
-      font-weight:bold;
-    }
-    .return-btn {
-      margin-top:12px;
-      padding:10px 22px;
-      font-family:Cinzel, serif;
-      background:linear-gradient(#d4af37,#8d6b1f);
-      border:2px solid gold;
-      border-radius:10px;
-      cursor:pointer;
-    }
-    .return-btn:hover {
-      background:gold;
-      box-shadow:0 0 12px rgba(255,215,100,.8);
-    }
-    .gear-grid {
-      display:grid;
-      grid-template-columns:repeat(2,1fr);
-      gap:12px;
-    }
-    .gear-slot {
-      border:1px solid #aa8c3c;
-      background:rgba(20,14,6,.9);
-      border-radius:8px;
-      padding:8px;
-      text-align:center;
-      min-height:95px;
-    }
-    .inv-grid {
-      display:grid;
-      grid-template-columns:repeat(auto-fill,64px);
-      gap:10px;
-    }
-    .inv-item {
-      width:64px;
-      height:64px;
-      border:2px solid #aa8c3c;
-      background:radial-gradient(circle,#1a140b 40%,#060300);
-      border-radius:10px;
-      cursor:pointer;
-      text-align:center;
-    }
-    .tooltip-container {
-    position: relative;
-    cursor: help;
+<style>
+  :root{
+    --bg0:#07090c;
+    --bg1:#0b0f14;
+    --panel:#0e131a;
+    --panel2:#0a0f15;
+
+    --ink:#d7dbe2;
+    --muted:#9aa3af;
+
+    --iron:#2b3440;
+    --ember:#b64b2e;
+    --blood:#7a1e1e;
+    --bone:#c9b89a;
+
+    --shadow: rgba(0,0,0,.60);
+    --frame: rgba(255,255,255,.04);
+    --glass: rgba(0,0,0,.18);
   }
 
+  *{ box-sizing:border-box; }
 
-    .tooltip {
-      position:absolute;
-      min-width:180px;
-      background:#111;
-      border:1px solid gold;
-      color:#f5d27d;
-      padding:8px;
-      border-radius:8px;
-      z-index:9999;
-      font-size:12px;
-      box-shadow:0 0 10px rgba(255,215,0,.6);
-      display:none;
+  body{
+    margin:0;
+    position: relative;
+    color: var(--ink);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background:
+      radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
+      radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0));
+  }
+
+  /* grit overlay */
+  body::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    opacity:.10;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
+    mix-blend-mode: overlay;
+  }
+
+  /* =========================
+     LAYOUT (Left / Center / Right)
+     ========================= */
+  .page-wrap{
+    padding-top: 120px; /* leaves room for statpanel */
+    width: min(1240px, 94vw);
+    margin: 0 auto;
+    display:grid;
+    grid-template-columns: 360px 520px 1fr; /* left stats | center paperdoll | right inventory */
+    gap: 18px;
+    align-items:flex-start;
+    position: relative;
+    z-index: 1;
+  }
+
+  .left-panel{ width:auto; }
+  .center-panel{ width:auto; }
+  .right-panel{ width:auto; min-width: 0; }
+
+  /* =========================
+     SHARED PANEL STYLING
+     ========================= */
+  .char-box{
+    position:relative;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+
+    border: 1px solid rgba(43,52,64,.95);
+    background:
+      radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.10), transparent 60%),
+      linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
+      linear-gradient(180deg, var(--panel), var(--panel2));
+
+    box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
+    overflow: visible; /* important for tooltips */
+  }
+
+  .char-box::before{
+    content:"";
+    position:absolute;
+    inset:10px;
+    pointer-events:none;
+    border: 0;
+    border-radius: 10px;
+  }
+
+  .char-box h2,
+  .char-box h3{
+    margin: 0 0 10px;
+    font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--bone);
+    text-shadow:
+      0 0 10px rgba(182,75,46,.20),
+      0 10px 18px rgba(0,0,0,.85);
+    position:relative;
+    z-index:1;
+  }
+
+  .char-box p{
+    margin: 6px 0;
+    color: rgba(215,219,226,.92);
+    font-size: 13px;
+    position:relative;
+    z-index:1;
+  }
+
+  .char-box p i{ color: var(--muted); }
+
+  /* XP bar wrapper (inline styles exist in markup; make them look consistent) */
+  .char-box > div[style*="background:#222"]{
+    background: rgba(0,0,0,.28) !important;
+    border: 1px solid rgba(43,52,64,.95) !important;
+    border-radius: 999px !important;
+  }
+  /* safer: target the inner bar inside the wrapper */
+  .char-box > div[style*="background:#222"] > div{
+    background: linear-gradient(90deg, rgba(182,75,46,.92), rgba(122,30,30,.88)) !important;
+  }
+
+  /* =========================
+     STATS ROWS
+     ========================= */
+  .stat-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    margin: 8px 0;
+    position:relative;
+    z-index:1;
+  }
+
+  .stat-row > span:first-child{
+    color: var(--muted);
+    font-weight: 800;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    font-size: 12px;
+    min-width: 92px;
+  }
+
+  .stat-value{
+    font-weight: 900;
+    color: rgba(255,255,255,.92);
+  }
+
+  .stat-row button{
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid rgba(182,75,46,.55);
+    background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
+    color: #f3e7db;
+    cursor:pointer;
+    font-weight: 900;
+    box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.12);
+    transition: transform .12s ease, filter .12s ease;
+  }
+  .stat-row button:hover{ filter: brightness(1.06); transform: translateY(-1px); }
+  .stat-row button:active{ transform: translateY(0) scale(.99); }
+
+  /* Return button */
+  .return-btn{
+    margin-top: 10px;
+    padding: 12px 12px;
+    width: 100%;
+
+    border-radius: 10px;
+    border: 1px solid rgba(43,52,64,.95);
+    background: rgba(0,0,0,.18);
+    color: #f3e7db;
+
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+
+    cursor:pointer;
+    box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+    transition: transform .12s ease, border-color .12s ease;
+  }
+  .return-btn:hover{ border-color: rgba(182,75,46,.45); transform: translateY(-1px); }
+  .return-btn:active{ transform: translateY(0) scale(.99); }
+
+  /* =========================
+     PAPERDOLL (CENTER)
+     ========================= */
+  .paperdoll{
+    position: relative;
+    width: min(420px, 100%);
+    margin: 0 auto;
+    padding: 16px 14px;
+    border-radius: 14px;
+
+    border: 1px solid rgba(43,52,64,.95);
+    background:
+      radial-gradient(700px 500px at 50% 18%, rgba(182,75,46,.08), transparent 60%),
+      linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.18)),
+      linear-gradient(180deg, rgba(14,19,26,.65), rgba(10,15,21,.85));
+    box-shadow: inset 0 0 22px rgba(0,0,0,.75);
+    overflow: visible;
+
+    --slot: clamp(86px, 10vw, 112px);
+
+    display: grid;
+    grid-template-columns: repeat(3, var(--slot));
+    grid-template-rows: repeat(4, var(--slot));
+    gap: 14px;
+    justify-items: center;
+    align-items: center;
+  }
+
+  /* Make the draggable wrapper fill the square and truly center the image */
+  .paperdoll .pd-slot > .tooltip-container{
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+  }
+
+  /* Prevent the wrapper from nudging layout */
+  .paperdoll .tooltip-container{
+    margin: 0;
+    padding: 0;
+  }
+
+  .pd-slot{
+    width: var(--slot);
+    height: var(--slot);
+    border-radius: 14px;
+    border: 1px solid rgba(43,52,64,.95);
+    background: rgba(0,0,0,.22);
+    box-shadow: inset 0 0 16px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.05);
+    display:grid;
+    place-items:center;
+    overflow: visible;
+    position: relative;
+  }
+
+  .pd-slot.dragover{
+    outline: 2px dashed rgba(182,75,46,.75);
+    box-shadow:
+      0 0 0 1px rgba(182,75,46,.12),
+      inset 0 0 16px rgba(0,0,0,.85);
+  }
+
+  /* Placement */
+  .pd-slot.head{ grid-column: 2; grid-row: 1; }
+  .pd-slot.chest{ grid-column: 2; grid-row: 2; }
+  .pd-slot.weapon{ grid-column: 1; grid-row: 2; }
+  .pd-slot.offhand{ grid-column: 3; grid-row: 2; }
+  .pd-slot.legs{ grid-column: 2; grid-row: 3; }
+  .pd-slot.feet{ grid-column: 2; grid-row: 4; }
+  .pd-slot.hands{ grid-column: 1; grid-row: 3; } /* below weapon */
+
+  .pd-img{
+    width: 76%;
+    height: 76%;
+    object-fit: contain;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 3px 6px rgba(0,0,0,.75));
+  }
+    
+  .pd-empty{
+    width: 76%;
+    height: 76%;
+    opacity: .12;
+    border-radius: 12px;
+    border: 1px dashed rgba(255,255,255,.18);
+  }
+
+  /* =========================
+     INVENTORY (RIGHT)
+     ========================= */
+  .inv-panel-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    position:relative;
+    z-index:1;
+  }
+
+  .inv-search{
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(43,52,64,.95);
+    background: rgba(0,0,0,.20);
+    color: var(--ink);
+    outline: none;
+    font-weight: 700;
+    letter-spacing: .2px;
+    margin-bottom: 10px;
+  }
+  .inv-search::placeholder{ color: rgba(154,163,175,.75); }
+
+  .inv-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, 64px);
+    gap: 10px;
+    position:relative;
+    z-index:1;
+    overflow: visible;
+  }
+
+  .inv-item{
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    cursor:pointer;
+
+    border: 1px solid rgba(43,52,64,.95);
+    background: rgba(0,0,0,.22);
+
+    box-shadow: inset 0 0 14px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.05);
+    display:grid;
+    place-items:center;
+
+    position:relative;
+    overflow: visible;
+  }
+
+  .inv-item img{
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,.70));
+    display:block;
+  }
+
+  .inv-item.equipped{
+    outline: 2px solid rgba(182,75,46,.75);
+    box-shadow:
+      0 0 0 1px rgba(182,75,46,.12),
+      0 0 18px rgba(182,75,46,.22),
+      inset 0 0 14px rgba(0,0,0,.85);
+  }
+
+  .inv-item.not-equipable{ opacity: .92; }
+  .inv-item.not-equipable::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius: 12px;
+    pointer-events:none;
+    box-shadow: inset 0 0 0 999px rgba(0,0,0,.10);
+  }
+
+  /* Stack count (shared) */
+  .stack-count{
+    position:absolute;
+    bottom: 4px;
+    right: 6px;
+    font-size: 12px;
+    font-weight: 900;
+    color: #f3e7db;
+    text-shadow: 0 2px 6px rgba(0,0,0,.9);
+    pointer-events:none;
+  }
+
+  /* =========================
+     TOOLTIP (shared)
+     ========================= */
+  .tooltip-container{
+    position: relative;
+    cursor: help;
+    z-index: 1;
+  }
+  .tooltip-container:hover{ z-index: 9999; }
+  .tooltip-container:hover .tooltip{ display:block; }
+
+  .tooltip{
+    position:absolute;
+    left: 50%;
+    top: calc(100% + 10px);
+    transform: translateX(-50%);
+    min-width: 220px;
+    max-width: 320px;
+
+    background: rgba(9,12,16,.96);
+    border: 1px solid rgba(43,52,64,.95);
+    color: rgba(215,219,226,.92);
+
+    padding: 10px;
+    border-radius: 12px;
+    z-index: 10000;
+
+    box-shadow: 0 22px 60px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.06);
+    display:none;
+    font-size: 12px;
+    line-height: 1.35;
+    pointer-events:none;
+  }
+
+  .tooltip strong{
+    color: var(--bone);
+    display:block;
+    margin-bottom: 6px;
+    letter-spacing: .4px;
+    position:relative;
+    z-index:1;
+  }
+
+  .tooltip .rarity{
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    position:relative;
+    z-index:1;
+  }
+
+  .tooltip .stat{
+    display:block;
+    position:relative;
+    z-index:1;
+  }
+
+  .tooltip hr{
+    border: none;
+    height: 1px;
+    margin: 8px 0;
+    background: linear-gradient(90deg, transparent, rgba(182,75,46,.55), transparent);
+    opacity: .85;
+    position:relative;
+    z-index:1;
+  }
+
+  /* rarity borders */
+  .tooltip.common{ border-color: rgba(201,207,217,.55); }
+  .tooltip.uncommon{ border-color: rgba(119,242,154,.55); }
+  .tooltip.rare{ border-color: rgba(120,200,255,.55); }
+  .tooltip.epic{ border-color: rgba(211,140,255,.55); }
+  .tooltip.legendary{ border-color: rgba(255,184,74,.65); }
+
+  /* paperdoll tooltip stacking */
+  .paperdoll .tooltip-container{ z-index: 1; }
+  .paperdoll .tooltip-container:hover{ z-index: 9999; }
+
+  /* =========================
+     POTION BAR
+     ========================= */
+  .potionbar{
+    margin-top: 14px;
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .potion-slot{
+    border: 1px solid rgba(43,52,64,.95);
+    border-radius: 12px;
+    background: rgba(0,0,0,.22);
+    box-shadow: inset 0 0 16px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.05);
+    padding: 10px;
+    position: relative;
+  }
+
+  .potion-title{
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .potion-inner{
+    position: relative;
+    height: 64px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,.08);
+    background: rgba(0,0,0,.18);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor: pointer;
+  }
+
+  .potion-img{
+    width: 52px;
+    height: 52px;
+    object-fit: contain;
+    image-rendering: pixelated;
+  }
+
+  .potion-empty{
+    height: 64px;
+    border-radius: 12px;
+    border: 1px dashed rgba(255,255,255,.18);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color: rgba(154,163,175,.75);
+    font-weight: 800;
+    font-size: 12px;
+  }
+
+  /* Responsive */
+  @media (max-width: 1100px){
+    .page-wrap{
+      grid-template-columns: 1fr;
+      gap: 14px;
     }
+  }
+</style>
 
-    .tooltip strong { color:gold; display:block; margin-bottom:4px; }
-    .tooltip .rarity { font-size:11px; margin-bottom:4px; }
-    .tooltip .stat { display:block; }
-
-    .tooltip.common{border-color:#bbb}
-    .tooltip.uncommon{border-color:#44cc55}
-    .tooltip.rare{border-color:#4aa3ff}
-    .tooltip.epic{border-color:#b84aff}
-    .tooltip.legendary{border-color:#ff9933}
-
-    .tooltip-container:hover .tooltip { display:block; }
-
-    .gear-slot.dragover { outline:2px dashed gold; }
-    .inv-item.equipped { outline:2px solid gold; }
-.stack-count {
-  position: absolute;
-  bottom: 4px;
-  right: 6px;
-  font-size: 12px;
-  font-weight: bold;
-  color: gold;
-  text-shadow: 0 0 3px black;
-  pointer-events: none;
-}
-
-
-  </style>
 </head>
 
 <body>
@@ -288,7 +803,7 @@ STAT_KEYS.forEach((stat) => {
 
 <div class="page-wrap">
 
-  <!-- LEFT PANEL -->
+  <!-- LEFT PANEL (Character + Stats) -->
   <div class="left-panel">
 
     <div class="char-box">
@@ -321,25 +836,25 @@ STAT_KEYS.forEach((stat) => {
       <p>Unspent Points: <span id="statPoints">${p.stat_points}</span></p>
 
       ${(STAT_KEYS.filter(s => s !== "crit") as Exclude<StatKey, "crit">[])
-  .map((stat) => `
+        .map((stat) => `
+          <div class="stat-row">
+            <span>${stat.charAt(0).toUpperCase()+stat.slice(1)}:</span>
 
-        <div class="stat-row">
-          <span>${stat.charAt(0).toUpperCase()+stat.slice(1)}:</span>
-          <span class="stat-value tooltip-container">
-            ${(p as any)[stat]}
-            <div class="tooltip">
-              <strong>${stat.toUpperCase()}</strong>
-              <div>Base: ${statBreakdown[stat].base}</div>
-              <div>Gear: +${statBreakdown[stat].gear}</div>
-              <div>Buffs: +${statBreakdown[stat].buff}</div>
-              <hr>
-              <div><b>Total: ${statBreakdown[stat].total}</b></div>
-            </div>
-          </span>
+            <span class="stat-value tooltip-container" id="${stat}">
+              ${(p as any)[stat]}
+              <div class="tooltip">
+                <strong>${stat.toUpperCase()}</strong>
+                <div>Base: ${statBreakdown[stat].base}</div>
+                <div>Gear: +${statBreakdown[stat].gear}</div>
+                <div>Buffs: +${statBreakdown[stat].buff}</div>
+                <hr>
+                <div><b>Total: ${statBreakdown[stat].total}</b></div>
+              </div>
+            </span>
 
-          ${p.stat_points > 0 ? `<button onclick="addStat('${stat}')">+</button>` : ``}
-        </div>
-      `).join("")}
+            ${p.stat_points > 0 ? `<button onclick="addStat('${stat}')">+</button>` : ``}
+          </div>
+        `).join("")}
 
       <div style="text-align:center">
         <button class="return-btn" onclick="goBack()">⬅ Return</button>
@@ -348,98 +863,330 @@ STAT_KEYS.forEach((stat) => {
 
   </div>
 
-  <!-- RIGHT PANEL -->
-  <div class="right-panel">
-<div class="char-box">
-  <h3>Equipped Gear</h3>
+  <!-- CENTER PANEL (Paperdoll) -->
+  <div class="center-panel">
+    <div class="char-box">
+      <h3>Equipped Gear</h3>
 
-  <div class="gear-grid">
-    ${["weapon","offhand","head","chest","legs","feet","hands"].map(slot => `
-      <div class="gear-slot"
-           ondragover="event.preventDefault()"
-           ondrop="dropEquip(event, '${slot}')">
+      <div class="paperdoll">
 
-        <strong>${slot.toUpperCase()}</strong><br>
+        <!-- HEAD -->
+        <div class="pd-slot head"
+             ondragover="event.preventDefault()"
+             ondrop="dropEquip(event, 'head')">
+          ${equipped["head"]
+            ? `
+              <div class="tooltip-container"
+                   draggable="true"
+                   data-id="${equipped["head"].instance_id}"
+                   ondblclick="unequipItem(${equipped["head"].instance_id})">
+                <img class="pd-img" src="${resolveIcon(equipped["head"].icon)}" alt="Head"
+                     onerror="this.replaceWith(document.createTextNode('📦'))">
 
-        ${equipped[slot]
-          ? `
-            <div class="tooltip-container"
-                 draggable="true"
-                 data-id="${equipped[slot].instance_id}"
-                 ondblclick="unequipItem(${equipped[slot].instance_id})">
-
-              <img src="/icons/${equipped[slot].icon}" width="48">
-
-              <div class="tooltip ${equipped[slot].rarity}">
-                <strong>${equipped[slot].name}</strong>
-                <div class="rarity">${equipped[slot].rarity.toUpperCase()}</div>
-
-                ${equipped[slot].attack ? "<span class='stat'>Attack: +" + equipped[slot].attack + "</span>" : ""}
-                ${equipped[slot].defense ? "<span class='stat'>Defense: +" + equipped[slot].defense + "</span>" : ""}
-                ${equipped[slot].agility ? "<span class='stat'>Agility: +" + equipped[slot].agility + "</span>" : ""}
-                ${equipped[slot].vitality ? "<span class='stat'>Vitality: +" + equipped[slot].vitality + "</span>" : ""}
-                ${equipped[slot].intellect ? "<span class='stat'>Intellect: +" + equipped[slot].intellect + "</span>" : ""}
-                ${equipped[slot].crit ? "<span class='stat'>Crit: +" + equipped[slot].crit + "</span>" : ""}
+                <div class="tooltip ${equipped["head"].rarity}">
+                  <strong>${equipped["head"].name}</strong>
+                  <div class="rarity">${equipped["head"].rarity.toUpperCase()}</div>
+                  ${equipped["head"].attack ? "<span class='stat'>Attack: +" + equipped["head"].attack + "</span>" : ""}
+                  ${equipped["head"].defense ? "<span class='stat'>Defense: +" + equipped["head"].defense + "</span>" : ""}
+                  ${equipped["head"].agility ? "<span class='stat'>Agility: +" + equipped["head"].agility + "</span>" : ""}
+                  ${equipped["head"].vitality ? "<span class='stat'>Vitality: +" + equipped["head"].vitality + "</span>" : ""}
+                  ${equipped["head"].intellect ? "<span class='stat'>Intellect: +" + equipped["head"].intellect + "</span>" : ""}
+                  ${equipped["head"].crit ? "<span class='stat'>Crit: +" + equipped["head"].crit + "</span>" : ""}
+                </div>
               </div>
-            </div>
-          `
-          : "<em>Empty</em>"
-        }
+            `
+            : `<div class="pd-empty"></div>`
+          }
+        </div>
 
-      </div>
-    `).join("")}
-  </div>
-</div>
+        <!-- CHEST -->
+        <div class="pd-slot chest"
+             ondragover="event.preventDefault()"
+             ondrop="dropEquip(event, 'chest')">
+          ${equipped["chest"]
+            ? `
+              <div class="tooltip-container"
+                   draggable="true"
+                   data-id="${equipped["chest"].instance_id}"
+                   ondblclick="unequipItem(${equipped["chest"].instance_id})">
+                <img class="pd-img" src="${resolveIcon(equipped["chest"].icon)}" alt="Chest"
+                     onerror="this.replaceWith(document.createTextNode('📦'))">
 
-<div class="char-box">
-  <h3>Equipment Inventory</h3>
+                <div class="tooltip ${equipped["chest"].rarity}">
+                  <strong>${equipped["chest"].name}</strong>
+                  <div class="rarity">${equipped["chest"].rarity.toUpperCase()}</div>
+                  ${equipped["chest"].attack ? "<span class='stat'>Attack: +" + equipped["chest"].attack + "</span>" : ""}
+                  ${equipped["chest"].defense ? "<span class='stat'>Defense: +" + equipped["chest"].defense + "</span>" : ""}
+                  ${equipped["chest"].agility ? "<span class='stat'>Agility: +" + equipped["chest"].agility + "</span>" : ""}
+                  ${equipped["chest"].vitality ? "<span class='stat'>Vitality: +" + equipped["chest"].vitality + "</span>" : ""}
+                  ${equipped["chest"].intellect ? "<span class='stat'>Intellect: +" + equipped["chest"].intellect + "</span>" : ""}
+                  ${equipped["chest"].crit ? "<span class='stat'>Crit: +" + equipped["chest"].crit + "</span>" : ""}
+                </div>
+              </div>
+            `
+            : `<div class="pd-empty"></div>`
+          }
+        </div>
 
-  <div class="inv-grid"
-       ondragover="event.preventDefault()"
-       ondrop="dropUnequip(event)">
+        <!-- WEAPON -->
+        <div class="pd-slot weapon"
+             ondragover="event.preventDefault()"
+             ondrop="dropEquip(event, 'weapon')">
+          ${equipped["weapon"]
+            ? `
+              <div class="tooltip-container"
+                   draggable="true"
+                   data-id="${equipped["weapon"].instance_id}"
+                   ondblclick="unequipItem(${equipped["weapon"].instance_id})">
+                <img class="pd-img" src="${resolveIcon(equipped["weapon"].icon)}" alt="Weapon"
+                     onerror="this.replaceWith(document.createTextNode('📦'))">
 
-    ${inv.map((g:any) => `
-      <div class="inv-item tooltip-container ${g.equipped ? "equipped" : ""}"
-           data-id="${g.instance_id}"
-           data-slot="${g.slot}"
-           draggable="true"
-           ondblclick="equipItem(${g.instance_id})">
+                <div class="tooltip ${equipped["weapon"].rarity}">
+                  <strong>${equipped["weapon"].name}</strong>
+                  <div class="rarity">${equipped["weapon"].rarity.toUpperCase()}</div>
+                  ${equipped["weapon"].attack ? "<span class='stat'>Attack: +" + equipped["weapon"].attack + "</span>" : ""}
+                  ${equipped["weapon"].defense ? "<span class='stat'>Defense: +" + equipped["weapon"].defense + "</span>" : ""}
+                  ${equipped["weapon"].agility ? "<span class='stat'>Agility: +" + equipped["weapon"].agility + "</span>" : ""}
+                  ${equipped["weapon"].vitality ? "<span class='stat'>Vitality: +" + equipped["weapon"].vitality + "</span>" : ""}
+                  ${equipped["weapon"].intellect ? "<span class='stat'>Intellect: +" + equipped["weapon"].intellect + "</span>" : ""}
+                  ${equipped["weapon"].crit ? "<span class='stat'>Crit: +" + equipped["weapon"].crit + "</span>" : ""}
+                </div>
+              </div>
+            `
+            : `<div class="pd-empty"></div>`
+          }
+        </div>
 
-        <img src="/icons/${g.icon}" width="48">
+        <!-- OFFHAND -->
+        <div class="pd-slot offhand"
+             ondragover="event.preventDefault()"
+             ondrop="dropEquip(event, 'offhand')">
+          ${equipped["offhand"]
+            ? `
+              <div class="tooltip-container"
+                   draggable="true"
+                   data-id="${equipped["offhand"].instance_id}"
+                   ondblclick="unequipItem(${equipped["offhand"].instance_id})">
+                <img class="pd-img" src="${resolveIcon(equipped["offhand"].icon)}" alt="Offhand"
+                     onerror="this.replaceWith(document.createTextNode('📦'))">
 
-        <div class="tooltip ${g.rarity}">
-          <strong>${g.name}</strong>
-          <div class="rarity">${g.rarity.toUpperCase()}</div>
+                <div class="tooltip ${equipped["offhand"].rarity}">
+                  <strong>${equipped["offhand"].name}</strong>
+                  <div class="rarity">${equipped["offhand"].rarity.toUpperCase()}</div>
+                  ${equipped["offhand"].attack ? "<span class='stat'>Attack: +" + equipped["offhand"].attack + "</span>" : ""}
+                  ${equipped["offhand"].defense ? "<span class='stat'>Defense: +" + equipped["offhand"].defense + "</span>" : ""}
+                  ${equipped["offhand"].agility ? "<span class='stat'>Agility: +" + equipped["offhand"].agility + "</span>" : ""}
+                  ${equipped["offhand"].vitality ? "<span class='stat'>Vitality: +" + equipped["offhand"].vitality + "</span>" : ""}
+                  ${equipped["offhand"].intellect ? "<span class='stat'>Intellect: +" + equipped["offhand"].intellect + "</span>" : ""}
+                  ${equipped["offhand"].crit ? "<span class='stat'>Crit: +" + equipped["offhand"].crit + "</span>" : ""}
+                </div>
+              </div>
+            `
+            : `<div class="pd-empty"></div>`
+          }
+        </div>
 
-          ${g.attack ? "<span class='stat'>Attack: +" + g.attack + "</span>" : ""}
-          ${g.defense ? "<span class='stat'>Defense: +" + g.defense + "</span>" : ""}
-          ${g.agility ? "<span class='stat'>Agility: +" + g.agility + "</span>" : ""}
-          ${g.vitality ? "<span class='stat'>Vitality: +" + g.vitality + "</span>" : ""}
-          ${g.intellect ? "<span class='stat'>Intellect: +" + g.intellect + "</span>" : ""}
-          ${g.crit ? "<span class='stat'>Crit: +" + g.crit + "</span>" : ""}
+        <!-- LEGS -->
+        <div class="pd-slot legs"
+             ondragover="event.preventDefault()"
+             ondrop="dropEquip(event, 'legs')">
+          ${equipped["legs"]
+            ? `
+              <div class="tooltip-container"
+                   draggable="true"
+                   data-id="${equipped["legs"].instance_id}"
+                   ondblclick="unequipItem(${equipped["legs"].instance_id})">
+                <img class="pd-img" src="${resolveIcon(equipped["legs"].icon)}" alt="Legs"
+                     onerror="this.replaceWith(document.createTextNode('📦'))">
 
-          ${g.description
-            ? "<div style='margin-top:6px;font-style:italic'>" + g.description + "</div>"
-            : ""}
+                <div class="tooltip ${equipped["legs"].rarity}">
+                  <strong>${equipped["legs"].name}</strong>
+                  <div class="rarity">${equipped["legs"].rarity.toUpperCase()}</div>
+                  ${equipped["legs"].attack ? "<span class='stat'>Attack: +" + equipped["legs"].attack + "</span>" : ""}
+                  ${equipped["legs"].defense ? "<span class='stat'>Defense: +" + equipped["legs"].defense + "</span>" : ""}
+                  ${equipped["legs"].agility ? "<span class='stat'>Agility: +" + equipped["legs"].agility + "</span>" : ""}
+                  ${equipped["legs"].vitality ? "<span class='stat'>Vitality: +" + equipped["legs"].vitality + "</span>" : ""}
+                  ${equipped["legs"].intellect ? "<span class='stat'>Intellect: +" + equipped["legs"].intellect + "</span>" : ""}
+                  ${equipped["legs"].crit ? "<span class='stat'>Crit: +" + equipped["legs"].crit + "</span>" : ""}
+                </div>
+              </div>
+            `
+            : `<div class="pd-empty"></div>`
+          }
+        </div>
 
-          ${g.quantity > 1
-            ? "<div class='stack-count'>" + g.quantity + "</div>"
-            : ""}
+        <!-- FEET -->
+        <div class="pd-slot feet"
+             ondragover="event.preventDefault()"
+             ondrop="dropEquip(event, 'feet')">
+          ${equipped["feet"]
+            ? `
+              <div class="tooltip-container"
+                   draggable="true"
+                   data-id="${equipped["feet"].instance_id}"
+                   ondblclick="unequipItem(${equipped["feet"].instance_id})">
+                <img class="pd-img" src="${resolveIcon(equipped["feet"].icon)}" alt="Feet"
+                     onerror="this.replaceWith(document.createTextNode('📦'))">
+
+                <div class="tooltip ${equipped["feet"].rarity}">
+                  <strong>${equipped["feet"].name}</strong>
+                  <div class="rarity">${equipped["feet"].rarity.toUpperCase()}</div>
+                  ${equipped["feet"].attack ? "<span class='stat'>Attack: +" + equipped["feet"].attack + "</span>" : ""}
+                  ${equipped["feet"].defense ? "<span class='stat'>Defense: +" + equipped["feet"].defense + "</span>" : ""}
+                  ${equipped["feet"].agility ? "<span class='stat'>Agility: +" + equipped["feet"].agility + "</span>" : ""}
+                  ${equipped["feet"].vitality ? "<span class='stat'>Vitality: +" + equipped["feet"].vitality + "</span>" : ""}
+                  ${equipped["feet"].intellect ? "<span class='stat'>Intellect: +" + equipped["feet"].intellect + "</span>" : ""}
+                  ${equipped["feet"].crit ? "<span class='stat'>Crit: +" + equipped["feet"].crit + "</span>" : ""}
+                </div>
+              </div>
+            `
+            : `<div class="pd-empty"></div>`
+          }
+        </div>
+
+        <!-- HANDS -->
+        <div class="pd-slot hands"
+             ondragover="event.preventDefault()"
+             ondrop="dropEquip(event, 'hands')">
+          ${equipped["hands"]
+            ? `
+              <div class="tooltip-container"
+                   draggable="true"
+                   data-id="${equipped["hands"].instance_id}"
+                   ondblclick="unequipItem(${equipped["hands"].instance_id})">
+                <img class="pd-img" src="${resolveIcon(equipped["hands"].icon)}" alt="Hands"
+                     onerror="this.replaceWith(document.createTextNode('📦'))">
+
+                <div class="tooltip ${equipped["hands"].rarity}">
+                  <strong>${equipped["hands"].name}</strong>
+                  <div class="rarity">${equipped["hands"].rarity.toUpperCase()}</div>
+                  ${equipped["hands"].attack ? "<span class='stat'>Attack: +" + equipped["hands"].attack + "</span>" : ""}
+                  ${equipped["hands"].defense ? "<span class='stat'>Defense: +" + equipped["hands"].defense + "</span>" : ""}
+                  ${equipped["hands"].agility ? "<span class='stat'>Agility: +" + equipped["hands"].agility + "</span>" : ""}
+                  ${equipped["hands"].vitality ? "<span class='stat'>Vitality: +" + equipped["hands"].vitality + "</span>" : ""}
+                  ${equipped["hands"].intellect ? "<span class='stat'>Intellect: +" + equipped["hands"].intellect + "</span>" : ""}
+                  ${equipped["hands"].crit ? "<span class='stat'>Crit: +" + equipped["hands"].crit + "</span>" : ""}
+                </div>
+              </div>
+            `
+            : `<div class="pd-empty"></div>`
+          }
         </div>
 
       </div>
-    `).join("")}
+      <div class="potionbar">
+  <div class="potion-slot tooltip-container">
+    <div class="potion-title">Health Potion</div>
 
+    ${
+      hpPotion
+        ? `
+          <div class="potion-inner" ondblclick="unequipPotion('health')">
+            <img class="potion-img" src="${resolveIcon(hpPotion.icon)}" onerror="this.style.display='none'">
+            <div class="stack-count">${hpPotion.qty}</div>
+
+            <div class="tooltip">
+              <strong>${hpPotion.name}</strong>
+              <div class="rarity">EQUIPPED</div>
+              <div>Slot: Health</div>
+            </div>
+          </div>
+        `
+        : `<div class="potion-empty">Empty</div>`
+    }
+  </div>
+
+  <div class="potion-slot tooltip-container">
+    <div class="potion-title">Mana Potion</div>
+
+    ${
+      spPotion
+        ? `
+          <div class="potion-inner" ondblclick="unequipPotion('mana')">
+            <img class="potion-img" src="${resolveIcon(spPotion.icon)}" onerror="this.style.display='none'">
+            <div class="stack-count">${spPotion.qty}</div>
+
+            <div class="tooltip">
+              <strong>${spPotion.name}</strong>
+              <div class="rarity">EQUIPPED</div>
+              <div>Slot: Mana</div>
+            </div>
+          </div>
+        `
+        : `<div class="potion-empty">Empty</div>`
+    }
   </div>
 </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL (All Inventory) -->
+  <div class="right-panel">
+    <div class="char-box">
+      <div class="inv-panel-head">
+        <h3 style="margin:0">Inventory</h3>
+      </div>
+
+      <input id="invSearch" class="inv-search" placeholder="Search items..." autocomplete="off" />
+
+      <div class="inv-grid"
+           ondragover="event.preventDefault()"
+           ondrop="dropUnequip(event)">
+
+          ${inv
+            .filter((g:any) => !g.equipped)  // ✅ hide equipped items
+            .map((g:any) => `
+              <div class="inv-item tooltip-container"
+                  data-id="${g.instance_id}"
+                  data-slot="${g.slot || ""}"
+                  data-name="${(g.name || "").toLowerCase()}"
+                  draggable="true"
+                  ondblclick="${
+                  ["weapon","offhand","head","chest","legs","feet","hands"].includes(g.slot)
+                    ? `equipItem(${g.instance_id})`
+                    : (String(g.type) === "potion" && String(g.effect_target).toLowerCase() === "hp")
+                        ? `equipPotion(${g.instance_id}, 'health')`
+                        : (String(g.type) === "potion" && String(g.effect_target).toLowerCase() === "sp")
+                            ? `equipPotion(${g.instance_id}, 'mana')`
+                            : ``
+                }"
+
+                >
+
+                <img src="${resolveIcon(g.icon)}" alt=""
+                    onerror="this.style.display='none'">
+
+                ${g.quantity > 1 ? `<div class="stack-count">${g.quantity}</div>` : ``}
+
+                <div class="tooltip ${g.rarity}">
+                  <strong>${g.name}</strong>
+                  <div class="rarity">${(g.rarity || "common").toUpperCase()}</div>
+
+                  ${g.attack ? "<span class='stat'>Attack: +" + g.attack + "</span>" : ""}
+                  ${g.defense ? "<span class='stat'>Defense: +" + g.defense + "</span>" : ""}
+                  ${g.agility ? "<span class='stat'>Agility: +" + g.agility + "</span>" : ""}
+                  ${g.vitality ? "<span class='stat'>Vitality: +" + g.vitality + "</span>" : ""}
+                  ${g.intellect ? "<span class='stat'>Intellect: +" + g.intellect + "</span>" : ""}
+                  ${g.crit ? "<span class='stat'>Crit: +" + g.crit + "</span>" : ""}
+
+                  ${g.description
+                    ? "<div style='margin-top:6px;font-style:italic'>" + g.description + "</div>"
+                    : ""}
+                </div>
+
+              </div>
+            `).join("")}
+
+
       </div>
     </div>
-
   </div>
 
 </div>
 
 <script src="/statpanel.js"></script>
+
 <script>
 async function addStat(stat) {
   const res = await fetch("/character/stat", {
@@ -449,16 +1196,21 @@ async function addStat(stat) {
   });
   const data = await res.json();
   if (data.error) return alert(data.error);
-  document.getElementById(stat).innerText = data.value;
+
+  const el = document.getElementById(stat);
+  if (el) el.childNodes[0].nodeValue = data.value; // keep tooltip intact
   document.getElementById("statPoints").innerText = data.stat_points;
+
   if (data.stat_points <= 0) {
     document.querySelectorAll(".stat-row button").forEach(b => b.remove());
   }
 }
+
 function goBack() {
   history.length > 1 ? history.back() : location.href="/town";
 }
 </script>
+
 <script>
 let draggedId = null;
 
@@ -477,7 +1229,7 @@ async function equipItem(id) {
   const data = await res.json();
   if (data.error) return alert(data.error);
 
-  location.reload(); // simple + safe for now
+  location.reload();
 }
 
 async function unequipItem(id) {
@@ -485,6 +1237,31 @@ async function unequipItem(id) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ inventoryId: id })
+  });
+
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+
+  location.reload();
+}
+async function equipPotion(inventoryId, slot) {
+  const res = await fetch("/character/equip-potion", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ inventoryId, slot })
+  });
+
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+
+  location.reload();
+}
+
+async function unequipPotion(slot) {
+  const res = await fetch("/character/unequip-potion", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slot })
   });
 
   const data = await res.json();
@@ -513,6 +1290,18 @@ function dropUnequip() {
 }
 </script>
 
+<script>
+  const searchEl = document.getElementById("invSearch");
+  if (searchEl) {
+    searchEl.addEventListener("input", () => {
+      const q = searchEl.value.trim().toLowerCase();
+      document.querySelectorAll(".inv-item").forEach(el => {
+        const name = (el.getAttribute("data-name") || "");
+        el.style.display = (!q || name.includes(q)) ? "" : "none";
+      });
+    });
+  }
+</script>
 
 </body>
 </html>
@@ -585,6 +1374,21 @@ if (!row || !row.slot) {
   return res.json({ error: "Invalid item" });
 }
 
+const ALLOWED_SLOTS = new Set([
+  "weapon",
+  "offhand",
+  "head",
+  "chest",
+  "legs",
+  "feet",
+  "hands"
+]);
+
+if (!row || !row.slot || !ALLOWED_SLOTS.has(row.slot)) {
+  return res.json({ error: "That item cannot be equipped." });
+}
+
+
 // Unequip existing item in same slot
 await db.query(`
   UPDATE inventory
@@ -618,6 +1422,91 @@ res.json({ success: true });
 });
 
 
+// =======================
+// EQUIP POTIONS (Loadout)
+// =======================
+router.post("/character/equip-potion", requireLogin, async (req, res) => {
+  const pid = req.session.playerId as number;
+  const slot = String(req.body.slot || "");          // "health" | "mana"
+  const inventoryId = Number(req.body.inventoryId);  // inventory.inventory_id
+
+  const expectedTarget =
+    slot === "health" ? "hp" :
+    slot === "mana" ? "sp" :
+    null;
+
+  if (!expectedTarget || !Number.isFinite(inventoryId)) {
+    return res.json({ error: "Invalid slot or inventoryId" });
+  }
+
+  const [[row]]: any = await db.query(
+    `
+    SELECT
+      inv.inventory_id,
+      inv.player_id,
+      inv.quantity,
+      inv.equipped,
+      i.type,
+      i.effect_target,
+      i.is_combat
+    FROM inventory inv
+    JOIN items i ON i.id = inv.item_id
+    WHERE inv.inventory_id = ?
+      AND inv.player_id = ?
+    LIMIT 1
+    `,
+    [inventoryId, pid]
+  );
+
+  if (!row) return res.json({ error: "Potion not found" });
+  if (Number(row.quantity) <= 0) return res.json({ error: "No quantity remaining" });
+
+  // must be a potion
+  if (String(row.type) !== "potion") return res.json({ error: "Item is not a potion" });
+
+  // must be usable in combat
+  if (Number(row.is_combat) !== 1) return res.json({ error: "Potion is not usable in combat" });
+
+  // must match slot target
+  if (String(row.effect_target || "").toLowerCase() !== expectedTarget) {
+    return res.json({ error: "Potion doesn't match that slot" });
+  }
+
+  // store pointer on players row
+  if (slot === "health") {
+    await db.query(
+      `UPDATE players SET equip_potion_hp_inventory_id=? WHERE id=?`,
+      [inventoryId, pid]
+    );
+  } else {
+    await db.query(
+      `UPDATE players SET equip_potion_sp_inventory_id=? WHERE id=?`,
+      [inventoryId, pid]
+    );
+  }
+
+  res.json({ success: true });
+});
+
+router.post("/character/unequip-potion", requireLogin, async (req, res) => {
+  const pid = req.session.playerId as number;
+  const slot = String(req.body.slot || "");
+
+  const col =
+    slot === "health" ? "equip_potion_hp_inventory_id" :
+    slot === "mana" ? "equip_potion_sp_inventory_id" :
+    null;
+
+  if (!col) return res.json({ error: "Invalid slot" });
+
+  await db.query(`UPDATE players SET ${col} = NULL WHERE id=?`, [pid]);
+  res.json({ success: true });
+});
+
+
+
+
+
 
 
 // =======================
@@ -626,18 +1515,42 @@ res.json({ success: true });
 router.post("/character/unequip", requireLogin, async (req, res) => {
   const pid = req.session.playerId;
   const { inventoryId } = req.body;
+  if (!inventoryId) return res.json({ error: "Missing inventoryId" });
 
-  if (!inventoryId) {
-    return res.json({ error: "Missing inventoryId" });
-  }
-
-  await db.query(`
-    UPDATE inventory
-    SET equipped = 0
-    WHERE inventory_id = ? AND player_id = ?
+  const [[row]]: any = await db.query(`
+    SELECT inventory_id, item_id, quantity
+    FROM inventory
+    WHERE inventory_id = ? AND player_id = ? AND equipped = 1
   `, [inventoryId, pid]);
+
+  if (!row) return res.json({ error: "Item not found or not equipped" });
+
+  // Find existing unequipped stack
+  const [[stack]]: any = await db.query(`
+    SELECT inventory_id, quantity
+    FROM inventory
+    WHERE player_id = ? AND item_id = ? AND equipped = 0
+    LIMIT 1
+  `, [pid, row.item_id]);
+
+  if (stack) {
+    // merge
+    await db.query(
+      `UPDATE inventory SET quantity = quantity + ? WHERE inventory_id = ?`,
+      [row.quantity, stack.inventory_id]
+    );
+    // remove equipped row
+    await db.query(`DELETE FROM inventory WHERE inventory_id = ?`, [row.inventory_id]);
+  } else {
+    // no stack exists, just flip equipped off
+    await db.query(
+      `UPDATE inventory SET equipped = 0 WHERE inventory_id = ? AND player_id = ?`,
+      [row.inventory_id, pid]
+    );
+  }
 
   res.json({ success: true });
 });
+
 
 export default router;

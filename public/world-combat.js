@@ -5,12 +5,44 @@ console.log("🔥 world-combat.js LOADED");
 
 let currentEnemy = null;
 let enemyAttackTimer = null;
-const spellCooldowns = {}; 
+const spellCooldowns = {};
 // { spellId: timestamp_when_ready }
+
 // =======================
 // STATUS POLLING
 // =======================
 let statusPollInterval = null;
+
+// ✅ NEW: post-combat state flag (so we can enable close + reload on manual close)
+let combatOver = false;
+
+// ✅ NEW: enable/disable close button (top-right of modal)
+function setCombatCloseEnabled(enabled) {
+  const btn = document.getElementById("combatCloseBtn"); // <-- required in your HTML
+  if (!btn) return;
+
+  btn.disabled = !enabled;
+
+  // lightweight visual affordance (won't break if no CSS)
+  btn.style.pointerEvents = enabled ? "auto" : "none";
+  btn.style.opacity = enabled ? "1" : "0.4";
+}
+
+// ✅ NEW: put modal into "post-combat" mode instead of auto-closing
+function enterPostCombatState() {
+  combatOver = true;
+
+  stopStatusPolling();
+  stopEnemyAutoAttack();
+
+  // lock further combat actions safely
+  currentEnemy = null;
+
+  // let player review the log
+  setCombatCloseEnabled(true);
+
+  logCombat("✅ Combat ended. Close this window when you're ready.");
+}
 
 function startStatusPolling() {
   if (statusPollInterval) return;
@@ -44,12 +76,14 @@ function startStatusPolling() {
           logCombat("⬆ LEVEL UP!");
         }
 
-        return setTimeout(() => {
-          closeCombatModal();
-          location.reload();
-        }, 1600);
-      }
+        // ✅ CHANGED: do NOT auto-close
+        // Put the modal into post-combat review state instead
+        setTimeout(() => {
+          enterPostCombatState();
+        }, 200);
 
+        return;
+      }
 
       if (data.stop) {
         stopStatusPolling();
@@ -70,6 +104,7 @@ function stopStatusPolling() {
     statusPollInterval = null;
   }
 }
+
 function updateEnemyHUD(hp, maxHP) {
   const bar = document.getElementById("enemyHPBar");
   const hpText = document.getElementById("enemyHP");
@@ -87,10 +122,13 @@ function updateEnemyHUD(hp, maxHP) {
   if (maxText) maxText.innerText = currentEnemy.maxHP;
 
   if (currentEnemy.maxHP > 0) {
-    bar.style.width =
-      Math.max(0, (hp / currentEnemy.maxHP) * 100) + "%";
+    bar.style.width = Math.max(0, (hp / currentEnemy.maxHP) * 100) + "%";
   }
 }
+
+
+
+
 
 /* ===============================
    COMBAT MODAL CONTROL
@@ -98,9 +136,18 @@ function updateEnemyHUD(hp, maxHP) {
 
 window.openCombatModal = async function (enemy) {
   await waitForEl("combatModal");
+
+// ✅ NEW: always populate the hotbar ASAP
+loadHotbarSpells();
+
   startStatusPolling();
+
   // ✅ Always show modal immediately (so user sees it)
   document.getElementById("combatModal").classList.remove("hidden");
+  loadEquippedPotions();
+  // ✅ NEW: reset post-combat state + disable close while fighting
+  combatOver = false;
+  setCombatCloseEnabled(false);
 
   // ✅ Reset log immediately
   clearCombatLog();
@@ -171,21 +218,31 @@ window.openCombatModal = async function (enemy) {
   }
 };
 
-window.openSpellsModal = function () {
-  document.getElementById("spellsModal").classList.remove("hidden");
-  loadCombatSpells();
-};
+// ✅ CHANGED: stop polling too; only reload if combatOver is true
 window.closeCombatModal = function () {
+  stopStatusPolling();
   stopEnemyAutoAttack();
   currentEnemy = null;
+
   document.getElementById("combatModal").classList.add("hidden");
-}
+
+  // ✅ If combat ended, closing means "continue" → refresh everything
+  if (combatOver) {
+    location.reload();
+  } else {
+    // if you ever allow manual closing mid-fight later, keep it disabled by default
+    setCombatCloseEnabled(false);
+  }
+
+  combatOver = false;
+};
 
 /* ===============================
    COMBAT ACTIONS
 ================================ */
 let playerAttackLocked = false;
 async function combatAttack() {
+  if (combatOver) return; // ✅ NEW: block actions in post-combat review mode
   if (playerAttackLocked) return;
   if (!currentEnemy) return;
 
@@ -195,7 +252,8 @@ async function combatAttack() {
   if (data.error === "cooldown") {
     return; // server rejected — do nothing
   }
-    playerAttackLocked = true;
+
+  playerAttackLocked = true;
 
   if (data.cooldownMs) {
     setTimeout(() => {
@@ -204,6 +262,7 @@ async function combatAttack() {
   } else {
     playerAttackLocked = false;
   }
+
   if (data.log) logCombat(data.log);
 
   if (data.damage !== undefined) {
@@ -214,24 +273,25 @@ async function combatAttack() {
     updateEnemyHP(data.enemyHP);
   }
 
-if (data.dead) {
-  logCombat("🏆 Enemy defeated!");
+  if (data.dead) {
+    logCombat("🏆 Enemy defeated!");
 
-  if (data.exp) {
-    logCombat(`✨ You gained ${data.exp} EXP!`);
+    if (data.exp) {
+      logCombat(`✨ You gained ${data.exp} EXP!`);
+    }
+
+    if (data.gold) {
+      logCombat(`💰 You gained ${data.gold} gold!`);
+    }
+
+    if (data.levelUp) {
+      logCombat(`⬆ LEVEL UP!`);
+    }
+
+    // ✅ CHANGED: do NOT auto-close
+    enterPostCombatState();
+    return;
   }
-
-  if (data.gold) {
-    logCombat(`💰 You gained ${data.gold} gold!`);
-  }
-
-  if (data.levelUp) {
-    logCombat(`⬆ LEVEL UP!`);
-  }
-
-  setTimeout(closeCombatModal, 1200);
-}
-
 }
 
 async function combatFlee() {
@@ -259,8 +319,6 @@ async function combatFlee() {
   }
 }
 
-
-
 /* ===============================
    ENEMY AUTO ATTACK
 ================================ */
@@ -274,16 +332,20 @@ function startEnemyAutoAttack() {
 
       if (data.log) logCombat(data.log);
 
-    if (data.playerHP !== undefined) {
-      updatePlayerHP(data.playerHP);
-      logCombat(`💥 ${currentEnemy.name} hits you for ${data.damage}`);
-    }
+      if (data.playerHP !== undefined) {
+        updatePlayerHP(data.playerHP);
+        logCombat(`💥 ${currentEnemy?.name ?? "Enemy"} hits you for ${data.damage}`);
+      }
 
-      if (data.dead) {
+      if (data.playerDead) {
         logCombat("☠ You were slain!");
         stopEnemyAutoAttack();
-        setTimeout(() => location.href = "/death", 1000);
+        stopStatusPolling();
+        currentEnemy = null;
+        setTimeout(() => (window.location.href = "/death.html"), 600);
+        return;
       }
+
 
       if (data.stop) {
         stopEnemyAutoAttack();
@@ -344,111 +406,125 @@ function waitForEl(id, tries = 40) {
     }, 25);
   });
 }
+
 window.openCombatModal = openCombatModal;
+
 /* ===============================
-   LOAD/CAST SPELL
+   HOTBAR
 ================================ */
-async function loadCombatSpells() {
-  const grid = document.getElementById("combatSpellsGrid");
-  if (!grid) {
-    console.error("❌ combatSpellsGrid missing from DOM");
-    return;
-  }
+function renderHotbarSpells(spells) {
+  const bar = document.getElementById("combatHotbar");
+  const manaBtn = document.getElementById("spPotionBtn");
+  if (!bar || !manaBtn) return;
 
-  let spells;
-  try {
-    const res = await fetch("/combat/spells", { credentials: "include" });
-    spells = await res.json();
-  } catch (err) {
-    console.error("❌ Failed to fetch spells", err);
-    return;
-  }
+  // ✅ Remove ONLY previously-rendered spell buttons (leave potions)
+  bar.querySelectorAll(".hotbar-spell").forEach(el => el.remove());
 
-  if (!Array.isArray(spells)) {
-    console.error("❌ Spells response is not an array:", spells);
-    return;
-  }
+  const MAX = 6;
+  const list = Array.isArray(spells) ? spells.slice(0, MAX) : [];
 
-grid.innerHTML = "";
+  for (let i = 0; i < MAX; i++) {
+    const s = list[i];
+    const key = (i + 1);
 
-if (spells.length === 0) {
-  grid.innerHTML = "<em>No spells available</em>";
-  return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hotbar-tile hotbar-spell"; // <- marker class so we can remove later
+
+    if (!s) {
+      btn.classList.add("empty");
+      btn.title = "Empty Slot";
+      btn.innerHTML = `
+        <img src="/icons/default.png" alt="">
+        <span class="hotbar-key">${key}</span>
+      `;
+    } else {
+      const name = (s.name ?? "Spell").toString();
+      const icon = (s.icon ?? "default.png").toString();
+
+      btn.title = name;
+      btn.onclick = () => castSpell(s.id);
+// Build a readable description (same logic as spellbook)
+let description = "";
+switch (s.type) {
+  case "damage": description = `Damage: ${s.damage ?? 0}`; break;
+  case "heal": description = `Heal: ${s.heal ?? 0}`; break;
+  case "dot": description = `DOT: ${s.dot_damage ?? 0} / ${s.dot_tick_rate ?? 1}s (${s.dot_duration ?? 0}s)`; break;
+  case "damage_dot": description = `Hit: ${s.damage ?? 0} + DOT: ${s.dot_damage ?? 0}/${s.dot_tick_rate ?? 1}s (${s.dot_duration ?? 0}s)`; break;
+  case "buff": description = `Buff ${String(s.buff_stat || "").toUpperCase()} +${s.buff_value ?? 0} (${s.buff_duration ?? 0}s)`; break;
+  case "debuff": description = `Debuff ${String(s.debuff_stat || "").toUpperCase()} ${s.debuff_value ?? 0} (${s.debuff_duration ?? 0}s)`; break;
+  default: description = s.description || "";
 }
 
-spells.forEach(s => {
-  let description = "";
+btn.innerHTML = `
+  <img src="/icons/spells/${icon}" alt="${name}" onerror="this.src='/icons/default.png'">
+  <span class="hotbar-key">${key}</span>
+  <div class="hotbar-cd hidden" id="hotbar-cd-${s.id}"></div>
 
-  switch (s.type) {
-    case "damage":
-      description = `DAMAGE: ${s.damage ?? 0}`;
-      break;
+  <!-- ✅ Tooltip -->
+  <div class="hotbar-tooltip">
+    <div class="tt-title">${name}</div>
 
-    case "heal":
-      description = `HEAL: ${s.heal ?? 0}`;
-      break;
-
-    case "dot": {
-      const perTick = s.dot_damage ?? 0;
-      const dur = s.dot_duration ?? 0;
-      const tick = s.dot_tick_rate ?? 1;
-      description = `DOT: ${perTick} / ${tick}s for ${dur}s`;
-      break;
-    }
-
-    case "damage_dot": {
-      const dmg = s.damage ?? 0;
-      const perTick = s.dot_damage ?? 0;
-      const dur = s.dot_duration ?? 0;
-      const tick = s.dot_tick_rate ?? 1;
-      description = `DMG: ${dmg} + DOT: ${perTick}/${tick}s for ${dur}s`;
-      break;
-    }
-
-    case "buff":
-      description = `BUFF ${String(s.buff_stat || "").toUpperCase()} +${s.buff_value ?? 0} (${s.buff_duration ?? 0}s)`;
-      break;
-
-    case "debuff":
-      description = `DEBUFF ${String(s.debuff_stat || "").toUpperCase()} ${s.debuff_value ?? 0} (${s.debuff_duration ?? 0}s)`;
-      break;
-
-    default:
-      description = s.description || "";
-  }
-
-  grid.innerHTML += `
-    <div class="spell-slot" onclick="castSpell(${s.id})">
-      <div class="spell-icon-wrapper">
-        <img class="spell-icon" src="/icons/spells/${s.icon}">
-        <div class="spell-cooldown hidden" id="spell-cd-${s.id}"></div>
-      </div>
-
-      <div class="spell-info">
-        <strong>${s.name}</strong>
-        <div>Cost: ${s.scost} SP</div>
-        <div>${description}</div>
-        ${s.cooldown ? `<div class="cooldown-text">CD: ${s.cooldown}s</div>` : ""}
-      </div>
+    <div class="tt-row">
+      <span class="tt-muted">Cost</span>
+      <span>${s.scost ?? 0} SP</span>
     </div>
-  `;
-});
-Object.entries(spellCooldowns).forEach(([spellId, endTime]) => {
-  const remaining = Math.ceil((endTime - Date.now()) / 1000);
-  if (remaining > 0) {
-    startSpellCooldown(spellId, remaining);
-  }
-});
 
+    ${s.cooldown ? `
+      <div class="tt-row">
+        <span class="tt-muted">Cooldown</span>
+        <span>${s.cooldown}s</span>
+      </div>
+    ` : ""}
+
+    <div class="tt-sep"></div>
+    <div>${description || "<span class='tt-muted'>No description</span>"}</div>
+  </div>
+`;
+    }
+
+    // ✅ Insert spell buttons BEFORE the mana potion button
+    bar.insertBefore(btn, manaBtn);
+  }
+
+  // ✅ Re-apply existing cooldowns
+  Object.entries(spellCooldowns).forEach(([spellId, endTime]) => {
+    const remaining = Math.ceil((endTime - Date.now()) / 1000);
+    if (remaining > 0) startHotbarCooldown(spellId, remaining);
+  });
 }
 
 
 
+
+function startHotbarCooldown(spellId, seconds) {
+  const cdEl = document.getElementById(`hotbar-cd-${spellId}`);
+  if (!cdEl || seconds <= 0) return;
+
+  const endTime = Date.now() + seconds * 1000;
+
+  cdEl.classList.remove("hidden");
+
+  function tick() {
+    const remaining = Math.ceil((endTime - Date.now()) / 1000);
+    if (remaining <= 0) {
+      cdEl.classList.add("hidden");
+      cdEl.textContent = "";
+      return;
+    }
+    cdEl.textContent = remaining;
+    requestAnimationFrame(() => setTimeout(tick, 250));
+  }
+
+  tick();
+}
 
 /* ===============================
    CAST SPELL
 ================================ */
 async function castSpell(spellId) {
+  if (combatOver) return; // ✅ NEW: block actions in post-combat review mode
+
   // Client-side cooldown guard
   if (spellCooldowns[spellId] && Date.now() < spellCooldowns[spellId]) {
     return;
@@ -474,8 +550,10 @@ async function castSpell(spellId) {
   }
 
   if (data.cooldown && data.cooldown > 0) {
-    startSpellCooldown(spellId, data.cooldown);
+    spellCooldowns[spellId] = Date.now() + data.cooldown * 1000; // keep your guard working
+    startHotbarCooldown(spellId, data.cooldown);
   }
+
 
   if (data.enemyHP !== undefined) {
     updateEnemyHP(data.enemyHP);
@@ -489,64 +567,182 @@ async function castSpell(spellId) {
     updatePlayerSP(data.playerSP);
   }
 
-if (data.dead) {
-  logCombat("🏆 Enemy defeated!");
+  if (data.dead) {
+    logCombat("🏆 Enemy defeated!");
 
-  if (data.exp) {
-    logCombat(`✨ You gained ${data.exp} EXP!`);
+    if (data.exp) {
+      logCombat(`✨ You gained ${data.exp} EXP!`);
+    }
+
+    if (data.gold) {
+      logCombat(`💰 You gained ${data.gold} gold!`);
+    }
+
+    if (data.levelUp) {
+      logCombat(`⬆ LEVEL UP!`);
+    }
+
+    // ✅ CHANGED: do NOT auto-close
+    enterPostCombatState();
+    closeSpellsModal();
+    return;
   }
-
-  if (data.gold) {
-    logCombat(`💰 You gained ${data.gold} gold!`);
-  }
-
-  if (data.levelUp) {
-    logCombat(`⬆ LEVEL UP!`);
-  }
-
-  stopEnemyAutoAttack();
-  setTimeout(closeCombatModal, 1200);
-}
-
 
   closeSpellsModal();
 }
-
+async function loadHotbarSpells() {
+  try {
+    const res = await fetch("/combat/spells", { credentials: "include" });
+    const spells = await res.json();
+    if (Array.isArray(spells)) {
+      renderHotbarSpells(spells);
+    } else {
+      renderHotbarSpells([]); // show empty slots
+    }
+  } catch (e) {
+    console.warn("Hotbar spells load failed:", e);
+    renderHotbarSpells([]); // fail gracefully
+  }
+}
 
 /* ===============================
    LOAD/USE ITEMS
 ================================ */
-async function useCombatItem(inventoryId) {
-  const res = await fetch("/combat/use-item", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ inventoryId })
-  });
+function resolveItemIcon(rawIcon) {
+  const raw = (rawIcon ?? "").toString().trim();
+  if (!raw) return "/icons/default.png";
 
-  const data = await res.json();
-  if (data.error) return alert(data.error);
+  // absolute url
+  if (raw.startsWith("http")) return raw;
 
-  logCombat(data.log);
-  updatePlayerHP(data.playerHP);
-  await refreshPlayerCaps();
-  closeItemsModal();
+  // already a rooted path like "/icons/..."
+  if (raw.startsWith("/")) return raw;
+
+  // if DB stores "icons/xxx.png" or "potions/xxx.png", normalize to "/icons/..."
+  if (raw.startsWith("icons/")) return "/" + raw;
+
+  // if DB stores just "potion.png", assume it's in /icons/
+  return "/icons/" + raw.replace(/^\/+/, "");
 }
-async function loadCombatItems() {
-  const res = await fetch("/combat/items");
-  const items = await res.json();
 
-  const grid = document.getElementById("combatItemsGrid");
-  grid.innerHTML = "";
+async function loadEquippedPotions() {
+  try {
+    const r = await fetch("/combat/potions-equipped", { credentials: "include" });
+    const data = await r.json();
+console.log("🧪 potions-equipped payload:", data);
+console.log("🧪 health potion object:", data?.health);
+console.log("🧪 mana potion object:", data?.mana);
+    applyPotion("health", data?.health || null);
+    applyPotion("mana", data?.mana || null);
+  } catch (e) {
+    console.warn("loadEquippedPotions failed", e);
+    applyPotion("health", null);
+    applyPotion("mana", null);
+  }
+}
 
-  items.forEach(i => {
-    grid.innerHTML += `
-      <div class="item-slot" onclick="useCombatItem(${i.inventory_id})">
-        <img src="/icons/${i.icon}">
-        <div class="qty">${i.quantity}</div>
+function applyPotion(slot, potion) {
+  const isHealth = slot === "health";
+
+  const tip = document.getElementById(isHealth ? "hpPotionTooltip" : "spPotionTooltip");
+  const btn = document.getElementById(isHealth ? "hpPotionBtn" : "spPotionBtn");
+  const img = document.getElementById(isHealth ? "hpPotionImg" : "spPotionImg");
+  const qtyEl = document.getElementById(isHealth ? "hpPotionQty" : "spPotionQty");
+
+  // Tip is optional, but the rest must exist
+  if (!btn || !img || !qtyEl) return;
+
+  // ---- No potion equipped ----
+  if (!potion) {
+    btn.disabled = true;
+
+    qtyEl.classList.add("hidden");
+    qtyEl.textContent = "";
+
+    if (tip) {
+      tip.innerHTML = `
+        <div class="tt-title">${isHealth ? "Health Potion" : "Mana Potion"}</div>
+        <div class="tt-muted">No potion equipped</div>
+      `;
+    }
+    return;
+  }
+
+  // ---- Potion equipped ----
+  btn.disabled = false;
+
+  // Icon
+  const iconSrc = resolveItemIcon(potion.icon);
+  if (iconSrc) img.src = iconSrc;
+
+  // Quantity badge
+  const qty = Number(potion.qty ?? potion.quantity ?? 1);
+  if (qty > 1) {
+    qtyEl.textContent = String(qty);
+    qtyEl.classList.remove("hidden");
+  } else {
+    qtyEl.classList.add("hidden");
+    qtyEl.textContent = "";
+  }
+
+  // Tooltip content
+  const name = (potion.name ?? (isHealth ? "Health Potion" : "Mana Potion")).toString();
+
+  // Try common fields that might exist in your DB
+  const amount = Number(
+  potion.effect_value ??
+  potion.heal_amount ?? potion.restore_amount ??
+  potion.heal ?? potion.restore ?? potion.amount ??
+  0
+);
+
+
+  const desc = (potion.description ?? potion.desc ?? "").toString().trim();
+
+  if (tip) {
+    tip.innerHTML = `
+      <div class="tt-title">${name}</div>
+      <div class="tt-row">
+        <span class="tt-muted">Effect</span>
+        <span>${amount ? (isHealth ? `+${amount} HP` : `+${amount} SP`) : (isHealth ? "Restores HP" : "Restores SP")}</span>
       </div>
+      ${desc ? `<div class="tt-sep"></div><div>${desc}</div>` : ""}
     `;
-  });
+  }
 }
+
+
+async function useHotbarPotion(slot) {
+  if (combatOver) return;
+
+  try {
+    const r = await fetch("/combat/potions-use", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slot }) // "health" | "mana"
+    });
+
+    const data = await r.json();
+    if (data.error) {
+      logCombat(`⚠ ${data.error}`);
+      return;
+    }
+
+    if (data.log) logCombat(data.log);
+
+    if (data.playerHP !== undefined) updatePlayerHP(data.playerHP);
+    if (data.playerSP !== undefined) updatePlayerSP(data.playerSP);
+
+    await refreshPlayerCaps();
+    await loadEquippedPotions(); // qty/empty refresh
+  } catch (e) {
+    console.error("useHotbarPotion failed", e);
+    logCombat("⚠ Failed to use potion.");
+  }
+}
+
+
 /* ===============================
    COMBAT LOG HELPERS
 ================================ */
@@ -562,23 +758,6 @@ function clearCombatLog() {
   if (log) log.innerHTML = "";
 }
 
-function openItemsModal() {
-  document.getElementById("itemsModal").classList.remove("hidden");
-  loadCombatItems();
-}
-
-function closeItemsModal() {
-  document.getElementById("itemsModal").classList.add("hidden");
-}
-function openSpellsModal() {
-  document.getElementById("spellsModal").classList.remove("hidden");
-  loadCombatSpells();
-}
-
-function closeSpellsModal() {
-  document.getElementById("spellsModal").classList.add("hidden");
-}
-
 async function refreshPlayerCaps() {
   const res = await fetch("/me");
   const p = await res.json();
@@ -592,39 +771,12 @@ async function refreshPlayerCaps() {
   setText("playerHP", p.hpoints);
   setText("playerSP", p.spoints);
 }
-function startSpellCooldown(spellId, seconds) {
-  const cdEl = document.getElementById(`spell-cd-${spellId}`);
-  const spellSlot = cdEl?.closest(".spell-slot");
-  if (!cdEl || seconds <= 0) return;
 
-  const endTime = Date.now() + seconds * 1000;
-  spellCooldowns[spellId] = endTime;
-
-  cdEl.classList.remove("hidden");
-  spellSlot?.classList.add("on-cooldown");
-
-  function tick() {
-    const remaining = Math.ceil((endTime - Date.now()) / 1000);
-
-    if (remaining <= 0) {
-      cdEl.classList.add("hidden");
-      spellSlot?.classList.remove("on-cooldown");
-      delete spellCooldowns[spellId];
-      return;
-    }
-
-    cdEl.textContent = remaining;
-    requestAnimationFrame(() => setTimeout(tick, 250));
-  }
-
-  tick();
-}
 function setText(id, value) {
   const el = document.getElementById(id);
   if (!el) return;
 
-  el.textContent =
-    value === undefined || value === null ? "" : String(value);
+  el.textContent = value === undefined || value === null ? "" : String(value);
 }
 
 function updateBar(barId, current, max) {
@@ -633,12 +785,11 @@ function updateBar(barId, current, max) {
   const pct = Math.max(0, Math.min(100, (current / max) * 100));
   bar.style.width = pct + "%";
 }
+
 function updateEnemyHP(hp) {
   if (!currentEnemy) return;
   updateEnemyHUD(hp, currentEnemy.maxHP);
 }
-
-
 
 function updatePlayerHP(currentHP) {
   setText("playerHP", currentHP);

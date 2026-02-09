@@ -15,6 +15,15 @@ function loadStatPanel() {
     .then(res => res.json())
     .then(p => {
       if (!p) return;
+      // ✅ STAT POINTS GLOW (portrait)
+      const frame = document.querySelector(".portrait-frame");
+      if (frame) {
+        const hasPoints = Number(p.stat_points) > 0;
+        frame.classList.toggle("portrait-glow", hasPoints);
+        console.log("🟡 portrait glow:", hasPoints, "stat_points:", p.stat_points);
+      } else {
+        console.warn("portrait-frame not found (HUD not injected yet?)");
+      }
 
       // =======================
       // BASIC INFO
