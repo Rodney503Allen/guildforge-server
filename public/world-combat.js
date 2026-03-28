@@ -1,20 +1,79 @@
-console.log("🔥 world-combat.js LOADED");
+//world-combat.js
 // =======================================
 // WORLD COMBAT (MODAL-ONLY, CLEAN)
 // =======================================
 
 let currentEnemy = null;
-let enemyAttackTimer = null;
 const spellCooldowns = {};
 // { spellId: timestamp_when_ready }
 
-// =======================
-// STATUS POLLING
-// =======================
-let statusPollInterval = null;
-
 // ✅ NEW: post-combat state flag (so we can enable close + reload on manual close)
 let combatOver = false;
+let combatStateInterval = null;
+function maybeShowLootChest(data) {
+  const chestId = data?.chest?.id ?? data?.chestId ?? null;
+  if (!chestId) return;
+
+  setTimeout(() => {
+    if (typeof LootChestModal !== "undefined") {
+      LootChestModal.setPending?.(chestId); // show indicator
+      LootChestModal.show(chestId);         // open modal
+    } else {
+      console.warn("LootChestModal not loaded");
+    }
+  }, 250);
+}
+
+function startCombatStatePolling() {
+  if (combatStateInterval) return;
+
+  combatStateInterval = setInterval(async () => {
+    try {
+      const res = await fetch("/combat/state", { credentials: "include" });
+      const data = await res.json();
+
+      if (!data?.snapshot) return;
+
+      syncCombatSnapshot(data.snapshot);
+
+      if (data.snapshot?.state === "defeat" && !combatOver) {
+        stopCombatStatePolling();
+        currentEnemy = null;
+        setTimeout(() => (window.location.href = "/death.html"), 500);
+        return;
+      }
+
+      if (!data.inCombat && !combatOver) {
+        if (data.snapshot?.state === "victory") {
+          logCombat("🏆 Enemy defeated!");
+
+          const rewards = data.snapshot.rewards;
+          if (rewards) {
+            if (rewards.exp) logCombat(`✨ You gained ${rewards.exp} EXP!`);
+            if (rewards.gold) logCombat(`💰 You gained ${rewards.gold} gold!`);
+            if (rewards.levelUp) logCombat("⬆ LEVEL UP!");
+
+            maybeShowLootChest({
+              chest: rewards.chest ?? null,
+              quest: rewards.quest ?? null
+            });
+          }
+        }
+
+        enterPostCombatState();
+      }
+    } catch (err) {
+      console.error("combat/state polling failed", err);
+    }
+  }, 200);
+}
+
+function stopCombatStatePolling() {
+  if (combatStateInterval) {
+    clearInterval(combatStateInterval);
+    combatStateInterval = null;
+  }
+}
 
 // ✅ NEW: enable/disable close button (top-right of modal)
 function setCombatCloseEnabled(enabled) {
@@ -28,126 +87,256 @@ function setCombatCloseEnabled(enabled) {
   btn.style.opacity = enabled ? "1" : "0.4";
 }
 
+// ✅ Disable/enable ALL combat modal buttons except the top-right close X
+function setCombatUIEnabled(enabled) {
+  const modal = document.getElementById("combatModal");
+  if (!modal) return;
+
+    // ✅ toggle dim state
+  modal.classList.toggle("post-combat-dim", !enabled);
+  
+  // target all buttons inside modal
+  const buttons = modal.querySelectorAll("button");
+
+  buttons.forEach((b) => {
+    if (b.id === "combatCloseBtn") return; // keep X controllable via setCombatCloseEnabled
+    b.disabled = !enabled;
+  });
+
+  // Optional: also kill pointer interaction on non-button clickable tiles (if any)
+  // This is safe even if none exist.
+  modal.querySelectorAll(".hotbar-tile, .spell-tile, .spell-slot, .item-slot").forEach((el) => {
+    // don't block tooltips/scrolling; just stop clicking
+    el.style.pointerEvents = enabled ? "" : "none";
+  });
+}
+
+// =======================
+// POTION COOLDOWNS (PER SLOT)
+// =======================
+const POTION_CD_MS = 2000; // 2s cooldown PER potion slot
+
+const potionCdEnd = {
+  health: 0,
+  mana: 0
+};
+
+const potionCdTimer = {
+  health: null,
+  mana: null
+};
+
+function getPotionEls(slot) {
+  const isHealth = slot === "health";
+  return {
+    btn: document.getElementById(isHealth ? "hpPotionBtn" : "spPotionBtn"),
+    cd:  document.getElementById(isHealth ? "potion-cd-hp" : "potion-cd-sp")
+  };
+}
+
+function isPotionOnCooldown(slot) {
+  return Date.now() < (potionCdEnd[slot] || 0);
+}
+
+function setPotionDimmed(slot, dimmed) {
+  const { btn } = getPotionEls(slot);
+  if (!btn) return;
+  btn.classList.toggle("is-cooldown", !!dimmed);
+  btn.style.pointerEvents = dimmed ? "none" : "";
+}
+
+function showPotionCooldown(slot, seconds) {
+  const { cd } = getPotionEls(slot);
+  if (!cd) return;
+  cd.classList.remove("hidden");
+  cd.textContent = String(seconds);
+}
+
+function hidePotionCooldown(slot) {
+  const { cd } = getPotionEls(slot);
+  if (!cd) return;
+  cd.classList.add("hidden");
+  cd.textContent = "";
+}
+
+function startPotionCooldown(slot, seconds = 2) {
+  potionCdEnd[slot] = Date.now() + seconds * 1000;
+
+  setPotionDimmed(slot, true);
+  showPotionCooldown(slot, seconds);
+
+  if (potionCdTimer[slot]) clearInterval(potionCdTimer[slot]);
+
+  potionCdTimer[slot] = setInterval(() => {
+    const remaining = Math.ceil((potionCdEnd[slot] - Date.now()) / 1000);
+
+    if (remaining <= 0) {
+      clearInterval(potionCdTimer[slot]);
+      potionCdTimer[slot] = null;
+      potionCdEnd[slot] = 0;
+
+      hidePotionCooldown(slot);
+      setPotionDimmed(slot, false);
+      return;
+    }
+
+    showPotionCooldown(slot, remaining);
+  }, 150);
+}
+
+function cancelPotionCooldown(slot) {
+  potionCdEnd[slot] = 0;
+  if (potionCdTimer[slot]) {
+    clearInterval(potionCdTimer[slot]);
+    potionCdTimer[slot] = null;
+  }
+  hidePotionCooldown(slot);
+  setPotionDimmed(slot, false);
+}
+
+function cancelAllPotionCooldowns() {
+  cancelPotionCooldown("health");
+  cancelPotionCooldown("mana");
+}
+
+
 // ✅ NEW: put modal into "post-combat" mode instead of auto-closing
 function enterPostCombatState() {
   combatOver = true;
 
-  stopStatusPolling();
-  stopEnemyAutoAttack();
+  stopCombatStatePolling();
 
   // lock further combat actions safely
   currentEnemy = null;
 
-  // let player review the log
+  // ✅ disable everything in the modal except the close button
+  setCombatUIEnabled(false);
+
+  // ✅ allow closing now
   setCombatCloseEnabled(true);
 
   logCombat("✅ Combat ended. Close this window when you're ready.");
 }
 
-function startStatusPolling() {
-  if (statusPollInterval) return;
-
-  console.log("🔥 startStatusPolling");
-
-  statusPollInterval = setInterval(async () => {
-    try {
-      const r = await fetch("/combat/poll");
-      const data = await r.json();
-
-      console.log("[POLL]", data);
-
-      if (data.enemyDead || data.enemyHP <= 0) {
-        stopStatusPolling();
-        stopEnemyAutoAttack();
-
-        updateEnemyHUD(0, data.enemyMaxHP || 1);
-
-        logCombat("🏆 Enemy defeated!");
-
-        if (data.exp) {
-          logCombat(`✨ You gained ${data.exp} EXP`);
-        }
-
-        if (data.gold) {
-          logCombat(`💰 You gained ${data.gold} gold`);
-        }
-
-        if (data.levelUp) {
-          logCombat("⬆ LEVEL UP!");
-        }
-
-        // ✅ CHANGED: do NOT auto-close
-        // Put the modal into post-combat review state instead
-        setTimeout(() => {
-          enterPostCombatState();
-        }, 200);
-
-        return;
-      }
-
-      if (data.stop) {
-        stopStatusPolling();
-        return;
-      }
-
-      updateEnemyHUD(data.enemyHP, data.enemyMaxHP);
-    } catch (err) {
-      console.error("Status polling failed:", err);
-      stopStatusPolling();
-    }
-  }, 1000);
-}
-
-function stopStatusPolling() {
-  if (statusPollInterval) {
-    clearInterval(statusPollInterval);
-    statusPollInterval = null;
-  }
-}
 
 function updateEnemyHUD(hp, maxHP) {
   const bar = document.getElementById("enemyHPBar");
   const hpText = document.getElementById("enemyHP");
   const maxText = document.getElementById("enemyMaxHP");
 
-  if (!bar || !currentEnemy) return;
+  if (!bar) return;
 
-  // 🔥 UPDATE CANONICAL STATE
-  currentEnemy.hp = hp;
-  if (Number.isFinite(maxHP)) {
-    currentEnemy.maxHP = maxHP;
+  if (currentEnemy) {
+    currentEnemy.hp = hp;
+    if (Number.isFinite(maxHP)) {
+      currentEnemy.maxHP = maxHP;
+    }
   }
 
   if (hpText) hpText.innerText = hp;
-  if (maxText) maxText.innerText = currentEnemy.maxHP;
+  if (maxText) maxText.innerText = Number.isFinite(maxHP)
+    ? maxHP
+    : (currentEnemy?.maxHP ?? "");
 
-  if (currentEnemy.maxHP > 0) {
-    bar.style.width = Math.max(0, (hp / currentEnemy.maxHP) * 100) + "%";
+  const effectiveMax = Number.isFinite(maxHP)
+    ? maxHP
+    : (currentEnemy?.maxHP ?? 0);
+
+  if (effectiveMax > 0) {
+    bar.style.width = Math.max(0, (hp / effectiveMax) * 100) + "%";
   }
 }
 
+function syncCombatSnapshot(snapshot) {
+  if (!snapshot) return;
 
+  const player = snapshot.player;
+  const enemy = snapshot.enemy;
 
+  if (player) {
+    setText("playerHP", player.hp);
+    setText("playerMaxHP", player.maxHp);
+    setText("playerSP", player.sp);
+    setText("playerMaxSP", player.maxSp);
 
+    updateBar("playerHPBar", player.hp, player.maxHp);
+    updateBar("playerSPBar", player.sp, player.maxSp);
 
+    window.playerMaxHP = player.maxHp;
+    window.playerMaxSP = player.maxSp;
+
+    const playerGauge = Math.max(0, Math.min(100, Number(player.gauge || 0)));
+    updateBar("playerATBBar", playerGauge, 100);
+    setText("playerATBText", player.ready ? "READY" : `${Math.round(playerGauge)}%`);
+
+    const playerPanel = document.querySelector(".player-panel");
+    if (playerPanel) {
+      playerPanel.classList.toggle("ready", !!player.ready);
+    }
+  }
+
+  if (enemy) {
+    if (currentEnemy) {
+      currentEnemy.hp = Number(enemy.hp ?? currentEnemy.hp ?? 0);
+      currentEnemy.maxHP = Number(enemy.maxHp ?? currentEnemy.maxHP ?? 1);
+    }
+
+    setText("enemyName", enemy.name);
+    setText("enemyHP", enemy.hp);
+    setText("enemyMaxHP", enemy.maxHp);
+    updateBar("enemyHPBar", enemy.hp, enemy.maxHp);
+
+    const enemyGauge = Math.max(0, Math.min(100, Number(enemy.gauge || 0)));
+    updateBar("enemyATBBar", enemyGauge, 100);
+    setText("enemyATBText", enemy.ready ? "READY" : `${Math.round(enemyGauge)}%`);
+
+    const enemyPanel = document.querySelector(".enemy-panel");
+    if (enemyPanel) {
+      enemyPanel.classList.toggle("ready", !!enemy.ready);
+    }
+  }
+
+  // Optional: disable Attack button unless player is ready
+  const attackBtn = document.getElementById("combatAttackBtn");
+  if (attackBtn && !combatOver) {
+    attackBtn.disabled = !player?.ready;
+  }
+}
 /* ===============================
    COMBAT MODAL CONTROL
 ================================ */
 
 window.openCombatModal = async function (enemy) {
   await waitForEl("combatModal");
-
+  cancelAllPotionCooldowns();
 // ✅ NEW: always populate the hotbar ASAP
 loadHotbarSpells();
 
-  startStatusPolling();
-
+  startCombatStatePolling();
   // ✅ Always show modal immediately (so user sees it)
   document.getElementById("combatModal").classList.remove("hidden");
   loadEquippedPotions();
+    // ✅ Enemy portrait from creatures.creatureimage
+const enemyImg = document.getElementById("enemyPortrait");
+if (enemyImg) {
+  let src = enemy?.img || "/images/default_creature.png";
+
+  if (src && !src.startsWith("/") && !src.startsWith("http")) {
+    src = "/" + src;
+  }
+
+  enemyImg.src = src;
+  enemyImg.onerror = () => {
+    enemyImg.onerror = null;
+    enemyImg.src = "/images/default_creature.png";
+  };
+}
   // ✅ NEW: reset post-combat state + disable close while fighting
   combatOver = false;
   setCombatCloseEnabled(false);
+
+    // ✅ re-enable combat UI buttons for a fresh fight
+  setCombatUIEnabled(true);
 
   // ✅ Reset log immediately
   clearCombatLog();
@@ -170,8 +359,7 @@ loadHotbarSpells();
   setText("enemyMaxHP", currentEnemy.maxHP);
   updateBar("enemyHPBar", currentEnemy.hp, currentEnemy.maxHP);
 
-  // ✅ Start enemy loop AFTER enemy exists
-  startEnemyAutoAttack();
+   // Enemy actions now resolve through /combat/state polling
 
   // ✅ In parallel: load player stats (doesn't block enemy UI)
   try {
@@ -196,11 +384,13 @@ loadHotbarSpells();
 
   // ✅ OPTIONAL BUT STRONG: Immediately sync enemy from authoritative server state
   // (prevents NaN / stale state if enemy payload was incomplete)
-  try {
+    try {
     const state = await fetch("/combat/state", { credentials: "include" }).then(r => r.json());
-    if (state?.inCombat && state?.enemy) {
-      const ehp = Number(state.enemy.hp);
-      const emax = Number(state.enemy.maxHP ?? state.enemy.maxhp);
+    const snap = state?.snapshot;
+
+    if (state?.inCombat && snap?.enemy) {
+      const ehp = Number(snap.enemy.hp);
+      const emax = Number(snap.enemy.maxHp ?? snap.enemy.maxHP ?? snap.enemy.maxhp);
 
       if (Number.isFinite(ehp)) {
         currentEnemy.hp = ehp;
@@ -212,6 +402,19 @@ loadHotbarSpells();
       }
 
       updateBar("enemyHPBar", currentEnemy.hp, currentEnemy.maxHP);
+
+      if (snap.player) {
+        setText("playerHP", snap.player.hp);
+        setText("playerMaxHP", snap.player.maxHp);
+        setText("playerSP", snap.player.sp);
+        setText("playerMaxSP", snap.player.maxSp);
+
+        updateBar("playerHPBar", snap.player.hp, snap.player.maxHp);
+        updateBar("playerSPBar", snap.player.sp, snap.player.maxSp);
+
+        window.playerMaxHP = snap.player.maxHp;
+        window.playerMaxSP = snap.player.maxSp;
+      }
     }
   } catch (e) {
     console.warn("combat/state sync failed (non-fatal)", e);
@@ -220,8 +423,7 @@ loadHotbarSpells();
 
 // ✅ CHANGED: stop polling too; only reload if combatOver is true
 window.closeCombatModal = function () {
-  stopStatusPolling();
-  stopEnemyAutoAttack();
+  stopCombatStatePolling();
   currentEnemy = null;
 
   document.getElementById("combatModal").classList.add("hidden");
@@ -241,32 +443,49 @@ window.closeCombatModal = function () {
    COMBAT ACTIONS
 ================================ */
 let playerAttackLocked = false;
+
 async function combatAttack() {
-  if (combatOver) return; // ✅ NEW: block actions in post-combat review mode
-  if (playerAttackLocked) return;
+  if (combatOver) return;
   if (!currentEnemy) return;
+  if (playerAttackLocked) return;
+
+  playerAttackLocked = true;
+  setTimeout(() => {
+    playerAttackLocked = false;
+  }, 150);
 
   const res = await fetch("/combat/attack", { method: "POST" });
   const data = await res.json();
 
-  if (data.error === "cooldown") {
-    return; // server rejected — do nothing
+  if (data.error === "not_ready") {
+    return;
   }
 
-  playerAttackLocked = true;
+  if (data.error === "combat_over") {
+    return;
+  }
 
-  if (data.cooldownMs) {
-    setTimeout(() => {
-      playerAttackLocked = false;
-    }, data.cooldownMs);
-  } else {
-    playerAttackLocked = false;
+  if (data.error === "No enemy") {
+    return;
+  }
+
+  if (data.error === "server_error") {
+    return;
   }
 
   if (data.log) logCombat(data.log);
 
   if (data.damage !== undefined) {
-    logCombat(`⚔ You hit for ${data.damage}${data.crit ? " (CRITICAL!)" : ""}`);
+    if (data.dodged) {
+      logCombat("⚔ Your attack missed!");
+    } else {
+      logCombat(`⚔ You hit for ${data.damage}${data.crit ? " (CRITICAL!)" : ""}`);
+    }
+  }
+
+  if (data.lifestealHeal) {
+    logCombat(`🩸 You restore ${data.lifestealHeal} HP.`);
+    await refreshPlayerCaps();
   }
 
   if (data.enemyHP !== undefined) {
@@ -276,20 +495,15 @@ async function combatAttack() {
   if (data.dead) {
     logCombat("🏆 Enemy defeated!");
 
-    if (data.exp) {
-      logCombat(`✨ You gained ${data.exp} EXP!`);
-    }
+    const exp = data.exp ?? data.expGained;
+    const gold = data.gold ?? data.goldGained;
 
-    if (data.gold) {
-      logCombat(`💰 You gained ${data.gold} gold!`);
-    }
+    if (exp) logCombat(`✨ You gained ${exp} EXP!`);
+    if (gold) logCombat(`💰 You gained ${gold} gold!`);
+    if (data.levelUp) logCombat("⬆ LEVEL UP!");
 
-    if (data.levelUp) {
-      logCombat(`⬆ LEVEL UP!`);
-    }
-
-    // ✅ CHANGED: do NOT auto-close
     enterPostCombatState();
+    maybeShowLootChest(data);
     return;
   }
 }
@@ -306,7 +520,6 @@ async function combatFlee() {
 
     logCombat("🏃 You fled from combat!");
 
-    stopEnemyAutoAttack();
     closeCombatModal();
 
     // Reload world cleanly (server is now authoritative)
@@ -319,50 +532,6 @@ async function combatFlee() {
   }
 }
 
-/* ===============================
-   ENEMY AUTO ATTACK
-================================ */
-function startEnemyAutoAttack() {
-  if (enemyAttackTimer) return;
-
-  enemyAttackTimer = setInterval(async () => {
-    try {
-      const res = await fetch("/combat/enemy-attack", { method: "POST" });
-      const data = await res.json();
-
-      if (data.log) logCombat(data.log);
-
-      if (data.playerHP !== undefined) {
-        updatePlayerHP(data.playerHP);
-        logCombat(`💥 ${currentEnemy?.name ?? "Enemy"} hits you for ${data.damage}`);
-      }
-
-      if (data.playerDead) {
-        logCombat("☠ You were slain!");
-        stopEnemyAutoAttack();
-        stopStatusPolling();
-        currentEnemy = null;
-        setTimeout(() => (window.location.href = "/death.html"), 600);
-        return;
-      }
-
-
-      if (data.stop) {
-        stopEnemyAutoAttack();
-      }
-    } catch (err) {
-      console.error("Enemy attack loop failed", err);
-      stopEnemyAutoAttack();
-    }
-  }, 1500);
-}
-
-function stopEnemyAutoAttack() {
-  if (enemyAttackTimer) {
-    clearInterval(enemyAttackTimer);
-    enemyAttackTimer = null;
-  }
-}
 
 /* ===============================
    MOVEMENT LOCK
@@ -387,8 +556,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   const res = await fetch("/combat/state");
   const state = await res.json();
 
-  if (state.inCombat && state.enemy) {
-    openCombatModal(state.enemy);
+  if (state?.inCombat && state?.snapshot?.enemy) {
+    openCombatModal({
+      id: state.snapshot.enemy.id,
+      name: state.snapshot.enemy.name,
+      hp: state.snapshot.enemy.hp,
+      maxHP: state.snapshot.enemy.maxHp
+    });
+
+    if (state.snapshot) {
+      syncCombatSnapshot(state.snapshot);
+    }
   }
 });
 
@@ -523,7 +701,7 @@ function startHotbarCooldown(spellId, seconds) {
    CAST SPELL
 ================================ */
 async function castSpell(spellId) {
-  if (combatOver) return; // ✅ NEW: block actions in post-combat review mode
+  if (combatOver) return;
 
   // Client-side cooldown guard
   if (spellCooldowns[spellId] && Date.now() < spellCooldowns[spellId]) {
@@ -532,7 +710,7 @@ async function castSpell(spellId) {
 
   const response = await fetch("/spells/cast", {
     method: "POST",
-    credentials: "include", // 🔥 REQUIRED for sessions
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ spellId })
   });
@@ -541,6 +719,8 @@ async function castSpell(spellId) {
 
   if (data.error) {
     if (data.error === "cooldown") return;
+    if (data.error === "not_ready") return;
+    if (data.error === "combat_over") return;
     alert(data.error);
     return;
   }
@@ -550,17 +730,16 @@ async function castSpell(spellId) {
   }
 
   if (data.cooldown && data.cooldown > 0) {
-    spellCooldowns[spellId] = Date.now() + data.cooldown * 1000; // keep your guard working
+    spellCooldowns[spellId] = Date.now() + data.cooldown * 1000;
     startHotbarCooldown(spellId, data.cooldown);
   }
-
 
   if (data.enemyHP !== undefined) {
     updateEnemyHP(data.enemyHP);
   }
 
   if (data.playerHP !== undefined) {
-    await refreshPlayerCaps();
+    updatePlayerHP(data.playerHP);
   }
 
   if (data.playerSP !== undefined) {
@@ -570,21 +749,15 @@ async function castSpell(spellId) {
   if (data.dead) {
     logCombat("🏆 Enemy defeated!");
 
-    if (data.exp) {
-      logCombat(`✨ You gained ${data.exp} EXP!`);
-    }
+    const exp = data.exp ?? data.expGained;
+    const gold = data.gold ?? data.goldGained;
 
-    if (data.gold) {
-      logCombat(`💰 You gained ${data.gold} gold!`);
-    }
+    if (exp) logCombat(`✨ You gained ${exp} EXP!`);
+    if (gold) logCombat(`💰 You gained ${gold} gold!`);
+    if (data.levelUp) logCombat("⬆ LEVEL UP!");
 
-    if (data.levelUp) {
-      logCombat(`⬆ LEVEL UP!`);
-    }
-
-    // ✅ CHANGED: do NOT auto-close
     enterPostCombatState();
-    closeSpellsModal();
+    maybeShowLootChest(data);
     return;
   }
 
@@ -715,6 +888,14 @@ function applyPotion(slot, potion) {
 async function useHotbarPotion(slot) {
   if (combatOver) return;
 
+  if (slot !== "health" && slot !== "mana") return;
+
+  // ✅ cooldown guard PER slot
+  if (isPotionOnCooldown(slot)) return;
+
+  // ✅ start cooldown immediately (prevents double-click spam)
+  startPotionCooldown(slot, Math.ceil(POTION_CD_MS / 1000));
+
   try {
     const r = await fetch("/combat/potions-use", {
       method: "POST",
@@ -724,8 +905,12 @@ async function useHotbarPotion(slot) {
     });
 
     const data = await r.json();
+
     if (data.error) {
+      // ❗ If the server rejected the use, refund the cooldown so it doesn't feel bad
+      cancelPotionCooldown(slot);
       logCombat(`⚠ ${data.error}`);
+      await loadEquippedPotions();
       return;
     }
 
@@ -737,11 +922,13 @@ async function useHotbarPotion(slot) {
     await refreshPlayerCaps();
     await loadEquippedPotions(); // qty/empty refresh
   } catch (e) {
+    // refund cooldown on network failure
+    cancelPotionCooldown(slot);
     console.error("useHotbarPotion failed", e);
     logCombat("⚠ Failed to use potion.");
+    await loadEquippedPotions();
   }
 }
-
 
 /* ===============================
    COMBAT LOG HELPERS

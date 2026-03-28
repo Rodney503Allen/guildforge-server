@@ -1,475 +1,380 @@
+// trainer.routes.ts
 import express from "express";
 import { db } from "./db";
 
 const router = express.Router();
 
 // =======================
-// SPELL TRAINER PAGE
+// Helpers
 // =======================
-router.get("/", async (req, res) => {
+function requireLogin(req: any, res: any, next: any) {
+  if (!req.session || !req.session.playerId) return res.redirect("/login.html");
+  next();
+}
 
-  const pid = req.session.playerId;
-  if (!pid) return res.redirect("/login.html");
+function esc(input: any) {
+  return String(input ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-  // Player class, gold, level
-  const [[player]]: any = await db.query(
-    "SELECT pclass, gold, level FROM players WHERE id=?",
-    [pid]
-  );
+function resolveIcon(icon: any) {
+  const raw = (icon ?? "").toString().trim();
+  if (!raw) return "/icons/default.png"; // change if you want
+  if (raw.startsWith("http") || raw.startsWith("/")) return raw;
+  return "/" + raw.replace(/^\/+/, "");
+}
 
-  // Available spells by class
-  const [spells]: any = await db.query(
-    "SELECT * FROM spells WHERE sclass = ? OR sclass = 'any'",
-    [player.pclass]
-  );
+// Clean title-case-ish (fixes ALL CAPS names)
+function titleCaseName(name: any) {
+  const s = String(name ?? "").trim();
+  if (!s) return "Unknown Spell";
+  return s
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (m) => m.toUpperCase());
+}
 
-  // Learned spells
-  const [known]: any = await db.query(
-    "SELECT spell_id FROM player_spells WHERE player_id=?",
-    [pid]
-  );
+// Build a HTML chunk for stats/effects (kept simple and safe)
+function buildSpellDetails(s: any) {
+  const lines: string[] = [];
 
-  const knownIds = known.map((s:any)=>s.spell_id);
+  // core
+  if (s.type) lines.push(`<div class="t-row"><span class="t-k">Type</span><span class="t-v">${esc(String(s.type))}</span></div>`);
+  if (Number.isFinite(Number(s.level)))
+    lines.push(`<div class="t-row"><span class="t-k">Required</span><span class="t-v">Level ${Number(s.level)}</span></div>`);
+  if (Number.isFinite(Number(s.price)))
+    lines.push(`<div class="t-row"><span class="t-k">Cost</span><span class="t-v">${Number(s.price)}g</span></div>`);
 
-const rows = spells.map((s:any)=>{
+  // combat values (your schema varies; keep it defensive)
+  if (s.damage != null && Number(s.damage) > 0)
+    lines.push(`<div class="t-row"><span class="t-k">Damage</span><span class="t-v">${Number(s.damage)}</span></div>`);
 
-  const learned = knownIds.includes(s.id);
-  const canAfford = player.gold >= s.price;
-  const meetsLevel = player.level >= s.level;
+  if (s.heal != null && Number(s.heal) > 0)
+    lines.push(`<div class="t-row"><span class="t-k">Heal</span><span class="t-v">${Number(s.heal)}</span></div>`);
 
-  let action = "";
-
-  if (learned) {
-    action = `<span style="color:lime;">Learned</span>`;
-  } else if (!meetsLevel) {
-    action = `<span style="color:orange;">Requires level ${s.level}</span>`;
-  } else if (!canAfford) {
-    action = `<span style="color:red;">Not enough gold</span>`;
-  } else {
-    action = `<a href="/trainer/learn/${s.id}" class="buy">Learn</a>`;
+  if (s.dot_damage != null && Number(s.dot_damage) > 0) {
+    const dur = s.dot_duration != null ? ` / ${Number(s.dot_duration)}s` : "";
+    lines.push(`<div class="t-row"><span class="t-k">DoT</span><span class="t-v">${Number(s.dot_damage)}${dur}</span></div>`);
   }
 
-  return `
-    <tr>
-      <td>${s.name}</td>
-      <td>${s.description}</td>
-      <td>${s.price}</td>
-      <td>${action}</td>
-    </tr>
-  `;
-}).join("");
+  if (s.scost != null && Number(s.scost) > 0)
+    lines.push(`<div class="t-row"><span class="t-k">SP Cost</span><span class="t-v">${Number(s.scost)}</span></div>`);
+
+  if (s.cooldown != null && Number(s.cooldown) > 0)
+    lines.push(`<div class="t-row"><span class="t-k">Cooldown</span><span class="t-v">${Number(s.cooldown)}s</span></div>`);
+
+  // Buff/debuff
+  if (s.buff_stat && s.buff_value) {
+    const dur = s.buff_duration ? ` (${Number(s.buff_duration)}s)` : "";
+    lines.push(`<div class="t-row"><span class="t-k">Buff</span><span class="t-v">+${Number(s.buff_value)} ${esc(s.buff_stat)}${dur}</span></div>`);
+  }
+  if (s.debuff_stat && s.debuff_value) {
+    const dur = s.debuff_duration ? ` (${Number(s.debuff_duration)}s)` : "";
+    lines.push(`<div class="t-row"><span class="t-k">Debuff</span><span class="t-v">-${Number(s.debuff_value)} ${esc(s.debuff_stat)}${dur}</span></div>`);
+  }
+
+  return lines.join("");
+}
+
+// =======================
+// TRAINER PAGE
+// =======================
+router.get("/", requireLogin, async (req: any, res: any) => {
+  const pid = req.session.playerId as number;
+
+  const [[player]]: any = await db.query(
+    `SELECT pclass, gold, level
+     FROM players
+     WHERE id=?
+     LIMIT 1`,
+    [pid]
+  );
+  if (!player) return res.redirect("/login.html");
+
+  // NOTE: add skill_points later when you implement it (placeholder UI below)
+  const pclass = String(player.pclass || "Unknown");
+  const playerGold = Number(player.gold || 0);
+  const playerLevel = Number(player.level || 1);
+
+  // spells you can potentially train
+  const [spells]: any = await db.query(
+    `SELECT *
+     FROM spells
+     WHERE sclass = ? OR sclass = 'any'
+     ORDER BY level ASC, name ASC`,
+    [pclass]
+  );
+
+  const [knownRows]: any = await db.query(
+    `SELECT spell_id
+     FROM player_spells
+     WHERE player_id=?`,
+    [pid]
+  );
+
+  const known = new Set<number>(knownRows.map((r: any) => Number(r.spell_id)));
+
+  // Build cards
+  const cards = spells
+    .map((s: any) => {
+      const sid = Number(s.id);
+      const learned = known.has(sid);
+
+      const reqLevel = Number(s.level || 1);
+      const price = Number(s.price || 0);
+
+      const meetsLevel = playerLevel >= reqLevel;
+      const canAfford = playerGold >= price;
+
+      const state =
+        learned ? "learned" :
+        !meetsLevel ? "locked" :
+        !canAfford ? "cantafford" :
+        "available";
+
+      const actionHtml =
+        learned
+          ? `<div class="status learned"><span class="dot"></span>Learned</div>`
+          : !meetsLevel
+            ? `<div class="status locked"><span class="dot"></span>Requires Lv ${reqLevel}</div>`
+            : !canAfford
+              ? `<div class="status locked"><span class="dot"></span>Need ${price}g</div>`
+              : `<a class="btn" href="/trainer/learn/${sid}">Learn</a>`;
+
+      // tooltip details
+      const detailRows = buildSpellDetails(s);
+      const desc = s.description ? esc(s.description) : "A mysterious spell...";
+
+      // For tooltip dataset: keep HTML minimal and safe
+      const tooltipStats = detailRows || "";
+      const tooltipDesc = desc;
+
+      return `
+        <div class="spell-card"
+          data-tooltip="item"
+          tabindex="0"
+          data-state="${esc(state)}"
+          data-type="${esc(String(s.type || ""))}"
+          data-nameplain="${esc(titleCaseName(s.name))}"
+
+          data-name="${esc(titleCaseName(s.name))}"
+          data-rarity="${esc(state)}"
+          data-value="0"
+          data-price="${price}"
+          data-qty="1"
+          data-stats="${esc(tooltipStats)}"
+          data-desc="${esc(tooltipDesc)}"
+        >
+          <div class="spell-left">
+            <div class="icon-wrap">
+              <img class="spell-icon" src="${resolveIcon(s.icon)}" alt=""
+                   loading="lazy"
+                   onerror="this.style.display='none'; this.parentElement.classList.add('fallback');">
+              <div class="fallback-ico">✦</div>
+            </div>
+
+            <div class="spell-main">
+              <div class="spell-name ${state}">${esc(titleCaseName(s.name))}</div>
+              <div class="spell-sub">
+                <span class="pillMini">Lv ${reqLevel}</span>
+                <span class="pillMini">💰 ${price}g</span>
+                <span class="pill muted">${esc(String(s.type || "spell"))}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="spell-right">
+            ${actionHtml}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+// inside router.get("/", requireLogin, async (req, res) => { ... })
 
 res.send(`
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Guildforge | Class Trainer</title>
-
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <title>Guildforge | Trainer</title>
 
-  <style>
-    :root{
-      --bg0:#07090c;
-      --bg1:#0b0f14;
-      --panel:#0e131a;
-      --panel2:#0a0f15;
+  <!-- Statpanel -->
+  <link rel="stylesheet" href="/statpanel.css">
+  <script src="/statpanel.js"></script>
 
-      --ink:#d7dbe2;
-      --muted:#9aa3af;
+  <!-- Shared tooltip -->
+  <link rel="stylesheet" href="/ui/itemTooltip.css">
+  <script defer src="/ui/itemTooltip.js"></script>
 
-      --iron:#2b3440;
-      --ember:#b64b2e;
-      --blood:#7a1e1e;
-      --bone:#c9b89a;
-
-      --shadow: rgba(0,0,0,.60);
-      --frame: rgba(255,255,255,.04);
-      --glass: rgba(0,0,0,.18);
-    }
-
-    *{ box-sizing:border-box; }
-
-    html, body{
-      margin:0;
-      padding:0;
-      color: var(--ink);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-
-      background:
-        radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
-        linear-gradient(180deg, var(--bg1), var(--bg0));
-    }
-
-    /* grit overlay */
-    body::before{
-      content:"";
-      position:fixed;
-      inset:0;
-      pointer-events:none;
-      opacity:.10;
-      background:
-        repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
-        repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
-      mix-blend-mode: overlay;
-    }
-
-    .wrap{
-      width: min(980px, 94vw);
-      margin: 0 auto;
-      padding: 18px 0 28px;
-    }
-
-    .panel{
-      position:relative;
-      margin: 80px auto 0;
-      padding: 18px;
-      border-radius: 12px;
-
-      border: 1px solid rgba(43,52,64,.95);
-      background:
-        radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-
-      box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
-    }
-
-    .panel::before{
-      content:"";
-      position:absolute;
-      inset:10px;
-      pointer-events:none;
-      border: 0;
-      border-radius: 10px;
-    }
-
-    .head{
-      position:relative;
-      z-index:1;
-      display:flex;
-      align-items:flex-end;
-      justify-content:space-between;
-      gap: 14px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid rgba(43,52,64,.85);
-      margin-bottom: 12px;
-    }
-
-    .title{
-      text-align:left;
-    }
-
-    .title h2{
-      margin:0;
-      font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
-      letter-spacing: 2.2px;
-      text-transform: uppercase;
-      color: var(--bone);
-      font-size: 22px;
-      text-shadow:
-        0 0 10px rgba(182,75,46,.20),
-        0 10px 18px rgba(0,0,0,.85);
-    }
-
-    .sub{
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 12px;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-    }
-
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap: 8px;
-      padding: 8px 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      color: var(--ink);
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-      white-space: nowrap;
-    }
-
-    /* List */
-    .list{
-      position:relative;
-      z-index:1;
-      display:flex;
-      flex-direction:column;
-      gap: 10px;
-      margin-top: 12px;
-    }
-
-    .spell{
-      position:relative;
-      border-radius: 12px;
-      border: 1px solid rgba(43,52,64,.95);
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-      box-shadow: 0 16px 34px rgba(0,0,0,.60), inset 0 1px 0 rgba(255,255,255,.06);
-
-      padding: 12px;
-      display:grid;
-      grid-template-columns: 1.1fr 2.2fr auto auto;
-      gap: 12px;
-      align-items:center;
-    }
-
-    .name{
-      font-weight: 900;
-      letter-spacing: .3px;
-      color: var(--bone);
-      text-transform: uppercase;
-      font-size: 13px;
-      text-align:left;
-    }
-
-    .desc{
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.35;
-      text-align:left;
-    }
-
-    .price{
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-      padding: 6px 8px;
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-      white-space: nowrap;
-      text-align:center;
-      color: var(--ink);
-      min-width: 92px;
-    }
-
-    /* Status labels */
-    .locked{
-      color: #ffd6d6;
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .3px;
-      text-transform: uppercase;
-      padding: 6px 8px;
-      border-radius: 10px;
-      border: 1px solid rgba(122,30,30,.65);
-      background: rgba(0,0,0,.18);
-      white-space: nowrap;
-      text-align:center;
-      min-width: 160px;
-    }
-
-    .learned{
-      color: #d9ffe6;
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: .3px;
-      text-transform: uppercase;
-      padding: 6px 8px;
-      border-radius: 10px;
-      border: 1px solid rgba(70, 180, 120, .55);
-      background: rgba(0,0,0,.18);
-      white-space: nowrap;
-      text-align:center;
-      min-width: 160px;
-    }
-
-    /* Learn button (anchor) */
-    .learnBtn{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      text-decoration:none;
-
-      border-radius: 10px;
-      border: 1px solid rgba(182,75,46,.55);
-      background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
-      color: #f3e7db;
-
-      padding: 10px 12px;
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: .7px;
-      text-transform: uppercase;
-
-      cursor:pointer;
-      box-shadow: 0 14px 28px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.12);
-      transition: transform .12s ease, filter .12s ease;
-      min-width: 160px;
-      white-space: nowrap;
-    }
-
-    .learnBtn:hover{
-      filter: brightness(1.06);
-      transform: translateY(-1px);
-    }
-
-    .learnBtn:active{
-      transform: translateY(0) scale(.99);
-    }
-
-    .returnBtn{
-      width:100%;
-      margin-top: 14px;
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      color: #f3e7db;
-
-      padding: 12px;
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: .7px;
-      text-transform: uppercase;
-
-      cursor:pointer;
-      box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
-      transition: transform .12s ease, border-color .12s ease;
-    }
-
-    .returnBtn:hover{
-      border-color: rgba(182,75,46,.45);
-      transform: translateY(-1px);
-    }
-
-    /* Responsive */
-    @media (max-width: 860px){
-      .spell{
-        grid-template-columns: 1fr;
-        gap: 8px;
-        align-items:start;
-      }
-      .price, .locked, .learned, .learnBtn{
-        min-width: unset;
-        width: 100%;
-      }
-      .price{ text-align:left; }
-    }
-  </style>
+  <!-- Trainer page -->
+  <link rel="stylesheet" href="/trainer.css">
+  <script defer src="/trainer.js"></script>
 </head>
 
 <body>
   <div id="statpanel-root"></div>
 
-  <link rel="stylesheet" href="/statpanel.css">
-  <script src="/statpanel.js"></script>
-
   <div class="wrap">
-    <div class="panel">
-      <div class="head">
-        <div class="title">
-          <h2>Spell Trainer</h2>
-          <div class="sub">Available spells for the ${player.pclass}</div>
+    <div class="topbar">
+      <div class="brand">
+        <div class="title"><span class="sigil"></span> Class Trainer</div>
+        <div class="sub">Spells available to the ${esc(pclass)} • Level ${playerLevel} • ${playerGold}g</div>
+      </div>
+
+      <div class="nav">
+        <span class="pill">Class: <strong>${esc(pclass)}</strong></span>
+        <span class="pill">Gold: <strong>${playerGold}g</strong></span>
+        <a class="btn danger" href="/town">Return to Town</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- LEFT: Spellbook -->
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Spellbook</h2>
+            <p>Hover or focus a spell to view details. Learn new spells with gold.</p>
+          </div>
+
+          <div class="headerRight">
+            <span class="badge good">Trainer</span>
+          </div>
         </div>
-        <div class="pill">📜 Trainer</div>
-      </div>
 
-      <div class="list">
-        ${spells.map((s:any)=>{
-
-          const learned = knownIds.includes(s.id);
-          const canAfford = player.gold >= s.price;
-          const meetsLevel = player.level >= s.level;
-
-          let action = "";
-
-          if (learned) {
-            action = `<span class="learned">✅ Mastered</span>`;
-          }
-          else if (!meetsLevel) {
-            action = `<span class="locked">🔒 Level ${s.level} Required</span>`;
-          }
-          else if (!canAfford) {
-            action = `<span class="locked">💸 Insufficient Gold</span>`;
-          }
-          else {
-            action = `<a class="learnBtn" href="/trainer/learn/${s.id}">Train Spell</a>`;
-          }
-
-          return `
-            <div class="spell">
-              <div class="name">${s.name}</div>
-              <div class="desc">${s.description || "A mysterious spell..."}</div>
-              <div class="price">💰 ${s.price}</div>
-              <div>${action}</div>
+        <div class="cardBody">
+          <div class="trainerTools">
+            <div class="noteBox">
+              Skill Points and Spell Rank upgrades will be added here later. For now, learning is gold + level gated.
             </div>
-          `;
-        }).join("")}
-      </div>
 
-      <button class="returnBtn" onclick="location.href='/town'">Return to Town</button>
+            <div class="searchRow">
+              <input id="spellSearch" class="input" placeholder="Search spells…" autocomplete="off" />
+              <select id="spellFilter" class="select">
+                <option value="all">All</option>
+                <option value="available">Available</option>
+                <option value="locked">Locked</option>
+                <option value="cantafford">Need Gold</option>
+                <option value="learned">Learned</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="spellList" id="spellList">
+            ${cards || `<div class="empty"><i>No spells available.</i></div>`}
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Trainer Notes -->
+      <aside class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Trainer’s Notes</h2>
+            <p>Reminders before you spend coin.</p>
+          </div>
+          <span class="badge">Info</span>
+        </div>
+
+        <div class="cardBody">
+          <div class="infoBox">
+            <div class="infoTitle">
+              <strong>How to learn</strong>
+              <span class="badge good">Simple</span>
+            </div>
+            <p class="infoText">
+• Meet the required level
+• Pay the gold cost
+• Spell becomes available in combat
+            </p>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="infoBox">
+            <div class="infoTitle">
+              <strong>Tip</strong>
+              <span class="badge warn">Smart Spend</span>
+            </div>
+            <p class="infoText">
+Learn 1–2 core spells first, then branch into utility.
+            </p>
+          </div>
+
+          <div class="divider"></div>
+
+          <a class="btn primary" href="/shop">🛒 Market</a>
+          <a class="btn" href="/tavern">🍺 Tavern</a>
+        </div>
+      </aside>
     </div>
   </div>
 </body>
 </html>
 `);
 
-
-
 });
-
 
 // =======================
 // LEARN SPELL
+// (kept same behavior, but hardens checks + class restriction)
 // =======================
-router.get("/learn/:id", async (req, res) => {
-
-  const pid = req.session.playerId;
+router.get("/learn/:id", requireLogin, async (req: any, res: any) => {
+  const pid = req.session.playerId as number;
   const sid = Number(req.params.id);
+  if (!Number.isFinite(sid)) return res.redirect("/trainer");
 
-  if (!pid) return res.redirect("/login.html");
+  const [[player]]: any = await db.query(
+    "SELECT pclass, gold, level FROM players WHERE id=? LIMIT 1",
+    [pid]
+  );
+  if (!player) return res.redirect("/login.html");
 
-const [[player]]: any = await db.query(
-  "SELECT gold, level FROM players WHERE id=?",
-  [pid]
-);
+  const [[spell]]: any = await db.query(
+    "SELECT * FROM spells WHERE id=? LIMIT 1",
+    [sid]
+  );
+  if (!spell) return res.redirect("/trainer");
 
+  // class restriction (allow 'any')
+  const sclass = String(spell.sclass || "any");
+  if (sclass !== "any" && sclass !== String(player.pclass)) {
+    return res.send("You cannot learn this spell.");
+  }
 
-const [[spell]]: any = await db.query(
-  "SELECT * FROM spells WHERE id=?",
-  [sid]
-);
+  const [[exists]]: any = await db.query(
+    "SELECT id FROM player_spells WHERE player_id=? AND spell_id=? LIMIT 1",
+    [pid, sid]
+  );
+  if (exists) return res.redirect("/trainer");
 
-if (!spell) return res.send("Spell not found");
+  // Level check
+  if (Number(player.level) < Number(spell.level)) {
+    return res.send(`You must be level ${Number(spell.level)} to learn this spell.`);
+  }
 
-const [[exists]]: any = await db.query(
-  "SELECT id FROM player_spells WHERE player_id=? AND spell_id=?",
-  [pid, sid]
-);
+  // Gold check
+  if (Number(player.gold) < Number(spell.price)) {
+    return res.send("Not enough gold.");
+  }
 
-if (exists) return res.redirect("/trainer");
-
-// 🔒 LEVEL CHECK
-if (player.level < spell.level) {
-  return res.send(`You must be level ${spell.level} to learn this spell.`);
-}
-
-if (player.gold < spell.price)
-  return res.send("Not enough gold");
-
-  // Pay
-  await db.query(
-    "UPDATE players SET gold = gold - ? WHERE id=?",
-    [spell.price, pid]
+  // Pay + Learn (atomic-ish: do spend only if enough gold)
+  const [r]: any = await db.query(
+    `UPDATE players
+     SET gold = gold - ?
+     WHERE id = ? AND gold >= ?`,
+    [Number(spell.price), pid, Number(spell.price)]
   );
 
-  // Learn
+  if (!r?.affectedRows) return res.send("Not enough gold.");
+
   await db.query(
     "INSERT INTO player_spells (player_id, spell_id) VALUES (?, ?)",
     [pid, sid]

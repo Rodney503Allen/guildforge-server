@@ -1,9 +1,71 @@
+//src/town.routes.ts
 import express from "express";
 import { db } from "./db";
+import { getJournalQuests } from "./services/questService";
 
 const router = express.Router();
 console.log("✅ TOWN ROUTES FILE LOADED");
+router.get("/town/current", async (req, res) => {
+  const pid = (req.session as any)?.playerId;
+  if (!pid) return res.status(401).json({ error: "Not logged in" });
 
+  const [[player]]: any = await db.query(
+    `SELECT map_x, map_y FROM players WHERE id=?`,
+    [pid]
+  );
+
+  const [[town]]: any = await db.query(
+    `SELECT id, name FROM locations WHERE map_x=? AND map_y=? LIMIT 1`,
+    [player.map_x, player.map_y]
+  );
+
+  if (!town) return res.json({ id: null, name: "Unknown" });
+
+  res.json({ id: town.id, name: town.name });
+});
+// =======================
+// GOSSIP (random unaccepted quest hint)
+// =======================
+router.get("/api/town/:townId/gossip", async (req, res) => {
+  const pid = Number((req.session as any)?.playerId);
+  if (!pid) return res.status(401).json({ error: "not_logged_in" });
+
+  const townId = Number(req.params.townId);
+
+  try {
+    const payload = await getJournalQuests(pid);
+
+    // payload.rumors already excludes accepted quests (by design of your journal)
+    const rumors = (payload?.rumors || [])
+      .filter((r: any) => {
+        const hint = String(r?.rumor_hint || "").trim();
+        if (!hint) return false;
+
+        // Prefer town-specific gossip; allow null town rumors as fallback
+        const rTown = r?.town_id != null ? Number(r.town_id) : null;
+        return rTown === townId || rTown === null;
+      });
+
+    if (!rumors.length) {
+      return res.json({
+        hasGossip: false,
+        text: "The ledger is quiet. No fresh whispers tonight."
+      });
+    }
+
+    const pick = rumors[Math.floor(Math.random() * rumors.length)];
+
+    return res.json({
+      hasGossip: true,
+      questId: Number(pick.questId),
+      title: pick.title,
+      text: pick.rumor_hint
+    });
+  } catch (err: any) {
+    console.error("gossip failed:", err?.message);
+    res.status(500).json({ error: "server_error" });
+  }
+});
 // =======================
 // TOWN UI
 // =======================
@@ -31,33 +93,96 @@ router.get("/town", async (req, res) => {
     LIMIT 1
   `, [player.map_x, player.map_y]);
 
-  if (!town) {
-    return res.send(`
-      <html>
-      <body style="background:#050509;color:gold;font-family:Cinzel,serif;text-align:center;padding-top:100px">
-        <h2>No town here.</h2>
-        <a style="color:gold" href="/world">Return to World</a>
-      </body>
-      </html>
-    `);
+if (!town) {
+  return res.redirect("/world");
+}
+// =======================
+// LOAD TOWN SERVICES
+// =======================
+const [servicesRaw]: any = await db.query(`
+  SELECT *
+  FROM location_services
+  WHERE location_id = ?
+  ORDER BY display_order ASC, name ASC
+`, [town.id]);
+
+// Remove the old 3 shop entries (either by name OR route pattern)
+const services = (servicesRaw || []).filter((s: any) => {
+  const name = String(s.name || "").toLowerCase();
+  const route = String(s.route || "").toLowerCase();
+
+  const isLegacyShopByName =
+    name.includes("general store") ||
+    name.includes("blacksmith") ||
+    name.includes("armorer");
+
+  const isLegacyShopByRoute = route.startsWith("/shop/"); // old /shop/:id
+
+  return !(isLegacyShopByName || isLegacyShopByRoute);
+});
+
+// Inject unified Market button near the top (after display_order 0 usually)
+services.splice(1, 0, {
+  name: "Market",
+  route: "/shop",
+  icon: "/icons/ui/market.png",
+  display_order: 1
+});
+function renderServiceIcon(icon: any) {
+  const v = String(icon || "").trim();
+  if (!v) return `<span class="iconText">🏛</span>`;
+
+  // treat as image if it looks like a path or file
+  const isImg =
+    v.startsWith("/") ||
+    v.startsWith("http") ||
+    v.includes("/") ||
+    /\.(png|jpg|jpeg|webp|svg)$/i.test(v);
+
+  if (isImg) {
+    // if DB stores "public/..." strip it for browser paths
+    const src = v.startsWith("/public/") ? v.replace("/public/", "/") : v;
+    return `<img class="iconImg" src="${src}" alt="">`;
   }
 
-  // =======================
-  // LOAD TOWN SERVICES
-  // =======================
-  const [services]: any = await db.query(`
-    SELECT *
-    FROM location_services
-    WHERE location_id = ?
-    ORDER BY display_order ASC, name ASC
-  `, [town.id]);
+  // otherwise assume emoji/text
+  return `<span class="iconText">${v}</span>`;
+}
+
+function serviceSubtitle(s: any) {
+  const name = String(s?.name || "").toLowerCase();
+  const route = String(s?.route || "").toLowerCase();
+
+  // route-first (most reliable)
+  if (route === "/shop") return "Market stalls & merchants";
+  if (route === "/tavern") return "Rumors, quests, and company";
+  if (route === "/trainer") return "Learn spells & techniques";
+  if (route === "/church") return "Revive and recover safely";
+  if (route === "/sell") return "Offload loot for coin";
+  if (route === "/guild") return "Perks, roles, and progress";
+  if (route === "/inventory") return "Manage gear & items";
+  if (route === "/quests") return "Track your active work";
+  if (route === "/world") return "Leave the safety of the walls";
+
+  // name-based fallback (in case routes vary later)
+  if (name.includes("market")) return "Market stalls & merchants";
+  if (name.includes("tavern")) return "Rumors, quests, and company";
+  if (name.includes("trainer")) return "Learn spells & techniques";
+  if (name.includes("church") || name.includes("sanctuary")) return "Revive and recover safely";
+  if (name.includes("sell")) return "Offload loot for coin";
+  if (name.includes("guild")) return "Perks, roles, and progress";
+  if (name.includes("quest")) return "Track your active work";
+  if (name.includes("inventory") || name.includes("backpack")) return "Manage gear & items";
+
+  return "Open service";
+}
 
   // =======================
   // RENDER LINKS
   // =======================
   const buttons = services.map((s: any) => `
     <a class="service" href="${s.route}">
-      <span class="icon">${s.icon || "🏛"}</span>
+      <span class="icon">${renderServiceIcon(s.icon)}</span>
       <span class="label">${s.name}</span>
     </a>
   `).join("");
@@ -66,369 +191,136 @@ router.get("/town", async (req, res) => {
   // PAGE OUTPUT
   // =======================
 res.send(`
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>Guildforge | ${town.name}</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <title>Guildforge | ${town.name}</title>
 
-  <style>
-    /* =========================
-       TOWN PAGE — Grit Iron/Ember Theme
-       (Inline CSS so route stays self-contained)
-       ========================= */
-
-    :root{
-      --bg0:#07090c;
-      --bg1:#0b0f14;
-      --panel:#0e131a;
-      --panel2:#0a0f15;
-
-      --ink:#d7dbe2;
-      --muted:#9aa3af;
-
-      --iron:#2b3440;
-      --iron2:#1b232d;
-
-      --ember:#b64b2e;
-      --blood:#7a1e1e;
-      --bone:#c9b89a;
-
-      --shadow: rgba(0,0,0,.60);
-      --frame: rgba(255,255,255,.04);
-      --glass: rgba(0,0,0,.18);
-    }
-
-    *{ box-sizing:border-box; }
-
-    body{
-      margin:0;
-      color: var(--ink);
-      font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
-      text-align: center;
-
-      background:
-        radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
-        linear-gradient(180deg, var(--bg1), var(--bg0));
-    }
-
-    /* grit overlay */
-    body::before{
-      content:"";
-      position:fixed;
-      inset:0;
-      pointer-events:none;
-      opacity:.10;
-      background:
-        repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
-        repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
-      mix-blend-mode: overlay;
-    }
-
-    /* A centered “console” layout so it feels like the new UI */
-    .wrap{
-      width: min(980px, 94vw);
-      margin: 0 auto;
-      padding: 22px 0 28px;
-      display:flex;
-      flex-direction:column;
-      gap: 14px;
-    }
-
-    .panel{
-      position:relative;
-      padding: 18px;
-      border-radius: 12px;
-
-      border: 1px solid rgba(43,52,64,.95);
-      background:
-        radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-
-      box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
-    }
-
-    .panel::before{
-      content:"";
-      position:absolute;
-      inset:10px;
-      pointer-events:none;
-      border: 0;
-      border-radius: 10px;
-    }
-
-    h2{
-      margin: 0 0 6px;
-      letter-spacing: 2.6px;
-      text-transform: uppercase;
-      color: var(--bone);
-      text-shadow:
-        0 0 10px rgba(182,75,46,.20),
-        0 10px 18px rgba(0,0,0,.85);
-      font-size: 22px;
-      position:relative;
-      z-index:1;
-    }
-
-    .desc{
-      margin: 0 auto 12px;
-      max-width: 680px;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.45;
-      position:relative;
-      z-index:1;
-    }
-
-    .rule{
-      height: 1px;
-      border: none;
-      margin: 14px 0;
-      background: linear-gradient(90deg, transparent, rgba(182,75,46,.65), transparent);
-      opacity: .85;
-      position:relative;
-      z-index:1;
-    }
-
-    /* Services grid: feels like building tiles */
-    .services{
-      display:grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 6px;
-      position:relative;
-      z-index:1;
-    }
-
-    .service{
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      gap: 10px;
-
-      padding: 12px;
-      border-radius: 10px;
-
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-
-      border: 1px solid rgba(43,52,64,.95);
-      color: var(--ink);
-      text-decoration: none;
-
-      box-shadow: 0 16px 34px rgba(0,0,0,.60), inset 0 1px 0 rgba(255,255,255,.06);
-      transition: transform .12s ease, border-color .12s ease, filter .12s ease;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    }
-
-    .service:hover{
-      border-color: rgba(182,75,46,.55);
-      transform: translateY(-2px);
-      filter: brightness(1.03);
-      box-shadow:
-        0 0 0 1px rgba(182,75,46,.10),
-        0 20px 44px rgba(0,0,0,.75),
-        inset 0 1px 0 rgba(255,255,255,.06);
-    }
-
-    .icon{
-      width: 44px;
-      height: 44px;
-      display:grid;
-      place-items:center;
-
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.22);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-
-      font-size: 18px;
-      flex: 0 0 auto;
-    }
-
-    .label{
-      font-weight: 900;
-      letter-spacing: .4px;
-      color: var(--bone);
-      text-transform: uppercase;
-      font-size: 13px;
-      line-height: 1.1;
-    }
-
-    .empty{
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      color: var(--muted);
-      font-size: 13px;
-      padding: 10px 0;
-      position:relative;
-      z-index:1;
-    }
-
-    /* Return link */
-    .leave{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap: 8px;
-
-      margin-top: 6px;
-      padding: 10px 12px;
-
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      color: #f3e7db;
-      text-decoration:none;
-
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      font-size: 13px;
-      font-weight: 800;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-
-      box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
-      transition: transform .12s ease, border-color .12s ease;
-      position:relative;
-      z-index:1;
-    }
-
-    .leave:hover{
-      border-color: rgba(182,75,46,.45);
-      transform: translateY(-1px);
-    }
-
-    /* World chat: same theme language + keep IDs */
-    #worldChat{
-      width: min(980px, 94vw);
-      margin: 0 auto 26px;
-      padding: 12px;
-
-      border-radius: 12px;
-      border: 1px solid rgba(43,52,64,.95);
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-
-      box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
-      position: relative;
-      color: var(--ink);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      text-align: left;
-    }
-
-    #worldChat::before{
-      content:"";
-      position:absolute;
-      inset:10px;
-      pointer-events:none;
-      border: 0;
-      border-radius: 10px;
-    }
-
-    #chatTitle{
-      text-align:center;
-      font-weight: 900;
-      letter-spacing: .8px;
-      text-transform: uppercase;
-      color: var(--bone);
-      margin-bottom: 10px;
-      position:relative;
-      z-index:1;
-    }
-
-    #chatLog{
-      height: 160px;
-      overflow-y: auto;
-
-      background: rgba(0,0,0,.30);
-      border: 1px solid rgba(43,52,64,.95);
-      border-radius: 10px;
-
-      padding: 10px;
-      font-size: 12px;
-      line-height: 1.35;
-
-      box-shadow: inset 0 0 12px rgba(0,0,0,.85);
-      position:relative;
-      z-index:1;
-    }
-
-    .chatLine{ margin-bottom: 6px; color: rgba(215,219,226,.92); }
-    .chatName{ color: rgba(160,220,255,.95); font-weight: 900; }
-
-    #chatInput{
-      width: 100%;
-      margin-top: 10px;
-      padding: 10px 12px;
-
-      background: rgba(0,0,0,.22);
-      border: 1px solid rgba(43,52,64,.95);
-      border-radius: 10px;
-
-      color: var(--ink);
-      outline: none;
-
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
-      position:relative;
-      z-index:1;
-    }
-
-    #chatInput:focus{
-      border-color: rgba(182,75,46,.55);
-      box-shadow:
-        0 0 0 1px rgba(182,75,46,.10),
-        inset 0 1px 0 rgba(255,255,255,.05);
-    }
-
-    /* Responsive */
-    @media (max-width: 900px){
-      .services{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    @media (max-width: 520px){
-      .services{ grid-template-columns: 1fr; }
-      h2{ font-size: 18px; letter-spacing: 2px; }
-      .panel{ padding: 16px; }
-    }
-
-  </style>
+  <link rel="stylesheet" href="/town.css">
+  <script defer src="/town.js"></script>
 </head>
-<body>
 
+<body>
   <div id="statpanel-root"></div>
 
   <div class="wrap">
-    <div class="panel">
-      <h2>${town.name}</h2>
-      <div class="desc">${town.description || "A place of faith, shelter, and fate."}</div>
 
-      <hr class="rule">
-
-      <div class="services">
-        ${buttons || `<div class="empty"><i>No services available yet.</i></div>`}
+    <div class="topbar">
+      <div class="brand">
+        <div class="title"><span class="sigil"></span> ${town.name}</div>
+        <div class="sub">${town.description || "A place of faith, shelter, and guarded coin."}</div>
       </div>
 
-      <hr class="rule">
-
-      <a class="leave" href="/world">🌍 Return to World</a>
+      <div class="nav">
+        <span class="pill">Haven: <strong>${town.name}</strong></span>
+        <a class="btn danger" href="/world">⚔ Step Into the Wilderness</a>
+      </div>
     </div>
-  </div>
 
-  <div id="worldChat">
-    <div id="chatTitle">🌍 World Chat</div>
-    <div id="chatLog"></div>
-    <input id="chatInput" placeholder="Say something..." maxlength="240" />
+    <div class="grid">
+
+      <!-- LEFT: SERVICES -->
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Town Services</h2>
+            <p>Trade, train, heal, and prepare.</p>
+          </div>
+          <span class="badge good">Safe Zone</span>
+        </div>
+
+        <div class="cardBody">
+          <div class="servicesGrid">
+            ${services.map((s: any) => `
+              <a class="serviceTile ${s.route === "/shop" ? "featured" : ""}" href="${s.route}">
+                <div class="serviceIcon">${renderServiceIcon(s.icon)}</div>
+                <div class="serviceLabel">
+                  <strong>${s.name}</strong>
+                  <span>${serviceSubtitle(s)}</span>
+                </div>
+              </a>
+            `).join("")}
+          </div>
+
+
+          <div class="note">Some services may be expanded later (parties, bulletin board, trade offers).</div>
+        </div>
+      </section>
+
+      <!-- RIGHT: INFO / UPDATES / DANGER CTA -->
+      <aside class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Town Ledger</h2>
+            <p>Notes, updates, and warnings.</p>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="btn journal" id="btn-journal" type="button">
+              📖 Journal
+            </button>
+
+          </div>
+        </div>
+
+        <div class="cardBody">
+
+        <div class="infoBox" aria-label="Gossip">
+          <div class="infoTitle">
+            <strong>Gossip</strong>
+            <span class="badge">Whispers</span>
+          </div>
+
+          <p class="infoText" id="town-gossip">
+            Listening for whispers…
+          </p>
+
+          <div class="infoText" id="town-gossip-meta" style="color: var(--muted); font-size: 12px; margin-top: 8px;"></div>
+        </div>
+
+          <div class="divider"></div>
+
+          <!-- Optional: reuse your “Latest Updates” concept -->
+          <div class="infoBox" aria-label="Latest Updates">
+            <div class="infoTitle">
+              <strong>Latest Updates</strong>
+              <span class="badge">What’s new</span>
+            </div>
+
+            <p class="infoText" style="color: var(--muted); font-size:12px;">
+• Loot drops now appear as a chest you open after combat.  
+• Rumor quests can be found in the tavern and accepted.  
+• Quest turn-ins can be claimed when objectives are complete.
+            </p>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="wilderness">
+            <div>
+              <div style="font-weight:800; letter-spacing:.3px; color:#fff; font-size:13px; margin-bottom:4px;">
+                ⚔ Venture Out
+              </div>
+              <p>Supplies, gear, and luck — that’s what survives the wild.</p>
+            </div>
+            <a class="btn danger" href="/world">Leave Haven</a>
+          </div>
+
+        </div>
+      </aside>
+
+    </div>
   </div>
 
   <link rel="stylesheet" href="/statpanel.css">
   <script src="/statpanel.js"></script>
-  <script src="/world-chat.js"></script>
+  <script>window.GF_TOWN_ID = ${town.id};</script>
 </body>
 </html>
 `);
+
 
 
 });

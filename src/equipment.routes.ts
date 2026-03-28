@@ -3,13 +3,11 @@ import { db } from "./db";
 
 const router = Router();
 
-
-
 // ========================
 // LOGIN GUARD
 // ========================
-function requireLogin(req:any,res:any,next:any) {
-  if(!req.session || !req.session.playerId) {
+function requireLogin(req: any, res: any, next: any) {
+  if (!req.session || !req.session.playerId) {
     return res.redirect("/login.html");
   }
   next();
@@ -18,52 +16,70 @@ function requireLogin(req:any,res:any,next:any) {
 // ========================
 // EQUIPMENT PAGE
 // ========================
-router.get("/equipment", requireLogin, async (req,res)=>{
-
+router.get("/equipment", requireLogin, async (req, res) => {
   const pid = req.session.playerId;
 
   // Player base stats
-  const [[player]]: any = await db.execute(`
+  const [[player]]: any = await db.execute(
+    `
     SELECT name, attack, defense, agility, vitality, intellect, crit
-    FROM players WHERE id=?
-  `,[pid]);
+    FROM players
+    WHERE id=?
+    `,
+    [pid]
+  );
 
-// Load equipped gear from inventory
-const [gear]: any = await db.execute(`
-  SELECT
-    inv.inventory_id AS instance_id,
-    i.*
-  FROM inventory inv
-  JOIN items i ON i.id = inv.item_id
-  WHERE inv.player_id = ? AND inv.equipped = 1
-`, [pid]);
+  // Load equipped gear from player_items + item_bases
+  const [gear]: any = await db.execute(
+    `
+    SELECT
+      pi.id AS instance_id,
+      pi.name,
+      pi.item_level,
+      pi.rarity,
+      pi.is_equipped,
+      pi.roll_json,
 
-
+      ib.slot,
+      ib.item_type,
+      ib.armor_weight,
+      ib.base_attack AS attack,
+      ib.base_defense AS defense,
+      ib.sell_value AS value,
+      ib.icon,
+      ib.description
+    FROM player_items pi
+    JOIN item_bases ib ON ib.id = pi.item_base_id
+    WHERE pi.player_id = ?
+      AND pi.is_equipped = 1
+    `,
+    [pid]
+  );
 
   // Map gear by slot
-  const equipped:any = {};
-  gear.forEach((g:any)=> equipped[g.slot] = g );
+  const equipped: any = {};
+  gear.forEach((g: any) => (equipped[g.slot] = g));
 
   // Totals
   const total = {
-    attack: player.attack,
-    defense: player.defense,
-    agility: player.agility,
-    vitality: player.vitality,
-    intellect: player.intellect,
-    crit: player.crit
+    attack: Number(player.attack ?? 0),
+    defense: Number(player.defense ?? 0),
+    agility: Number(player.agility ?? 0),
+    vitality: Number(player.vitality ?? 0),
+    intellect: Number(player.intellect ?? 0),
+    crit: Number(player.crit ?? 0)
   };
 
-  for(const g of gear) {
-    total.attack   += g.attack;
-    total.defense  += g.defense;
-    total.agility  += g.agility;
-    total.vitality += g.vitality;
-    total.intellect+= g.intellect;
-    total.crit     += g.crit;
+  for (const g of gear) {
+    total.attack += Number(g.attack ?? 0);
+    total.defense += Number(g.defense ?? 0);
+    total.agility += Number(g.agility ?? 0);
+    total.vitality += Number(g.vitality ?? 0);
+    total.intellect += Number(g.intellect ?? 0);
+    total.crit += Number(g.crit ?? 0);
   }
 
-  const SLOT_LABELS:any = {
+  const SLOT_LABELS: any = {
     weapon: "Weapon",
     head: "Helmet",
     chest: "Chest",
@@ -73,52 +89,70 @@ const [gear]: any = await db.execute(`
     offhand: "Off-Hand"
   };
 
-const renderSlot = (slot:string)=>{
-  const item = equipped[slot];
-  return `
-    <div class="gear-slot"
-     ondragover="event.preventDefault()"
-     ondrop="dropEquip(event, '${slot}')">
+  const renderSlot = (slot: string) => {
+    const item = equipped[slot];
+    return `
+      <div class="gear-slot"
+       ondragover="event.preventDefault()"
+       ondrop="dropEquip(event, '${slot}')">
 
-      <strong>${SLOT_LABELS[slot]}</strong>
-      ${
-        item
-          ? `<div class="tooltip-container">
-             <img src="/icons/${item.icon}" width="40">
-             <div>${item.name}</div>
+        <strong>${SLOT_LABELS[slot]}</strong>
+        ${
+          item
+            ? `<div class="tooltip-container">
+               <img src="/icons/${item.icon}" width="40">
+               <div>${item.name}</div>
 
-  <div class="tooltip ${item.rarity}">
-    <strong>${item.name}</strong>
-    <div class="rarity">${item.rarity.toUpperCase()}</div>
-    ${item.attack ? `<span class="stat">Attack: +${item.attack}</span>` : ""}
-    ${item.defense ? `<span class="stat">Defense: +${item.defense}</span>` : ""}
-    ${item.agility ? `<span class="stat">Agility: +${item.agility}</span>` : ""}
-    ${item.vitality ? `<span class="stat">Vitality: +${item.vitality}</span>` : ""}
-    ${item.intellect ? `<span class="stat">Intellect: +${item.intellect}</span>` : ""}
-    ${item.crit ? `<span class="stat">Crit: +${item.crit}</span>` : ""}
-    ${item.description ? `<div style="margin-top:6px;font-style:italic">${item.description}</div>` : ""}
-  </div>
-</div>
-
-             <a href="/equipment/unequip/${item.instance_id}">Unequip</a>`
-          : `<em>Empty</em>`
-      }
+    <div class="tooltip ${item.rarity}">
+      <strong>${item.name}</strong>
+      <div class="rarity">${String(item.rarity || "base").toUpperCase()}</div>
+      ${item.attack ? `<span class="stat">Attack: +${item.attack}</span>` : ""}
+      ${item.defense ? `<span class="stat">Defense: +${item.defense}</span>` : ""}
+      ${item.agility ? `<span class="stat">Agility: +${item.agility}</span>` : ""}
+      ${item.vitality ? `<span class="stat">Vitality: +${item.vitality}</span>` : ""}
+      ${item.intellect ? `<span class="stat">Intellect: +${item.intellect}</span>` : ""}
+      ${item.crit ? `<span class="stat">Crit: +${item.crit}</span>` : ""}
+      ${item.item_level ? `<span class="stat">Item Level: ${item.item_level}</span>` : ""}
+      ${item.armor_weight ? `<span class="stat">Weight: ${item.armor_weight}</span>` : ""}
+      ${item.description ? `<div style="margin-top:6px;font-style:italic">${item.description}</div>` : ""}
     </div>
-  `;
-};
-// Load ALL equipment items in inventory
-const [inventory]: any = await db.execute(`
-  SELECT
-    inv.inventory_id AS instance_id,
-    inv.equipped,
-    i.*
-  FROM inventory inv
-  JOIN items i ON i.id = inv.item_id
-  WHERE inv.player_id = ? AND i.slot IS NOT NULL
-`, [pid]);
+  </div>
 
+               <a href="/equipment/unequip/${item.instance_id}">Unequip</a>`
+            : `<em>Empty</em>`
+        }
+      </div>
+    `;
+  };
 
-res.send(`
+  // Load ALL equipment items from player_items + item_bases
+  const [inventory]: any = await db.execute(
+    `
+    SELECT
+      pi.id AS instance_id,
+      pi.is_equipped AS equipped,
+      pi.name,
+      pi.item_level,
+      pi.rarity,
+      pi.roll_json,
+
+      ib.slot,
+      ib.item_type,
+      ib.armor_weight,
+      ib.base_attack AS attack,
+      ib.base_defense AS defense,
+      ib.sell_value AS value,
+      ib.icon,
+      ib.description
+    FROM player_items pi
+    JOIN item_bases ib ON ib.id = pi.item_base_id
+    WHERE pi.player_id = ?
+    ORDER BY pi.is_equipped DESC, pi.created_at DESC
+    `,
+    [pid]
+  );
+
+  res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -287,14 +321,16 @@ button:hover { background:#222; }
   display: block;
 }
 
-.tooltip.common    { border-color: #bbb; }
-.tooltip.uncommon  { border-color: #44cc55; }
-.tooltip.rare      { border-color: #4aa3ff; }
-.tooltip.epic      { border-color: #b84aff; }
-.tooltip.legendary { border-color: #ff9933; }
+.tooltip.base         { border-color: #bbb; }
+.tooltip.dormant      { border-color: #7a7a7a; }
+.tooltip.awakened     { border-color: #4aa3ff; }
+.tooltip.empowered    { border-color: #b84aff; }
+.tooltip.transcendent { border-color: #ff9933; }
+
 .tooltip-container:hover .tooltip {
   display: block;
 }
+
 .inv-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, 64px);
@@ -328,7 +364,8 @@ button:hover { background:#222; }
 .inv-item.equipped {
   outline: 2px solid gold;
 }
-  .gear-slot.dragover {
+
+.gear-slot.dragover {
   outline: 2px dashed gold;
 }
 
@@ -339,16 +376,11 @@ button:hover { background:#222; }
 
 <div class="container">
 
-<!-- =========================
-     EQUIPMENT GRID
-========================= -->
-
 <div class="equipment-panel">
 
 <h2>${player.name}'s Equipment</h2>
 
 <div class="gear-grid">
-
 ${renderSlot("weapon")}
 ${renderSlot("offhand")}
 ${renderSlot("head")}
@@ -356,15 +388,10 @@ ${renderSlot("chest")}
 ${renderSlot("legs")}
 ${renderSlot("feet")}
 ${renderSlot("hands")}
-
 </div>
 
 <a class="return" href="/">Return to Town</a>
 </div>
-
-<!-- =========================
-     RIGHT SIDE
-========================= -->
 
 <div class="side-panel">
 
@@ -386,7 +413,7 @@ Crit: ${total.crit}
 <div class="inv-grid">
 ${
   inventory.map((g:any)=>`
-    <div class="inv-item tooltip-container"
+    <div class="inv-item tooltip-container ${g.equipped ? "equipped" : ""}"
          data-id="${g.instance_id}"
          data-slot="${g.slot}"
          draggable="true"
@@ -396,13 +423,15 @@ ${
 
       <div class="tooltip ${g.rarity}">
         <strong>${g.name}</strong>
-        <div class="rarity">${g.rarity.toUpperCase()}</div>
+        <div class="rarity">${String(g.rarity || "base").toUpperCase()}</div>
         ${g.attack ? `<span class="stat">Attack: +${g.attack}</span>` : ""}
         ${g.defense ? `<span class="stat">Defense: +${g.defense}</span>` : ""}
         ${g.agility ? `<span class="stat">Agility: +${g.agility}</span>` : ""}
         ${g.vitality ? `<span class="stat">Vitality: +${g.vitality}</span>` : ""}
         ${g.intellect ? `<span class="stat">Intellect: +${g.intellect}</span>` : ""}
         ${g.crit ? `<span class="stat">Crit: +${g.crit}</span>` : ""}
+        ${g.item_level ? `<span class="stat">Item Level: ${g.item_level}</span>` : ""}
+        ${g.armor_weight ? `<span class="stat">Weight: ${g.armor_weight}</span>` : ""}
         ${g.description ? `<div style="margin-top:6px;font-style:italic">${g.description}</div>` : ""}
       </div>
 
@@ -411,7 +440,6 @@ ${
 }
 </div>
 </div>
-
 
 <script>
 fetch("/statpanel.html")
@@ -431,7 +459,7 @@ let draggedId = null;
 
 document.querySelectorAll(".inv-item").forEach(el => {
   el.addEventListener("dragstart", e => {
-    draggedId = e.target.dataset.id;
+    draggedId = e.currentTarget.dataset.id;
   });
 });
 
@@ -439,80 +467,84 @@ function dropEquip(e, expectedSlot) {
   e.preventDefault();
   if (!draggedId) return;
 
-  fetch("/api/inventory/slot-check/" + draggedId)
-    .then(res => res.json())
-    .then(data => {
+  const draggedEl = document.querySelector('.inv-item[data-id="' + draggedId + '"]');
+  if (!draggedEl) return;
 
-      if (data.slot !== expectedSlot) {
-        alert("That item does not belong in this slot.");
-        return;
-      }
+  const actualSlot = draggedEl.dataset.slot;
+  if (actualSlot !== expectedSlot) {
+    alert("That item does not belong in this slot.");
+    return;
+  }
 
-      window.location.href = "/equipment/equip/" + draggedId;
-
-    });
+  window.location.href = "/equipment/equip/" + draggedId;
 }
 </script>
 
 </body>
 </html>
 `);
-
 });
 
-router.get("/equipment/equip/:id", requireLogin, async (req,res)=>{
-
+router.get("/equipment/equip/:id", requireLogin, async (req, res) => {
   const pid = req.session.playerId;
-  const invId = parseInt(req.params.id);
+  const playerItemId = parseInt(req.params.id, 10);
 
-  console.log("EQUIP CLICK:", invId, "PLAYER:", pid);
+  console.log("EQUIP CLICK:", playerItemId, "PLAYER:", pid);
 
-  // Get item slot
-  const [[row]]: any = await db.execute(`
-    SELECT inv.inventory_id, i.slot
-    FROM inventory inv
-    JOIN items i ON i.id = inv.item_id
-    WHERE inv.inventory_id = ? AND inv.player_id = ?
-  `,[invId,pid]);
+  const [[row]]: any = await db.execute(
+    `
+    SELECT
+      pi.id,
+      ib.slot
+    FROM player_items pi
+    JOIN item_bases ib ON ib.id = pi.item_base_id
+    WHERE pi.id = ? AND pi.player_id = ?
+    `,
+    [playerItemId, pid]
+  );
 
   console.log("ITEM FOUND:", row);
 
-  if(!row) return res.send("Item not found.");
-  if(!row.slot) return res.send("Item has no slot.");
+  if (!row) return res.send("Item not found.");
+  if (!row.slot) return res.send("Item has no slot.");
 
-  // Unequip same slot
-  await db.execute(`
-    UPDATE inventory
-    SET equipped = 0
-    WHERE player_id = ?
-      AND item_id IN (SELECT id FROM items WHERE slot = ?)
-  `,[pid,row.slot]);
+  await db.execute(
+    `
+    UPDATE player_items pi
+    JOIN item_bases ib ON ib.id = pi.item_base_id
+    SET pi.is_equipped = 0
+    WHERE pi.player_id = ?
+      AND ib.slot = ?
+    `,
+    [pid, row.slot]
+  );
 
-  // Equip selected
-  await db.execute(`
-    UPDATE inventory
-    SET equipped = 1
-    WHERE inventory_id = ?
-  `,[invId]);
+  await db.execute(
+    `
+    UPDATE player_items
+    SET is_equipped = 1
+    WHERE id = ? AND player_id = ?
+    `,
+    [playerItemId, pid]
+  );
 
   res.redirect("/equipment");
 });
 
-
-
-router.get("/equipment/unequip/:id", requireLogin, async (req,res)=>{
-
+router.get("/equipment/unequip/:id", requireLogin, async (req, res) => {
   const pid = req.session.playerId;
-  const invId = parseInt(req.params.id);
+  const playerItemId = parseInt(req.params.id, 10);
 
-  await db.execute(`
-    UPDATE inventory
-    SET equipped = 0
-    WHERE inventory_id = ? AND player_id = ?
-  `,[invId,pid]);
+  await db.execute(
+    `
+    UPDATE player_items
+    SET is_equipped = 0
+    WHERE id = ? AND player_id = ?
+    `,
+    [playerItemId, pid]
+  );
 
   res.redirect("/equipment");
 });
-
 
 export default router;

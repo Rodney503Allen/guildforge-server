@@ -1,3 +1,4 @@
+//services/combatEngine.ts
 import { DerivedStats } from "./statEngine";
 
 export type CombatResult = {
@@ -10,10 +11,6 @@ export function resolveAttack(
   attacker: DerivedStats,
   defender: DerivedStats
 ): CombatResult {
-
-  // =========================
-  // DODGE CHECK (AGILITY)
-  // =========================
   if (Math.random() < defender.dodgeChance) {
     return {
       damage: 0,
@@ -22,22 +19,18 @@ export function resolveAttack(
     };
   }
 
-  // =========================
-  // BASE DAMAGE
-  // =========================
   let damage = Math.max(
     1,
     Math.floor(attacker.attack * 1.1 - defender.defense * 0.6)
   );
 
-  // =========================
-  // CRIT CHECK
-  // =========================
   let crit = false;
   if (Math.random() < attacker.crit) {
-    damage = Math.floor(damage * 1.5);
+    damage = Math.floor(damage * attacker.critDamageMult);
     crit = true;
   }
+
+  damage = Math.max(1, Math.floor(damage * (1 - defender.damageReduction)));
 
   return {
     damage,

@@ -51,6 +51,22 @@ async function loadMyGuildMember(pid: number) {
 
   return row;
 }
+function esc(input: any) {
+  return String(input ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function fmt(n: any) {
+  return new Intl.NumberFormat("en-US").format(Number(n || 0));
+}
+
+function fmtDate(d: any) {
+  try { return new Date(d).toLocaleString(); } catch { return ""; }
+}
 
 /* ============================================================================================
    GUILD DASHBOARD
@@ -146,51 +162,85 @@ const member = await loadMyGuildMember(pid);
     `,[pid]) as any;
 
 
-    res.send(`
-<!DOCTYPE html>
-<html>
+res.send(`
+<!doctype html>
+<html lang="en">
 <head>
-<title>Guildforge | Guild Invitations</title>
-<link rel="stylesheet" href="/guild.css">
-<link rel="stylesheet" href="/statpanel.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <title>Guildforge | Guild</title>
+
+  <link rel="stylesheet" href="/statpanel.css">
+  <script defer src="/statpanel.js"></script>
+
+  <link rel="stylesheet" href="/guild.css">
 </head>
+
 <body>
-<div id="statpanel-root"></div>
-<link rel="stylesheet" href="/statpanel.css">
-<script src="/statpanel.js"></script>
+  <div id="statpanel-root"></div>
 
-<div class="guild-container">
-<div class="guild-title">Guild Invitations</div>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="title"><span class="sigil"></span> Guild</div>
+        <div class="sub">You are not currently in a guild.</div>
+      </div>
+      <div class="nav">
+        <a class="btn" href="/town">Return to Town</a>
+      </div>
+    </div>
 
-${
-inviteRows.length ? `
-<table class="guild-table">
-<tr><th>Guild</th><th>Inviter</th><th>Action</th></tr>
-${
-  inviteRows.map((i:any)=>`
-    <tr>
-      <td>${i.guild_name}</td>
-      <td>${i.inviter}</td>
-      <td>
-        <a href="/guild/accept/${i.id}">Accept</a> |
-        <a href="/guild/decline/${i.id}">Decline</a>
-      </td>
-    </tr>
-  `).join("")
-}
-</table>
-` : `<p style="text-align:center">No invitations.</p>`}
+    <div class="grid" style="grid-template-columns: 1fr;">
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Guild Invitations</h2>
+            <p>Accept an invite or create your own guild.</p>
+          </div>
+          <span class="badge">Invites</span>
+        </div>
 
-<div class="guild-actions">
-<a href="/guild/create">Create Guild</a>
-<a href="/">Return</a>
-</div>
-</div>
-<script src="/statpanel.js"></script>
+        <div class="cardBody">
+
+          ${
+            inviteRows.length
+              ? `
+                <table class="table">
+                  <tr>
+                    <th>Guild</th>
+                    <th>Inviter</th>
+                    <th style="width:220px;">Action</th>
+                  </tr>
+                  ${inviteRows.map((i:any)=>`
+                    <tr>
+                      <td>${esc(i.guild_name)}</td>
+                      <td>${esc(i.inviter)}</td>
+                      <td style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <a class="btn primary" href="/guild/accept/${Number(i.id)}">Accept</a>
+                        <a class="btn" href="/guild/decline/${Number(i.id)}">Decline</a>
+                      </td>
+                    </tr>
+                  `).join("")}
+                </table>
+              `
+              : `<div style="color:var(--muted); padding:10px 0;">No invitations.</div>`
+          }
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+            <a class="btn primary" href="/guild/create">Create Guild</a>
+            <a class="btn" href="/town">Return to Town</a>
+          </div>
+
+        </div>
+      </section>
+    </div>
+  </div>
 </body>
 </html>
 `);
-    return;
+return;
+
   }
 const [[guild]]: any = await db.execute(`
   SELECT
@@ -262,575 +312,333 @@ const [activityRows] = await db.execute(`
 const perkLevels: Record<number, number> = {};
 perkLevelsRows.forEach((p: any) => perkLevels[p.perk_id] = p.level);
 
-  res.send(`
-<!DOCTYPE html>
-<html>
+const xpNeed = guildXpNeeded(guild.level);
+const xpPct = xpNeed > 0 ? Math.max(0, Math.min(100, (guild.experience / xpNeed) * 100)) : 0;
+
+const canEditAnnouncement = hasPerm(member.permissions, PERMS.MANAGE_ROLES);
+const canInvite = hasPerm(member.permissions, PERMS.INVITE);
+const canDelete = hasPerm(member.permissions, PERMS.ADMIN_GUILD);
+
+res.send(`
+<!doctype html>
+<html lang="en">
 <head>
-<title>Guildforge | ${guild.name} — Guild</title>
-<link rel="stylesheet" href="/guild.css">
-<link rel="stylesheet" href="/statpanel.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <title>Guildforge | ${esc(guild.name)} — Guild</title>
+
+  <link rel="stylesheet" href="/statpanel.css">
+  <script defer src="/statpanel.js"></script>
+
+  <link rel="stylesheet" href="/guild.css">
+  <script defer src="/guild.js"></script>
 </head>
+
 <body>
-<div id="statpanel-root"></div>
-<link rel="stylesheet" href="/statpanel.css">
-<script src="/statpanel.js"></script>
+  <div id="statpanel-root"></div>
 
-<div class="guild-container">
+  <div class="wrap">
 
-<div class="guild-title">${guild.name}</div>
-<div class="guild-announcement">
-  <div class="announcement-header">
-  <div class="announcement-title">
-    <strong>📣 Guild Announcement</strong>
-  </div>
-
-    ${
-      hasPerm(member.permissions, PERMS.MANAGE_ROLES)
-        ? `<button id="edit-announcement" class="small-btn">Edit</button>`
-        : ``
-    }
-  </div>
-
-  <div class="announcement-body">
-    ${guild.announcement || "No announcement set."}
-  </div>
-
-  ${
-    guild.announcement_updated_at
-      ? `<div class="announcement-meta">
-           Last updated ${new Date(guild.announcement_updated_at).toLocaleString()}
-         </div>`
-      : ``
-  }
-</div>
-
-
-<div class="guild-sub">
-  Level ${guild.level} <br>
-  XP: ${guild.experience} / ${guildXpNeeded(guild.level)}
-</div>
-
-<div class="guild-xp-bar-wrapper">
-  <div class="guild-xp-bar">
-    <div class="guild-xp-fill" 
-         style="width:${(guild.experience / guildXpNeeded(guild.level)) * 100}%">
-    </div>
-  </div>
-</div>
-
-
-<div id="manage-member-modal" class="modal-hidden">
-  <div class="modal-window" style="width:420px">
-
-    <h2>Manage Member</h2>
-
-    <p>
-      <strong id="manage-member-name"></strong><br>
-      Current Role: <span id="manage-member-role"></span>
-    </p>
-
-    <hr>
-
-    <!-- ROLE CHANGE -->
-    <div class="manage-section">
-      <label>Change Role</label>
-      <select id="manage-role-select">
-        ${roles
-          .filter((r:any) => r.rank_order < member.rank_order)
-          .map((r:any) =>
-            `<option value="${r.id}">${r.name}</option>`
-          ).join("")}
-      </select>
-
-      <button id="confirm-role-change">Apply Role</button>
-
-    </div>
-
-    <hr>
-
-    <!-- KICK -->
-    ${
-      hasPerm(member.permissions, PERMS.KICK)
-        ? `<button id="kick-member-btn" class="danger-btn">
-             Kick from Guild
-           </button>`
-        : ""
-    }
-
-    <div class="modal-actions">
-      <button id="close-manage-member" class="cancel-btn">Close</button>
-    </div>
-
-  </div>
-</div>
-
-
-
-<div class="guild-actions" style="text-align:center; margin-top:15px;">
-  <button id="open-contribute" class="contrib-btn">Contribute</button>
-  <button id="open-perks" class="contrib-btn">Perks</button>
-  <button id="open-log" class="contrib-btn">View Log</button>
-</div>
-
-
-
-<!-- MODAL BACKDROP -->
-<div id="contribute-modal" class="modal-hidden">
-  <div class="modal-window">
-
-    <h2>Contribute Gold</h2>
-    <p>You have <strong>${player.gold}</strong> gold.</p>
-
-    <form method="POST" action="/guild/donate">
-      <input 
-        type="number"
-        name="amount"
-        min="1"
-        max="${player.gold}"
-        placeholder="Enter amount"
-        required
-      >
-
-      <div class="modal-actions">
-        <button type="submit" class="donate-btn">Donate</button>
-        <button type="button" id="close-contribute" class="cancel-btn">Cancel</button>
+    <div class="topbar">
+      <div class="brand">
+        <div class="title"><span class="sigil"></span> ${esc(guild.name)}</div>
+        <div class="sub">${esc(guild.description || "No guild description set.")}</div>
       </div>
-    </form>
 
+      <div class="nav">
+        <span class="pill">Role: <strong>${esc(member.role_name)}</strong></span>
+        <span class="pill">Guild Gold: <strong>${fmt(guild.gold)}g</strong></span>
+        <a class="btn danger" href="/town">Return to Town</a>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <!-- LEFT: MAIN -->
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Guild Dashboard</h2>
+            <p>Progress, announcements, and the roster.</p>
+          </div>
+          <span class="badge good">Active</span>
+        </div>
+
+        <div class="cardBody">
+
+          <div class="guildMeta">
+            <div class="metaBox">
+              <div class="metaK">Guild Level</div>
+              <div class="metaV">Level ${fmt(guild.level)}</div>
+            </div>
+
+            <div class="metaBox">
+              <div class="metaK">Experience</div>
+              <div class="metaV">${fmt(guild.experience)} / ${fmt(xpNeed)}</div>
+              <div class="xpBar"><div class="xpFill" style="width:${xpPct}%"></div></div>
+            </div>
+
+            <div class="metaBox">
+              <div class="metaK">Perk Points</div>
+              <div class="metaV">${fmt(guild.perk_points)}</div>
+            </div>
+          </div>
+
+          <div class="announce">
+            <div class="announceHead">
+              <div style="font-weight:900; letter-spacing:.4px;">📣 Guild Announcement</div>
+              ${canEditAnnouncement ? `<button id="edit-announcement" class="smallBtn">Edit</button>` : ``}
+            </div>
+
+            <div class="announceBody">${esc(guild.announcement || "No announcement set.")}</div>
+
+            ${
+              guild.announcement_updated_at
+                ? `<div class="announceMeta">Last updated ${esc(fmtDate(guild.announcement_updated_at))}</div>`
+                : ``
+            }
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+            <button id="open-contribute" class="btn primary">🪙 Contribute</button>
+            <button id="open-perks" class="btn">✨ Perks</button>
+            <button id="open-log" class="btn">📜 Activity Log</button>
+            ${canInvite ? `<a class="btn" href="/guild/invite">➕ Invite</a>` : ``}
+          </div>
+
+          <div style="margin-top:14px;">
+            <table class="table">
+              <tr>
+                <th>Name</th><th>Rank</th><th>Joined</th><th>Contribution</th><th>Actions</th>
+              </tr>
+              ${
+                members.map((m:any) => {
+                  const canManageThis =
+                    hasPerm(member.permissions, PERMS.MANAGE_ROLES) &&
+                    member.rank_order > m.rank_order &&
+                    Number(member.player_id) !== Number(m.player_id);
+
+                  return `
+                    <tr>
+                      <td>${esc(m.name)}</td>
+                      <td>${esc(m.role_name)}</td>
+                      <td>${esc(new Date(m.joined_at).toLocaleDateString())}</td>
+                      <td>${fmt(m.contribution)}</td>
+                      <td>
+                        ${
+                          canManageThis
+                            ? `<button class="smallBtn manage-btn"
+                                 data-player="${esc(m.name)}"
+                                 data-role="${esc(m.role_name)}"
+                                 data-player-id="${Number(m.player_id)}"
+                               >Manage</button>`
+                            : `—`
+                        }
+                      </td>
+                    </tr>
+                  `;
+                }).join("")
+              }
+            </table>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+            <a class="btn" href="/guild/leave" id="leave-guild-link" ${Number(member.owner_id) === Number(member.player_id) ? `data-owner="1"` : ``}>Leave Guild</a>
+            ${canDelete ? `<a class="btn danger" href="/guild/delete" id="delete-guild-link">Delete Guild</a>` : ``}
+          </div>
+
+        </div>
+      </section>
+
+      <!-- RIGHT: QUICK INFO -->
+      <aside class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Quick Info</h2>
+            <p>What matters at a glance.</p>
+          </div>
+          <span class="badge">Guild</span>
+        </div>
+
+        <div class="cardBody">
+          <div class="metaBox">
+            <div class="metaK">Your Contribution</div>
+            <div class="metaV">${fmt(member.contribution)}g</div>
+          </div>
+
+          <div class="metaBox" style="margin-top:10px;">
+            <div class="metaK">Permissions</div>
+            <div style="margin-top:6px; color:var(--muted); font-size:12px; line-height:1.4;">
+              ${hasPerm(member.permissions, PERMS.INVITE) ? "• Can invite<br>" : ""}
+              ${hasPerm(member.permissions, PERMS.KICK) ? "• Can kick<br>" : ""}
+              ${hasPerm(member.permissions, PERMS.SPEND_PERK_POINTS) ? "• Can spend perk points<br>" : ""}
+              ${hasPerm(member.permissions, PERMS.MANAGE_ROLES) ? "• Can manage roles<br>" : ""}
+              ${hasPerm(member.permissions, PERMS.ADMIN_GUILD) ? "• Guild Master<br>" : ""}
+              ${member.permissions === 0 ? "• Standard member" : ""}
+            </div>
+          </div>
+        </div>
+      </aside>
+
+    </div>
   </div>
-</div>
 
-<!-- GUILD PERKS MODAL -->
-<div id="perks-modal" class="modal-hidden">
-  <div class="modal-window" style="width:480px">
+  <!-- JSON payload for guild.js -->
+  <script id="guildData" type="application/json">${esc(JSON.stringify({
+    canKick: hasPerm(member.permissions, PERMS.KICK),
+    canManageRoles: hasPerm(member.permissions, PERMS.MANAGE_ROLES),
+    isOwner: Number(member.owner_id) === Number(member.player_id)
+  }))}</script>
 
-    <h2>Guild Perks</h2>
-    <p>Available Perk Points: <strong>${guild.perk_points}</strong></p>
-
-    <!-- COMBAT PERKS -->
-    <div class="perk-section">
-      <h3>⚔ Combat Perks</h3>
-      ${
-        perkDefs
-          .filter((p: any) => p.category === "combat")
-          .map((p: any) => renderPerk(p, perkLevels[p.id] || 0))
-          .join("")
-      }
-    </div>
-
-    <!-- ECONOMY PERKS -->
-    <div class="perk-section">
-      <h3>💰 Economy Perks</h3>
-      ${
-        perkDefs
-          .filter((p: any) => p.category === "economy")
-          .map((p: any) => renderPerk(p, perkLevels[p.id] || 0))
-          .join("")
-      }
-    </div>
-
-    <!-- UTILITY PERKS -->
-    <div class="perk-section">
-      <h3>🛡 Utility Perks</h3>
-      ${
-        perkDefs
-          .filter((p: any) => p.category === "utility")
-          .map((p: any) => renderPerk(p, perkLevels[p.id] || 0))
-          .join("")
-      }
-    </div>
-
-    <div class="modal-actions">
-      <button type="button" id="close-perks" class="cancel-btn">Close</button>
-    </div>
-
-  </div>
-</div>
-
-<!-- ACTIVITY LOG MODAL -->
-<div id="log-modal" class="modal-hidden">
-  <div class="modal-window" style="width:600px; max-height:70vh; overflow:auto;">
-
-    <h2>Guild Activity Log</h2>
-
-    <ul class="guild-activity">
-      ${
-        activityRows.map((a:any) => `
-          <li>
-            <span class="activity-time">
-              ${new Date(a.created_at).toLocaleString()}
-            </span>
-            —
-            <strong>${a.actor_name || "System"}</strong>
-            ${formatActivity(a)}
-          </li>
-        `).join("")
-      }
-    </ul>
-
-    <div class="modal-actions">
-      <button type="button" id="close-log" class="cancel-btn">Close</button>
-    </div>
-
-  </div>
-</div>
-<!-- ANNOUNCEMENT MODAL -->
-<div id="announcement-modal" class="modal-hidden">
-  <div class="modal-window" style="width:520px">
-
-    <h2>Edit Guild Announcement</h2>
-
-    <textarea
-      id="announcement-text"
-      rows="6"
-      placeholder="Enter guild announcement..."
-    >${guild.announcement || ""}</textarea>
-
-    <div class="modal-actions">
-      <button id="save-announcement" class="confirm-btn">Save</button>
-      <button id="close-announcement" class="cancel-btn">Cancel</button>
-    </div>
-
-  </div>
-</div>
-<!-- LEAVE GUILD BLOCKED MODAL -->
-<div id="leave-blocked-modal" class="modal-hidden">
-  <div class="modal-window" style="width:520px; text-align:center;">
-    <h2>Can't Leave Guild</h2>
-    <p style="margin-top:10px;">
-      You are the <strong>Guild Master</strong>.
-      Appoint a new Guild Master before leaving the guild.
-    </p>
-
-    <div class="modal-actions" style="justify-content:center;">
-      <button type="button" id="close-leave-blocked" class="cancel-btn">Close</button>
+  <!-- MODALS -->
+  <div class="modal" id="contribute-modal">
+    <div class="modalWin">
+      <div class="modalHead">
+        <h3>Contribute Gold</h3>
+        <button class="smallBtn" onclick="document.getElementById('contribute-modal').classList.remove('isOpen')">Close</button>
+      </div>
+      <div class="modalBody">
+        <div style="color:var(--muted); font-size:12px; margin-bottom:10px;">You have <b>${fmt(player.gold)}g</b>.</div>
+        <form method="POST" action="/guild/donate">
+          <input class="field" type="number" name="amount" min="1" max="${Number(player.gold)}" placeholder="Enter amount" required>
+          <div class="modalActions">
+            <button class="btn primary" type="submit">Donate</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
-</div>
-<!-- DELETE GUILD CONFIRM MODAL -->
-<div id="delete-guild-modal" class="modal-hidden">
-  <div class="modal-window" style="width:520px; text-align:center;">
-    <h2 style="color:#ff6666;">Delete Guild?</h2>
 
-    <p style="margin-top:10px;">
-      This will <strong>permanently delete</strong> the guild for <strong>ALL members</strong>.
-      This cannot be undone.
-    </p>
+  <div class="modal" id="perks-modal">
+    <div class="modalWin">
+      <div class="modalHead">
+        <h3>Guild Perks</h3>
+        <button class="smallBtn" onclick="document.getElementById('perks-modal').classList.remove('isOpen')">Close</button>
+      </div>
+      <div class="modalBody">
+        <div style="color:var(--muted); font-size:12px; margin-bottom:10px;">Available perk points: <b>${fmt(guild.perk_points)}</b></div>
 
-    <p style="margin-top:10px; opacity:.9;">
-      Confirm available in <strong><span id="delete-guild-timer">5</span></strong> seconds...
-    </p>
+        <div style="margin-top:10px;">
+          <div style="font-weight:900; margin-bottom:6px;">⚔ Combat</div>
+          ${perkDefs.filter((p:any)=>p.category==="combat").map((p:any)=>renderPerk(p, perkLevels[p.id]||0)).join("")}
+        </div>
 
-    <div class="modal-actions" style="justify-content:center; gap:10px;">
-      <button type="button" id="cancel-delete-guild" class="cancel-btn">Cancel</button>
-      <button type="button" id="confirm-delete-guild" class="danger-btn" disabled>
-        Delete Guild
-      </button>
+        <div style="margin-top:12px;">
+          <div style="font-weight:900; margin-bottom:6px;">💰 Economy</div>
+          ${perkDefs.filter((p:any)=>p.category==="economy").map((p:any)=>renderPerk(p, perkLevels[p.id]||0)).join("")}
+        </div>
+
+        <div style="margin-top:12px;">
+          <div style="font-weight:900; margin-bottom:6px;">🛡 Utility</div>
+          ${perkDefs.filter((p:any)=>p.category==="utility").map((p:any)=>renderPerk(p, perkLevels[p.id]||0)).join("")}
+        </div>
+      </div>
     </div>
   </div>
-</div>
 
+  <div class="modal" id="log-modal">
+    <div class="modalWin">
+      <div class="modalHead">
+        <h3>Guild Activity Log</h3>
+        <button class="smallBtn" onclick="document.getElementById('log-modal').classList.remove('isOpen')">Close</button>
+      </div>
+      <div class="modalBody">
+        <ul class="activity">
+          ${activityRows.map((a:any)=>`
+            <li>
+              <div class="time">${esc(fmtDate(a.created_at))}</div>
+              <div><b>${esc(a.actor_name || "System")}</b> ${esc(formatActivity(a))}</div>
+            </li>
+          `).join("")}
+        </ul>
+      </div>
+    </div>
+  </div>
 
-<p style="text-align:center">${guild.description || "No guild description."}</p>
+  <div class="modal" id="announcement-modal">
+    <div class="modalWin">
+      <div class="modalHead">
+        <h3>Edit Announcement</h3>
+        <button class="smallBtn" id="close-announcement">Close</button>
+      </div>
+      <div class="modalBody">
+        <textarea class="field" id="announcement-text" rows="6" placeholder="Enter guild announcement...">${esc(guild.announcement || "")}</textarea>
+        <div class="modalActions">
+          <button class="btn primary" id="save-announcement" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
-<div class="guild-actions">
-${hasPerm(member.permissions, PERMS.INVITE) ? `
-  <a href="/guild/invite">Invite</a>
-` : ""}
+  <div class="modal" id="manage-member-modal">
+    <div class="modalWin">
+      <div class="modalHead">
+        <h3>Manage Member</h3>
+        <button class="smallBtn" id="close-manage-member">Close</button>
+      </div>
+      <div class="modalBody">
+        <div style="margin-bottom:10px;">
+          <b id="manage-member-name"></b><br>
+          <span style="color:var(--muted); font-size:12px;">Current role: <span id="manage-member-role"></span></span>
+        </div>
 
-${hasPerm(member.permissions, PERMS.ADMIN_GUILD) ? `
-  <a href="/guild/delete"
-    id="delete-guild-link"
-    style="color:red">
-    Delete Guild
-  </a>
-` : ""}
+        <div style="margin-top:10px;">
+          <div style="color:var(--muted); font-size:11px; letter-spacing:.6px; text-transform:uppercase; font-weight:900;">Change Role</div>
+          <select class="field" id="manage-role-select">
+            ${
+              roles
+                .filter((r:any) => r.rank_order < member.rank_order)
+                .map((r:any) => `<option value="${Number(r.id)}">${esc(r.name)}</option>`)
+                .join("")
+            }
+          </select>
+          <div class="modalActions">
+            <button class="btn primary" id="confirm-role-change" type="button">Apply Role</button>
+            ${
+              hasPerm(member.permissions, PERMS.KICK)
+                ? `<button class="btn danger" id="kick-member-btn" type="button">Kick</button>`
+                : ``
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-<a
-  href="/guild/leave"
-  id="leave-guild-link"
-  ${Number(member.owner_id) === Number(member.player_id) ? `data-owner="1"` : ``}
->
-  Leave Guild
-</a>
+  <div class="modal" id="leave-blocked-modal">
+    <div class="modalWin">
+      <div class="modalHead">
+        <h3>Can't Leave Guild</h3>
+        <button class="smallBtn" id="close-leave-blocked">Close</button>
+      </div>
+      <div class="modalBody">
+        You are the <b>Guild Master</b>. Appoint a new Guild Master before leaving.
+      </div>
+    </div>
+  </div>
 
-<a href="/">Return</a>
-</div>
-
-
-<div class="guild-panel">
-<h3>Members</h3>
-<table class="guild-table">
-<tr><th>Name</th><th>Rank</th><th>Joined</th><th>Contribution</th><th>Actions</th></tr>
-${
-members.map((m:any)=>`
-<tr>
-<td>${m.name}</td>
-<td>${m.role_name}</td>
-<td>${new Date(m.joined_at).toLocaleDateString()}</td>
-<td>${m.contribution}</td>
- <td>
-    ${
-          member.rank_order > m.rank_order &&
-          member.player_id !== m.player_id &&
-          hasPerm(member.permissions, PERMS.MANAGE_ROLES)
-
-        ? `<button 
-             class="manage-btn"
-             data-player="${m.name}"
-             data-role="${m.role_name}"
-             data-player-id="${m.player_id}"
-           >
-             Manage
-           </button>`
-        : `—`
-    }
-  </td>
-</tr>
-`).join("")
-}
-</table>
-
-
-</div>
-
-</div>
-<script src="/statpanel.js"></script>
-
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-
-  /* ============================
-     SHARED MODAL HELPERS
-  ============================ */
-  function openModal(modal) {
-    modal.classList.remove("modal-hidden", "modal-closing");
-    modal.classList.add("modal-visible");
-  }
-
-  function closeModal(modal) {
-    modal.classList.remove("modal-visible");
-    modal.classList.add("modal-closing");
-
-    setTimeout(() => {
-      modal.classList.add("modal-hidden");
-      modal.classList.remove("modal-closing");
-    }, 300);
-  }
-
-  /* ============================
-       CONTRIBUTION MODAL
-  ============================ */
-  const contribModal = document.getElementById("contribute-modal");
-  const openContrib = document.getElementById("open-contribute");
-  const closeContrib = document.getElementById("close-contribute");
-
-  openContrib?.addEventListener("click", () => openModal(contribModal));
-  closeContrib?.addEventListener("click", () => closeModal(contribModal));
-
-  /* ============================
-           PERKS MODAL
-  ============================ */
-  const perksModal = document.getElementById("perks-modal");
-  const openPerks = document.getElementById("open-perks");
-  const closePerks = document.getElementById("close-perks");
-
-  openPerks?.addEventListener("click", () => openModal(perksModal));
-  closePerks?.addEventListener("click", () => closeModal(perksModal));
-
-/* ============================
-     ACTIVITY LOG MODAL
-============================ */
-const logModal = document.getElementById("log-modal");
-const openLog = document.getElementById("open-log");
-const closeLog = document.getElementById("close-log");
-
-openLog?.addEventListener("click", () => openModal(logModal));
-closeLog?.addEventListener("click", () => closeModal(logModal));
-
-
-/* ============================
-     ADD ANNOUNCEMENT MODAL
-============================ */
-const announcementModal = document.getElementById("announcement-modal");
-const openAnnouncement = document.getElementById("edit-announcement");
-const closeAnnouncement = document.getElementById("close-announcement");
-
-openAnnouncement?.addEventListener("click", () =>
-  openModal(announcementModal)
-);
-
-closeAnnouncement?.addEventListener("click", () =>
-  closeModal(announcementModal)
-);
-document
-  .getElementById("save-announcement")
-  ?.addEventListener("click", () => {
-
-    const text =
-      document.getElementById("announcement-text").value.trim();
-
-    fetch("/guild/announcement", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text })
-    }).then(() => location.reload());
-  });
-
-
-  /* ============================
-       MANAGE MEMBER MODAL
-  ============================ */
-  const manageModal = document.getElementById("manage-member-modal");
-
-  document.querySelectorAll(".manage-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      currentTargetPlayerId = btn.dataset.playerId;
-
-      document.getElementById("manage-member-name").textContent =
-        btn.dataset.player;
-
-      document.getElementById("manage-member-role").textContent =
-        btn.dataset.role;
-
-      openModal(manageModal);
-    });
-  });
-
-  document
-    .getElementById("close-manage-member")
-    ?.addEventListener("click", () => closeModal(manageModal));
-
-  /* ============================
-     APPLY ROLE CHANGE
-  ============================ */
-  document
-    .getElementById("confirm-role-change")
-    ?.addEventListener("click", () => {
-
-      const roleId =
-        document.getElementById("manage-role-select").value;
-
-      if (!currentTargetPlayerId || !roleId) return;
-
-      fetch("/guild/member/role", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetPlayerId: currentTargetPlayerId,
-          newRoleId: roleId
-        })
-      }).then(() => location.reload());
-    });
-
-  /* ============================
-     KICK MEMBER
-  ============================ */
-  document
-    .getElementById("kick-member-btn")
-    ?.addEventListener("click", () => {
-
-      if (!currentTargetPlayerId) return;
-      if (!confirm("Kick this member from the guild?")) return;
-
-      fetch("/guild/member/kick", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetPlayerId: currentTargetPlayerId
-        })
-      }).then(() => location.reload());
-    });
-      /* ============================
-       BLOCK OWNER LEAVE (MODAL)
-  ============================ */
-  const leaveLink = document.getElementById("leave-guild-link");
-  const leaveBlockedModal = document.getElementById("leave-blocked-modal");
-  const closeLeaveBlocked = document.getElementById("close-leave-blocked");
-
-  leaveLink?.addEventListener("click", (e) => {
-    const isOwner = leaveLink.dataset.owner === "1";
-    if (!isOwner) return; // normal leave
-
-    e.preventDefault();
-    openModal(leaveBlockedModal);
-  });
-
-  closeLeaveBlocked?.addEventListener("click", () =>
-    closeModal(leaveBlockedModal)
-  );
-  /* ============================
-   DELETE GUILD CONFIRM (5s)
-============================ */
-const deleteLink = document.getElementById("delete-guild-link");
-const deleteModal = document.getElementById("delete-guild-modal");
-const cancelDeleteBtn = document.getElementById("cancel-delete-guild");
-const confirmDeleteBtn = document.getElementById("confirm-delete-guild");
-const timerEl = document.getElementById("delete-guild-timer");
-
-let deleteHref = "";
-let countdownTimer = null;
-let countdown = 5;
-
-function resetDeleteCountdown() {
-  if (countdownTimer) {
-    clearInterval(countdownTimer);
-    countdownTimer = null;
-  }
-  countdown = 5;
-  if (timerEl) timerEl.textContent = String(countdown);
-  if (confirmDeleteBtn) confirmDeleteBtn.disabled = true;
-}
-
-function startDeleteCountdown() {
-  resetDeleteCountdown();
-  countdownTimer = setInterval(() => {
-    countdown -= 1;
-    if (timerEl) timerEl.textContent = String(Math.max(0, countdown));
-
-    if (countdown <= 0) {
-      clearInterval(countdownTimer);
-      countdownTimer = null;
-      if (confirmDeleteBtn) confirmDeleteBtn.disabled = false;
-      if (timerEl) timerEl.textContent = "0";
-    }
-  }, 1000);
-}
-
-deleteLink?.addEventListener("click", (e) => {
-  e.preventDefault();
-  if (!deleteModal) return;
-
-  deleteHref = deleteLink.getAttribute("href") || "/guild/delete";
-  openModal(deleteModal);
-  startDeleteCountdown();
-});
-
-cancelDeleteBtn?.addEventListener("click", () => {
-  if (!deleteModal) return;
-  resetDeleteCountdown();
-  closeModal(deleteModal);
-});
-
-confirmDeleteBtn?.addEventListener("click", () => {
-  if (confirmDeleteBtn.disabled) return;
-  // navigate to server route to actually delete
-  window.location.href = deleteHref || "/guild/delete";
-});
-
-// Optional: if you allow closing by clicking outside, make sure countdown stops
-// (Only needed if your modal supports backdrop click-to-close)
-
-});
-
-
-</script>
-
-
+  <div class="modal" id="delete-guild-modal">
+    <div class="modalWin">
+      <div class="modalHead">
+        <h3>Delete Guild?</h3>
+        <button class="smallBtn" onclick="document.getElementById('delete-guild-modal').classList.remove('isOpen')">Close</button>
+      </div>
+      <div class="modalBody">
+        <div style="color:rgba(255,204,102,.95); font-weight:900;">This permanently deletes the guild for ALL members.</div>
+        <div style="margin-top:10px; color:var(--muted); font-size:12px;">Confirm available in <b><span id="delete-guild-timer">5</span></b> seconds…</div>
+        <div class="modalActions">
+          <button class="btn" id="cancel-delete-guild" type="button">Cancel</button>
+          <button class="btn danger" id="confirm-delete-guild" type="button" disabled>Delete Guild</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>
 `);
+
 
 });
 
@@ -1129,36 +937,64 @@ if (!hasPerm(member.permissions, PERMS.SPEND_PERK_POINTS)) {
    CREATE GUILD PAGE
 ============================================================================================ */
 router.get("/guild/create", requireLogin, (req,res)=>{
-  res.send(`
-<!DOCTYPE html>
-<html>
+res.send(`
+<!doctype html>
+<html lang="en">
 <head>
-<title>Guildforge | Create Guild</title>
-<link rel="stylesheet" href="/guild.css">
-<link rel="stylesheet" href="/statpanel.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <title>Guildforge | Create Guild</title>
+
+  <link rel="stylesheet" href="/statpanel.css">
+  <script defer src="/statpanel.js"></script>
+
+  <link rel="stylesheet" href="/guild.css">
 </head>
+
 <body>
-<div id="statpanel-root"></div>
-<link rel="stylesheet" href="/statpanel.css">
-<script src="/statpanel.js"></script>
+  <div id="statpanel-root"></div>
 
-<div class="guild-container">
-<div class="guild-title">Create Guild</div>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="title"><span class="sigil"></span> Create Guild</div>
+        <div class="sub">Name your banner and set a purpose.</div>
+      </div>
+      <div class="nav">
+        <a class="btn" href="/guild">Back</a>
+        <a class="btn" href="/town">Return to Town</a>
+      </div>
+    </div>
 
-<form class="guild-form" method="POST" action="/guild/create">
-  <input name="name" placeholder="Guild name" required>
-  <textarea name="description" placeholder="Guild description"></textarea>
-  <div class="guild-actions">
-    <button>Create</button>
-    <a href="/">Cancel</a>
+    <div class="grid" style="grid-template-columns: 1fr;">
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Found a Guild</h2>
+            <p>This will make you the Guild Master.</p>
+          </div>
+          <span class="badge good">New</span>
+        </div>
+
+        <div class="cardBody">
+          <form method="POST" action="/guild/create" style="display:grid; gap:10px; max-width:620px;">
+            <input class="field" name="name" placeholder="Guild name" maxlength="32" required>
+            <textarea class="field" name="description" placeholder="Guild description" rows="4" maxlength="220"></textarea>
+
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+              <button class="btn primary" type="submit">Create Guild</button>
+              <a class="btn" href="/guild">Cancel</a>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
   </div>
-</form>
-
-</div>
-<script src="/statpanel.js"></script>
 </body>
 </html>
 `);
+
 });
 
 /* =======================
@@ -1228,9 +1064,6 @@ router.post("/guild/create", requireLogin, async (req, res) => {
   res.redirect("/guild");
 });
 
-
-
-
 /* ============================================================================================
    GUILD LEVEL/XP SYSTEMS
 ============================================================================================ */
@@ -1288,17 +1121,6 @@ while (experience >= guildXpNeeded(level)) {
   return { level, experience, leveledUp };
 }
 
-
-
-
-
-
-
-
-
-
-
-
 /* =======================
    INVITE PAGE
 ======================= */
@@ -1314,33 +1136,56 @@ if (!hasPerm(member.permissions, PERMS.INVITE)) {
 }
 
 
-  res.send(`
-<!DOCTYPE html>
-<html>
+res.send(`
+<!doctype html>
+<html lang="en">
 <head>
-<title>Guildforge | Invite Player</title>
-<link rel="stylesheet" href="/guild.css">
-<link rel="stylesheet" href="/statpanel.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <title>Guildforge | Invite Player</title>
+
+  <link rel="stylesheet" href="/statpanel.css">
+  <script defer src="/statpanel.js"></script>
+
+  <link rel="stylesheet" href="/guild.css">
 </head>
+
 <body>
-<div id="statpanel-root"></div>
-<link rel="stylesheet" href="/statpanel.css">
-<script src="/statpanel.js"></script>
+  <div id="statpanel-root"></div>
 
-<div class="guild-container">
-<div class="guild-title">Invite Player</div>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="title"><span class="sigil"></span> Invite Player</div>
+        <div class="sub">Bring someone under your banner.</div>
+      </div>
+      <div class="nav">
+        <a class="btn" href="/guild">Back</a>
+        <a class="btn" href="/town">Return to Town</a>
+      </div>
+    </div>
 
-<form class="guild-form" method="POST" action="/guild/invite">
-<input name="player" placeholder="Player name">
-<div class="guild-actions">
-<button>Invite</button>
-<a href="/guild">Back</a>
-</div>
-</form>
+    <div class="grid" style="grid-template-columns: 1fr;">
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Send Invitation</h2>
+            <p>Player must not already be in a guild.</p>
+          </div>
+          <span class="badge">Invite</span>
+        </div>
 
-</div>
-<script src="/statpanel.js"></script>
-
+        <div class="cardBody">
+          <form method="POST" action="/guild/invite" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <input class="field" name="player" placeholder="Exact player name" maxlength="32" required style="min-width:260px;">
+            <button class="btn primary" type="submit">Invite</button>
+            <a class="btn" href="/guild">Cancel</a>
+          </form>
+        </div>
+      </section>
+    </div>
+  </div>
 </body>
 </html>
 `);

@@ -10,6 +10,214 @@ function setText(id, val) {
   el.innerText = (val !== undefined && val !== null) ? val : "";
 }
 
+
+// =======================
+// QUEST COMPLETE GLOBAL NOTIFY (statpanel.js)
+// =======================
+(function installQuestCompleteNotifier() {
+  if (window.__questNotifyInstalled) return;
+  window.__questNotifyInstalled = true;
+
+  let questCompleteAudio = null;
+
+  function playQuestCompleteSound() {
+    try {
+      if (!questCompleteAudio) {
+        questCompleteAudio = new Audio("/sounds/questComplete.mp3");
+        questCompleteAudio.volume = 0.5;
+      }
+      questCompleteAudio.currentTime = 0;
+      questCompleteAudio.play().catch(() => {});
+    } catch (e) {
+      console.warn("Quest sound failed:", e);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  let bannerTimer = null;
+
+  function showQuestCompleteBanner(titleText) {
+    const title = (titleText ?? "Quest Completed").toString();
+
+    const existing = document.getElementById("questCompleteBanner");
+    if (existing) existing.remove();
+    if (bannerTimer) clearTimeout(bannerTimer);
+
+    const el = document.createElement("div");
+    el.id = "questCompleteBanner";
+    el.className = "quest-complete-banner";
+    el.innerHTML = `
+      <div class="qcb-inner">
+        <div class="qcb-glow"></div>
+        <div class="qcb-badge">✅</div>
+        <div class="qcb-text">
+          <div class="qcb-title">Quest Completed</div>
+          <div class="qcb-name">${escapeHtml(title)}</div>
+          <div class="qcb-sub">Journal updated</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(el);
+
+    playQuestCompleteSound();
+    requestAnimationFrame(() => el.classList.add("show"));
+
+    bannerTimer = setTimeout(() => {
+      el.classList.add("hide");
+      setTimeout(() => el.remove(), 500);
+    }, 2600);
+  }
+
+  // prevent duplicates across multiple API calls + reloads
+  const KEY = "gf_notified_completed_pqids";
+  function getSeen() {
+    try { return new Set(JSON.parse(localStorage.getItem(KEY) || "[]")); }
+    catch { return new Set(); }
+  }
+  function saveSeen(set) {
+    try { localStorage.setItem(KEY, JSON.stringify([...set].slice(-200))); }
+    catch {}
+  }
+
+    // =======================
+  // TURN-IN READY NOTIFY (amount owned == amount required)
+  // =======================
+
+  // ✅ IMPORTANT: set this to your actual journal endpoint.
+  // Common ones in your project: "/api/journal" or "/journal"
+  const JOURNAL_URL = "/api/journal/quests";
+
+  // prevent duplicates
+  const READY_KEY = "gf_notified_turnin_ready_pqids";
+  function getReadySeen() {
+    try { return new Set(JSON.parse(localStorage.getItem(READY_KEY) || "[]")); }
+    catch { return new Set(); }
+  }
+  function saveReadySeen(set) {
+    try { localStorage.setItem(READY_KEY, JSON.stringify([...set].slice(-200))); }
+    catch {}
+  }
+
+  function extractTurnInReadyFromJournal(journal) {
+    // expects: { active: QuestLogRow[], completed: [], claimed: [], rumors: [] }
+    const active = journal?.active;
+    if (!Array.isArray(active)) return [];
+
+    // If a quest has TURN_IN objective complete (progress >= required), notify once.
+    // (Still "active" until turn-in action, depending on your design.)
+    return active.filter((r) => {
+      const type = String(r?.objectiveType || "");
+      if (type !== "TURN_IN") return false;
+
+      const req = Number(r?.required_count || 0);
+      const cur = Number(r?.progress_count || 0);
+
+      return req > 0 && cur >= req;
+    });
+  }
+
+  async function pollTurnInReady() {
+    try {
+      const res = await _fetch(JOURNAL_URL, { credentials: "include" });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const ready = extractTurnInReadyFromJournal(data);
+      if (!ready.length) return;
+
+      const seen = getReadySeen();
+      const newlyReady = [];
+
+      for (const row of ready) {
+        const pqid = Number(row?.playerQuestId);
+        if (!Number.isFinite(pqid)) continue;
+        if (seen.has(pqid)) continue;
+
+        seen.add(pqid);
+        newlyReady.push(row);
+      }
+
+      if (newlyReady.length) {
+        saveReadySeen(seen);
+
+        // Use your existing banner + sound (requested)
+        newlyReady.forEach((r, idx) => {
+          const title = r?.title || "Quest";
+          setTimeout(() => showQuestCompleteBanner(`Turn-In Ready: ${title}`), idx * 450);
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Poll every 8s (lightweight). You can raise this to 15–30s if you want.
+  setInterval(pollTurnInReady, 8000);
+
+  // Run once shortly after load
+  setTimeout(pollTurnInReady, 1200);
+
+
+
+  function extractCompletedQuests(payload) {
+    // supports: { quest: { completedQuests: [...] } } OR { completedQuests: [...] }
+    const a = payload?.quest?.completedQuests;
+    if (Array.isArray(a)) return a;
+    const b = payload?.completedQuests;
+    if (Array.isArray(b)) return b;
+    return [];
+  }
+
+  const _fetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await _fetch(...args);
+
+    // Only inspect JSON responses (safe + cheap)
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (!ct.includes("application/json")) return res;
+
+    // Clone so callers can still read the response body
+    const clone = res.clone();
+
+    clone.json().then((data) => {
+      const completed = extractCompletedQuests(data);
+      if (!completed.length) return;
+
+      const seen = getSeen();
+      const newlyCompleted = [];
+
+      for (const q of completed) {
+        const pqid = Number(q?.playerQuestId);
+        if (!Number.isFinite(pqid)) continue;
+        if (seen.has(pqid)) continue;
+        seen.add(pqid);
+        newlyCompleted.push(q);
+      }
+
+      if (newlyCompleted.length) {
+        saveSeen(seen);
+
+        // stagger banners if multiple complete at once
+        newlyCompleted.forEach((q, idx) => {
+          setTimeout(() => showQuestCompleteBanner(q?.title || "Quest"), idx * 450);
+        });
+      }
+    }).catch(() => {});
+
+    return res;
+  };
+})();
+
+
+
 function loadStatPanel() {
   fetch("/me")
     .then(res => res.json())

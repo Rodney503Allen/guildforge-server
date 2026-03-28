@@ -216,7 +216,39 @@
     margin-top: 4px;
     font-weight: 600;
   }
+  .bar.atb{
+    height: 12px;
+    background: rgba(0,0,0,.34);
+  }
 
+  .bar-fill.atb{
+    background: linear-gradient(90deg, rgba(180,140,40,.92), rgba(255,210,90,.95));
+    box-shadow: 0 0 12px rgba(255,210,90,.18);
+    transition: width 0.12s linear;
+  }
+
+  .bar-fill.atb.enemy-atb{
+    background: linear-gradient(90deg, rgba(130,90,20,.92), rgba(220,170,60,.95));
+  }
+
+  .atb-group .bar-text{
+    font-size: 10px;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    color: rgba(215,219,226,.78);
+  }
+
+  .combat-panel.ready .bar.atb{
+    border-color: rgba(182,75,46,.70);
+    box-shadow:
+      inset 0 0 10px rgba(0,0,0,.85),
+      0 0 0 1px rgba(182,75,46,.12),
+      0 0 14px rgba(182,75,46,.18);
+  }
+
+  .combat-panel.ready .bar-fill.atb{
+    filter: brightness(1.08);
+  }
   /* =======================
      COMBAT LOG
   ======================= */
@@ -232,7 +264,7 @@
     border-radius: 12px;
 
     border: 1px solid rgba(43,52,64,.95);
-    background: rgba(0,0,0,.30);
+    background: rgba(0,0,0,.50);
 
     overflow-y:auto;
     font-size: 12px;
@@ -240,7 +272,18 @@
 
     box-shadow: inset 0 0 16px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.05);
   }
-
+  /* ✅ When dimmed, “spotlight” the log a bit */
+  #combatModal.post-combat-dim .combat-log{
+    background:
+      radial-gradient(900px 180px at 50% 0%, rgba(182,75,46,.18), transparent 60%),
+      rgba(0,0,0,.62);
+    border-color: rgba(182,75,46,.55);
+    box-shadow:
+      0 0 0 1px rgba(182,75,46,.18),
+      0 0 28px rgba(182,75,46,.10),
+      inset 0 0 26px rgba(0,0,0,.90),
+      inset 0 1px 0 rgba(255,255,255,.06);
+  }
   /* =======================
      MAIN ACTIONS
   ======================= */
@@ -885,6 +928,82 @@
 
 .hotbar-cd.hidden{ display:none; }
 
+
+/* =======================
+   POST-COMBAT DIM LAYER
+   Darkens everything except log + close button
+======================= */
+
+#combatModal.post-combat-dim::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background: rgba(0,0,0,.55);
+  z-index: 4;
+  pointer-events: none;
+}
+
+#combatModal.post-combat-dim .combat-header{
+  z-index: 6;
+}
+
+#combatModal.post-combat-dim #combatLog{
+  z-index: 5; /* stays readable */
+}
+
+#combatModal.post-combat-dim #combatCloseBtn{
+  z-index: 7;
+  opacity: 1 !important;
+  filter: brightness(1.6) saturate(1.15);
+  background: linear-gradient(180deg, rgba(182,75,46,.85), rgba(0,0,0,.22));
+  border-color: rgba(182,75,46,.80);
+  box-shadow:
+    0 0 0 1px rgba(182,75,46,.22),
+    0 18px 34px rgba(0,0,0,.70),
+    0 0 22px rgba(182,75,46,.28);
+}
+
+/* Optional: make disabled stuff feel “dead” */
+#combatModal.post-combat-dim button:disabled{
+  filter: grayscale(35%);
+  opacity: .55;
+}
+
+#combatModal.post-combat-dim #combatCloseBtn:disabled{
+  opacity: 1 !important;
+  filter: brightness(1.35) saturate(1.1) !important;
+  cursor: pointer;
+}
+
+
+/* ✅ Scrollbar styling (WebKit browsers) */
+#combatLog::-webkit-scrollbar{
+  width: 10px;
+}
+
+#combatLog::-webkit-scrollbar-track{
+  background: rgba(0,0,0,.25);
+  border-left: 1px solid rgba(255,255,255,.06);
+}
+
+#combatLog::-webkit-scrollbar-thumb{
+  background: rgba(182,75,46,.95);   /* red bar */
+  border-radius: 999px;
+  border: 2px solid rgba(0,0,0,.35); /* gives it separation */
+}
+
+#combatLog::-webkit-scrollbar-thumb:hover{
+  filter: brightness(1.08);
+}
+#combatLog{
+  scrollbar-width: thin;
+  scrollbar-color: rgba(182,75,46,.95) rgba(0,0,0,.25);
+}
+#hpPotionBtn.is-cooldown,
+#spPotionBtn.is-cooldown {
+  filter: brightness(0.55);
+  opacity: 0.85;
+}
 /* responsive */
 @media (max-width: 520px){
   .combat-hotbar{
@@ -950,13 +1069,23 @@
           </div>
         </div>
 
-        <div class="bar-group">
+                <div class="bar-group">
           <div class="bar-label">✨ SP</div>
           <div class="bar">
             <div id="playerSPBar" class="bar-fill sp"></div>
           </div>
           <div class="bar-text">
             <span id="playerSP"></span> / <span id="playerMaxSP"></span>
+          </div>
+        </div>
+
+        <div class="bar-group atb-group">
+          <div class="bar-label">⏳ ATB</div>
+          <div class="bar atb">
+            <div id="playerATBBar" class="bar-fill atb"></div>
+          </div>
+          <div class="bar-text">
+            <span id="playerATBText">0%</span>
           </div>
         </div>
       </div>
@@ -971,13 +1100,23 @@
       <div class="panel-info right">
         <div id="enemyName" class="name enemy-name"></div>
 
-        <div class="bar-group">
+                <div class="bar-group">
           <div class="bar-label">☠ HP</div>
           <div class="bar">
             <div id="enemyHPBar" class="bar-fill hp enemy"></div>
           </div>
           <div class="bar-text">
             <span id="enemyHP"></span> / <span id="enemyMaxHP"></span>
+          </div>
+        </div>
+
+        <div class="bar-group atb-group">
+          <div class="bar-label">⏳ ATB</div>
+          <div class="bar atb">
+            <div id="enemyATBBar" class="bar-fill atb enemy-atb"></div>
+          </div>
+          <div class="bar-text">
+            <span id="enemyATBText">0%</span>
           </div>
         </div>
       </div>
@@ -990,7 +1129,7 @@
 
   <!-- ACTIONS -->
 <div class="combat-actions">
-  <button onclick="combatAttack()">⚔ Attack</button>
+  <button id="combatAttackBtn" onclick="combatAttack()">⚔ Attack</button>
   <button onclick="combatFlee()">🏃 Flee</button>
 </div>
 
@@ -1000,6 +1139,7 @@
   <!-- HP potion -->
   <button id="hpPotionBtn" type="button" class="hotbar-tile" onclick="useHotbarPotion('health')">
     <img id="hpPotionImg" src="/icons/potions/health.png" onerror="this.src='/icons/default.png'">
+    <div class="hotbar-cd hidden" id="potion-cd-hp"></div>
     <span class="hotbar-key">Q</span>
     <span id="hpPotionQty" class="hotbar-qty hidden"></span>
     <div class="hotbar-tooltip" id="hpPotionTooltip">
@@ -1014,10 +1154,9 @@
   <!-- Mana potion -->
   <button id="spPotionBtn" type="button" class="hotbar-tile" onclick="useHotbarPotion('mana')">
     <img id="spPotionImg" src="/icons/potions/mana.png" onerror="this.src='/icons/default.png'">
+    <div class="hotbar-cd hidden" id="potion-cd-sp"></div>
     <span class="hotbar-key">E</span>
     <span id="spPotionQty" class="hotbar-qty hidden"></span>
-
-    <!-- ✅ ADD THIS -->
     <div class="hotbar-tooltip" id="spPotionTooltip">
       <div class="tt-title">Mana Potion</div>
       <div class="tt-muted">No potion equipped</div>

@@ -5,12 +5,35 @@ import { resolveAttack } from "./services/combatEngine";
 import { getFinalPlayerStats } from "./services/playerService";
 import { handleCreatureKill } from "./services/killService";
 import { getCreatureDebuffTotals } from "./services/creatureDebuffService";
+import {
+  createCombatSession,
+  ensureCombatSession,
+  advanceCombatSession,
+  buildCombatSnapshot,
+  consumeActorTurn,
+  destroyCombatSession,
+  getActorReadyInMs
+} from "./services/combatSessionService";
 
 const router = Router();
-const playerAttackCooldowns = new Map<number, number>();
-const enemyAttackCooldowns = new Map<number, number>();
 
-async function useInventoryItemInCombat(pid: number, invId: number) {
+// ✅ POTION GLOBAL COOLDOWN (server authoritative)
+const potionCooldowns = new Map<number, { health: number; mana: number }>();
+const POTION_GCD_MS = 2000; // 2 seconds
+
+function getPotionCd(pid: number) {
+  const cur = potionCooldowns.get(pid);
+  if (cur) return cur;
+  const fresh = { health: 0, mana: 0 };
+  potionCooldowns.set(pid, fresh);
+  return fresh;
+}
+
+async function useInventoryItemInCombat(
+  pid: number,
+  invId: number,
+  potionSlot?: "health" | "mana"
+) {
   // Fetch inventory row + item data (must belong to this player)
   const [[row]]: any = await db.query(
     `
@@ -45,7 +68,28 @@ async function useInventoryItemInCombat(pid: number, invId: number) {
   // Combat-usable checks
   if (Number(row.is_combat) !== 1) return { error: "Item cannot be used in combat", status: 400 };
   if (!row.effect_type) return { error: "Item has no effect", status: 400 };
+  // ✅ Potion global cooldown (server-side)
+// ✅ Potion cooldown per slot (server-side authoritative)
+if (String(row.type) === "potion") {
+  if (!potionSlot) {
+    return { error: "Potion slot missing", status: 400 };
+  }
 
+  const now = Date.now();
+  const cd = getPotionCd(pid);
+  const nextAllowed = cd[potionSlot] || 0;
+
+  if (now < nextAllowed) {
+    return {
+      error: "cooldown",
+      status: 429,
+      remainingMs: nextAllowed - now
+    };
+  }
+
+  cd[potionSlot] = now + POTION_GCD_MS;
+  potionCooldowns.set(pid, cd); // (not strictly necessary, but explicit)
+}
   // Use final/computed stats so max values match the game UI
   const player = await getFinalPlayerStats(pid);
   if (!player) return { error: "Player not found", status: 404 };
@@ -114,141 +158,129 @@ async function useInventoryItemInCombat(pid: number, invId: number) {
     depleted
   };
 }
+
+async function getOrCreateSession(pid: number) {
+  let session = ensureCombatSession(pid);
+  if (!session) {
+    session = await createCombatSession(pid);
+  }
+  return session;
+}
+
+async function refreshPlayerActor(session: any) {
+  const player = await getFinalPlayerStats(session.playerId);
+  if (!player) return null;
+
+  session.player.stats = player;
+  session.player.name = player.name ?? "Player";
+  session.player.hp = Number(player.hpoints ?? 0);
+  session.player.maxHp = Number(player.maxhp ?? 1);
+  session.player.sp = Number(player.spoints ?? 0);
+  session.player.maxSp = Number(player.maxspoints ?? 0);
+
+  return player;
+}
+
+async function refreshEnemyActor(session: any) {
+const [[enemyRow]]: any = await db.query(
+  `
+  SELECT
+    pc.id,
+    pc.hp,
+    c.name,
+    c.attack,
+    c.defense,
+    c.agility,
+    c.crit,
+    c.maxhp
+  FROM player_creatures pc
+  JOIN creatures c ON c.id = pc.creature_id
+  WHERE pc.id = ?
+    AND pc.player_id = ?
+  LIMIT 1
+  `,
+  [session.enemyInstanceId, session.playerId]
+);
+
+  if (!enemyRow) return null;
+
+  const debuffs = await getCreatureDebuffTotals(enemyRow.id);
+
+const enemyStats = {
+  level: 1,
+  attack: Number(enemyRow.attack ?? 0) + Number(debuffs.attack || 0),
+  defense: Number(enemyRow.defense ?? 0) + Number(debuffs.defense || 0),
+  agility: Number(enemyRow.agility ?? 0) + Number(debuffs.agility || 0),
+  vitality: Number(debuffs.vitality || 0),
+  intellect: Number(debuffs.intellect || 0),
+  crit: Number(enemyRow.crit ?? 0) + Number(debuffs.crit || 0),
+
+  hpoints: Number(enemyRow.hp ?? 0),
+  spoints: 0,
+  maxhp: Number(enemyRow.maxhp ?? 1),
+  maxspoints: 0,
+
+  dodgeChance: 0,
+  spellPower: 1,
+  critDamageMult: 1.5,
+  damageReduction: 0,
+  lifesteal: 0
+};
+
+  session.enemy.name = String(enemyRow.name ?? "Enemy");
+  session.enemy.hp = Number(enemyRow.hp ?? 0);
+  session.enemy.maxHp = Number(enemyRow.maxhp ?? 1);
+  session.enemy.stats = enemyStats as any;
+
+  return { row: enemyRow, stats: enemyStats };
+}
+
+
+
 /* ===========================
    GET COMBAT STATE
 =========================== */
 router.get("/combat/state", async (req, res) => {
-  const pid = (req.session as any).playerId;
-  if (!pid) return res.json({ inCombat: false });
+  try {
+    const pid = (req.session as any).playerId;
+    if (!pid) return res.json({ inCombat: false });
 
-  const [[row]]: any = await db.query(
-    `
-SELECT
-  pc.id,
-  c.name,
-  pc.hp,
-  c.maxhp,
-  EXISTS (
-  SELECT 1
-  FROM player_creature_dots d
-  WHERE d.player_creature_id = pc.id
-    AND d.expires_at > NOW()
-) AS hasStatus
-FROM player_creatures pc
-JOIN creatures c ON c.id = pc.creature_id
-WHERE pc.player_id = ?
+    const session = await getOrCreateSession(pid);
+    if (!session) {
+      return res.json({ inCombat: false });
+    }
 
-  `,
-    [pid]
-  );
+    await refreshPlayerActor(session);
+    const enemyData = await refreshEnemyActor(session);
 
-  if (!row) {
-    return res.json({ inCombat: false });
-  }
+    if (!enemyData) {
+      const snapshot = buildCombatSnapshot(session);
+      destroyCombatSession(pid);
 
-res.json({
-  inCombat: true,
-  enemy: {
-    id: row.id,
-    name: row.name,
-    hp: row.hp,
-    maxHP: row.maxhp,
-    hasStatus: !!row.hasStatus
+      return res.json({
+        inCombat: false,
+        snapshot
+      });
+    }
+
+    await advanceCombatSession(session);
+
+    return res.json({
+      inCombat: session.state === "active",
+      snapshot: buildCombatSnapshot(session)
+    });
+  } catch (err) {
+    console.error("GET /combat/state failed", err);
+    return res.status(500).json({ inCombat: false });
   }
 });
-
-});
-
 /* ===========================
    POLL COMBAT STATUS (HP SYNC)
    Used by client while DOT/HOT active
 =========================== */
 router.get("/combat/poll", async (req, res) => {
-  console.log("🧪 /combat/poll HIT");
-
-  try {
-    const pid = (req.session as any).playerId;
-    if (!pid) return res.json({ stop: true });
-
-    const [[enemy]]: any = await db.query(
-      `
-      SELECT
-        pc.id AS playerCreatureId,
-        pc.hp AS enemyHP,
-        c.maxhp AS enemyMaxHP
-      FROM player_creatures pc
-      JOIN creatures c ON c.id = pc.creature_id
-      WHERE pc.player_id = ?
-      LIMIT 1
-      `,
-      [pid]
-    );
-
-    if (!enemy) return res.json({ stop: true });
-
-    let enemyHP = Number(enemy.enemyHP);
-    const combatLog: string[] = [];
-    let reward = null;
-
-    // 🔥 DOT TICKS
-    const [dots]: any = await db.query(
-      `
-      SELECT *
-      FROM player_creature_dots
-      WHERE player_creature_id = ?
-        AND next_tick_at <= NOW()
-        AND expires_at > NOW()
-      `,
-      [enemy.playerCreatureId]
-    );
-
-    for (const dot of dots) {
-      enemyHP = Math.max(0, enemyHP - Number(dot.damage));
-
-      await db.query(
-        "UPDATE player_creatures SET hp = ? WHERE id = ?",
-        [enemyHP, enemy.playerCreatureId]
-      );
-
-      await db.query(
-        `
-        UPDATE player_creature_dots
-        SET next_tick_at = DATE_ADD(next_tick_at, INTERVAL tick_interval SECOND)
-        WHERE id = ?
-        `,
-        [dot.id]
-      );
-
-      combatLog.push(`🔥 Enemy takes ${dot.damage} damage.`);
-    }
-
-    await db.query(
-      "DELETE FROM player_creature_dots WHERE expires_at <= NOW()"
-    );
-
-    // ☠ Death check AFTER DOTs
-    if (enemyHP <= 0 && enemy.enemyHP > 0) {
-      reward = await handleCreatureKill(pid, enemy.playerCreatureId);
-    }
-
-    res.json({
-      stop: false,
-      enemyDead: enemyHP <= 0,
-      enemyHP,
-      enemyMaxHP: Number(enemy.enemyMaxHP),
-      log: combatLog,
-      exp: reward?.expGained,
-      gold: reward?.goldGained,
-      levelUp: reward?.levelUp
-    });
-
-  } catch (err) {
-    console.error("🔥 /combat/poll ERROR:", err);
-    res.status(500).json({ stop: true });
-  }
+  return res.json({ stop: true });
 });
-
-
 
 /* ===========================
    COMBAT SPELLS
@@ -511,7 +543,11 @@ router.post("/combat/potions-use", async (req, res) => {
 
   if (!Number.isFinite(invId)) return res.status(400).json({ error: "No potion equipped" });
 
-  const out: any = await useInventoryItemInCombat(pid, invId);
+  const out: any = await useInventoryItemInCombat(
+  pid,
+  invId,
+  slot as "health" | "mana"
+);
 
   if (out?.error) {
     return res.status(out.status || 400).json({ error: out.error });
@@ -533,200 +569,126 @@ router.post("/combat/potions-use", async (req, res) => {
    PLAYER ATTACK
 =========================== */
 router.post("/combat/attack", async (req, res) => {
-  const pid = (req.session as any).playerId;
-  if (!pid) return res.status(401).json({ error: "Not logged in" });
+  try {
+    const pid = (req.session as any).playerId;
+    if (!pid) return res.status(401).json({ error: "Not logged in" });
 
-  const now = Date.now();
-  const nextAllowed = playerAttackCooldowns.get(pid) || 0;
+    const session = await getOrCreateSession(pid);
+    if (!session) {
+      return res.status(404).json({ error: "No enemy" });
+    }
 
-  if (now < nextAllowed) {
+    await refreshPlayerActor(session);
+    const enemyData = await refreshEnemyActor(session);
+
+    if (!enemyData) {
+      session.state = "victory";
+      return res.json({
+        error: "No enemy",
+        snapshot: buildCombatSnapshot(session)
+      });
+    }
+
+    await advanceCombatSession(session);
+
+    if (session.state !== "active") {
+      return res.json({
+        error: "combat_over",
+        snapshot: buildCombatSnapshot(session)
+      });
+    }
+
+    if (!session.player.ready) {
+      return res.json({
+        error: "not_ready",
+        remainingMs: getActorReadyInMs(session.player),
+        snapshot: buildCombatSnapshot(session)
+      });
+    }
+
+    const attacker = session.player.stats as any;
+    const defender = enemyData.stats as any;
+
+    const result = resolveAttack(attacker, defender);
+
+    let damage = Math.max(0, Number(result.damage || 0));
+    let newEnemyHP = Math.max(0, session.enemy.hp - damage);
+
+    await db.query(
+      "UPDATE player_creatures SET hp = ? WHERE id = ?",
+      [newEnemyHP, session.enemyInstanceId]
+    );
+
+    session.enemy.hp = newEnemyHP;
+    session.log.push(
+      result.dodged
+        ? "⚔ Your attack missed!"
+        : `⚔ You hit for ${damage}${result.crit ? " (CRITICAL!)" : ""}`
+    );
+
+    // lifesteal
+    let lifestealHeal = 0;
+    if (!result.dodged && damage > 0 && Number(attacker.lifesteal || 0) > 0) {
+      lifestealHeal = Math.floor(damage * Number(attacker.lifesteal || 0));
+      if (lifestealHeal > 0) {
+        session.player.hp = Math.min(session.player.maxHp, session.player.hp + lifestealHeal);
+
+        await db.query(
+          "UPDATE players SET hpoints = ? WHERE id = ?",
+          [session.player.hp, pid]
+        );
+
+        session.log.push(`🩸 You restore ${lifestealHeal} HP.`);
+      }
+    }
+
+    consumeActorTurn(session.player, 350);
+
+    let reward = null;
+
+    if (newEnemyHP <= 0) {
+      reward = await handleCreatureKill(pid, session.enemyInstanceId);
+
+      session.state = "victory";
+      session.rewards = {
+        exp: reward?.expGained,
+        gold: reward?.goldGained,
+        levelUp: reward?.levelUp,
+        chest: reward?.chest ?? null,
+        quest: reward?.quest ?? null
+      };
+
+      session.log.push("🏆 Enemy defeated!");
+      if (reward?.expGained) session.log.push(`✨ You gained ${reward.expGained} EXP!`);
+      if (reward?.goldGained) session.log.push(`💰 You gained ${reward.goldGained} gold!`);
+      if (reward?.levelUp) session.log.push("⬆ LEVEL UP!");
+    }
+
     return res.json({
-      error: "cooldown",
-      remaining: Math.ceil((nextAllowed - now) / 1000)
+      damage,
+      crit: result.crit,
+      dodged: result.dodged,
+      enemyHP: newEnemyHP,
+      dead: newEnemyHP <= 0,
+      exp: reward?.expGained,
+      gold: reward?.goldGained,
+      levelUp: reward?.levelUp,
+      chest: reward?.chest ?? null,
+      quest: reward?.quest ?? null,
+      lifestealHeal,
+      snapshot: buildCombatSnapshot(session)
     });
+  } catch (err) {
+    console.error("POST /combat/attack failed", err);
+    return res.status(500).json({ error: "server_error" });
   }
-
-  const attacker = await getFinalPlayerStats(pid);
-  if (!attacker) {
-    return res.status(404).json({ error: "Player not found" });
-  }
-
-  const agility = Number(attacker.agility || 0);
-  const delay = Math.max(400, 1200 - agility * 10);
-  playerAttackCooldowns.set(pid, now + delay);
-
-  const [[enemyRow]]: any = await db.query(
-    `
-    SELECT
-      pc.id,
-      pc.hp,
-      c.attack,
-      c.defense,
-      c.maxhp
-    FROM player_creatures pc
-    JOIN creatures c ON c.id = pc.creature_id
-    WHERE pc.player_id = ?
-  `,
-    [pid]
-  );
-
-  if (!enemyRow) {
-    return res.json({ error: "No enemy" });
-  }
-
-  const debuffs = await getCreatureDebuffTotals(enemyRow.id);
-
-  const defender = {
-    attack: Number(enemyRow.attack) + (debuffs["attack"] || 0),
-    defense: Number(enemyRow.defense) + (debuffs["defense"] || 0),
-    agility: debuffs["agility"] || 0,
-    vitality: debuffs["vitality"] || 0,
-    intellect: debuffs["intellect"] || 0,
-    crit: debuffs["crit"] || 0,
-    hpoints: enemyRow.hp,
-    spoints: 0,
-    maxhp: enemyRow.maxhp,
-    maxspoints: 0,
-    level: 1,
-    dodgeChance: 0,
-    spellPower: 1
-  };
-
-  const result = resolveAttack(attacker, defender);
-  await db.query(
-  "UPDATE player_creatures SET hp = GREATEST(0, hp - ?) WHERE id = ?",
-  [result.damage, enemyRow.id]
-);
-
-const [[updated]]: any = await db.query(
-  "SELECT hp FROM player_creatures WHERE id = ?",
-  [enemyRow.id]
-);
-
-const newHP = updated.hp;
-
-  let reward = null;
-  if (newHP <= 0) {
-    reward = await handleCreatureKill(pid, enemyRow.id);
-    playerAttackCooldowns.delete(pid);
-    enemyAttackCooldowns.delete(enemyRow.id);
-  }
-
-  res.json({
-    damage: result.damage,
-    crit: result.crit,
-    dodged: result.dodged,
-    enemyHP: newHP,
-    dead: newHP <= 0,
-    exp: reward?.expGained,
-    gold: reward?.goldGained,
-    levelUp: reward?.levelUp
-  });
 });
 
 /* ===========================
    ENEMY AUTO ATTACK
 =========================== */
 router.post("/combat/enemy-attack", async (req, res) => {
-  try {
-    const pid = (req.session as any).playerId;
-    if (!pid) return res.status(401).json({ stop: true });
-
-    const player = await getFinalPlayerStats(pid);
-    if (!player) return res.json({ stop: true });
-
-    const [[enemy]]: any = await db.query(
-      `
-      SELECT
-        pc.id,
-        pc.hp,
-        c.attack,
-        c.defense,
-        c.agility,
-        c.crit
-      FROM player_creatures pc
-      JOIN creatures c ON c.id = pc.creature_id
-      WHERE pc.player_id = ?
-    `,
-      [pid]
-    );
-    if (!enemy) {
-      return res.json({ stop: true });
-    }
-
-
-    const debuffs = await getCreatureDebuffTotals(enemy.id);
-
-    const enemyStats = {
-      level: 1,
-      attack: Number(enemy.attack ?? 1) + (debuffs.attack || 0),
-      defense: Number(enemy.defense ?? 0) + (debuffs.defense || 0),
-      agility: Number(enemy.agility ?? 0) + (debuffs.agility || 0),
-      vitality: debuffs.vitality || 0,
-      intellect: debuffs.intellect || 0,
-      crit: Number(enemy.crit ?? 0) + (debuffs.crit || 0),
-      hpoints: Number(enemy.hp),
-      spoints: 0,
-      maxhp: Number(enemy.hp),
-      maxspoints: 0,
-      dodgeChance: 0,
-      spellPower: 1
-    };
-
-    const now = Date.now();
-    const nextAllowed = enemyAttackCooldowns.get(enemy.id) || 0;
-
-    if (now < nextAllowed) {
-      return res.json({ skipped: true });
-    }
-
-    const delay = Math.max(600, 1800 - (enemy.agility ?? 0) * 15);
-    enemyAttackCooldowns.set(enemy.id, now + delay);
-
-    const result = resolveAttack(enemyStats as any, player as any);
-    const dmg = Math.max(0, Math.floor(Number(result.damage) || 0));
-    const newHP = Math.max(0, Number(player.hpoints) - dmg);
-
-    await db.query(
-      "UPDATE players SET hpoints = ? WHERE id = ?",
-      [newHP, pid]
-    );
-
-    if (newHP <= 0) {
-      // Clear combat enemy (ends combat)
-      await db.query("DELETE FROM player_creatures WHERE player_id = ?", [pid]);
-
-      // clear cooldowns so next combat starts clean
-      playerAttackCooldowns.delete(pid);
-      enemyAttackCooldowns.delete(enemy.id);
-
-      return res.json({
-        type: "enemy-attack",
-        playerDead: true,
-        redirect: "/death.html",
-        damage: dmg,
-        crit: result.crit,
-        dodged: result.dodged,
-        playerHP: newHP,
-        playerMaxHP: player.maxhp
-      });
-    }
-
-    res.json({
-      type: "enemy-attack",
-      playerDead: newHP <= 0,
-      enemyDead: false,
-      damage: dmg,
-      crit: result.crit,
-      dodged: result.dodged,
-      playerHP: newHP,
-      playerMaxHP: player.maxhp
-    });
-
-  } catch (err) {
-    console.error("🔥 ENEMY ATTACK ERROR:", err);
-    res.status(500).json({ stop: true });
-  }
+  return res.json({ stop: true });
 });
 
 /* ===========================
@@ -741,8 +703,7 @@ router.post("/combat/flee", async (req, res) => {
     [pid]
   );
 
-  playerAttackCooldowns.delete(pid);
-  enemyAttackCooldowns.clear();
+  destroyCombatSession(pid);
 
   res.json({ success: true });
 });

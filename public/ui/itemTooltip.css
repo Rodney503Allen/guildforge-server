@@ -1,0 +1,147 @@
+/* Guildforge Item Tooltip - shared */
+
+.gf-tooltip {
+  position: fixed;
+  width: 300px;
+  background: rgba(9,12,16,.96);
+  border: 1px solid rgba(43,52,64,.95);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 22px 60px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.06);
+  z-index: 100000;
+
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: .12s ease;
+  backdrop-filter: blur(2px);
+}
+
+.gf-tooltip.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.gf-tooltip .t-name {
+  font-weight: 900;
+  letter-spacing: .4px;
+  text-transform: none;
+  margin-bottom: 6px;
+}
+
+/* ===== Rarity Colors ===== */
+
+.gf-tooltip .t-name.gf-base          { color: #c9cfd9; }
+.gf-tooltip .t-name.gf-dormant       { color: #50c878; }
+.gf-tooltip .t-name.gf-awakened      { color: #78c8ff; }
+.gf-tooltip .t-name.gf-empowered     { color: #d38cff; }
+.gf-tooltip .t-name.gf-transcendent  { color: #ffb84a; }
+
+.gf-base { color: #c9cfd9; }
+.gf-dormant { color: #50c878; }
+.gf-awakened { color: #78c8ff; }
+.gf-empowered { color: #d38cff; }
+.gf-transcendent { color: #ffb84a; }
+
+.gf-tooltip .t-sub {
+  color: rgba(154,163,175,.95);
+  font-size: 11px;
+  letter-spacing: .6px;
+  text-transform: none;
+  margin-bottom: 8px;
+}
+
+.gf-tooltip .t-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(43,52,64,.55);
+  font-size: 12px;
+  color: rgba(215,219,226,.92);
+}
+
+.gf-tooltip .t-row:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.gf-tooltip .t-k {
+  color: rgba(154,163,175,.95);
+  text-transform: none;
+  letter-spacing: .6px;
+  font-size: 11px;
+}
+
+.gf-tooltip .t-v {
+  font-weight: 900;
+}
+
+.gf-tooltip .t-stats {
+  line-height: 1.45;
+  margin-top: 8px;
+  color: rgba(215,219,226,.92);
+}
+
+.gf-tooltip .t-stats div {
+  margin-bottom: 2px;
+}
+
+.gf-tooltip .t-desc {
+  margin-top: 8px;
+  color: rgba(154,163,175,.95);
+  font-style: italic;
+}
+
+
+
+.gf-tooltip .t-stats {
+  line-height: 1.45;
+  margin-top: 8px;
+  color: rgba(215,219,226,.92);
+}
+
+.gf-tooltip .t-stats div {
+  margin-bottom: 2px;
+}
+
+.gf-tooltip .t-meta {
+  color: rgba(154,163,175,.9);
+  font-size: 11px;
+  letter-spacing: .4px;
+  margin-bottom: 2px;
+}
+
+.gf-tooltip .t-type {
+  color: rgba(126,136,150,.9);
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.gf-tooltip .t-base {
+  font-weight: 700;
+  color: rgba(230,235,242,.96);
+}
+
+.gf-tooltip .t-bonus {
+  color: #e6c57a;
+}
+
+.gf-tooltip .t-divider {
+  height: 1px;
+  background: rgba(43,52,64,.7);
+  margin: 8px 0 7px;
+}
+
+.gf-tooltip .t-bonus div {
+  margin-bottom: 2px;
+}
+
+.t-affix-resonant {
+  font-weight: 700;
+}
+
+.t-resonant-tag {
+  opacity: 0.95;
+  font-style: italic;
+}

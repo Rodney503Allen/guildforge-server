@@ -1,6 +1,9 @@
+//world.routes.ts
 import express from "express";
 import { db } from "./db";
 import { trySpawnEnemy } from "./services/spawnService";
+import { applyInteractProgress, applyEnterAreaProgress } from "./services/questService";
+
 
 const router = express.Router();
 
@@ -10,31 +13,126 @@ const directions: Record<string, [number, number]> = {
   west: [-1, 0],
   east: [1, 0]
 };
+const ENCOUNTER_CHANCE = 0.18;     // ~5–6 step average
+const ENCOUNTER_GAP_STEPS = 2;     // prevents constant back-to-back
+
+function normalizeSpritePath(src?: string | null) {
+  if (!src) return null;
+  return src.startsWith("/") ? src : `/${src}`;
+}
+
+function buildWorldObjectMap(rows: any[]) {
+  const map = new Map<string, any[]>();
+
+  for (const row of rows || []) {
+    const key = `${Number(row.x)},${Number(row.y)}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(row);
+  }
+
+  for (const [, list] of map) {
+    list.sort((a, b) => Number(a.z_index || 0) - Number(b.z_index || 0));
+  }
+
+  return map;
+}
+
+function getTileVisualData(
+  tile: any,
+  x: number,
+  y: number,
+  objectMap: Map<string, any[]>
+) {
+  const key = `${x},${y}`;
+  const objects = objectMap.get(key) || [];
+
+  let replaceSprite: string | null = null;
+  const overlays: string[] = [];
+
+  for (const obj of objects) {
+    const sprite = normalizeSpritePath(obj.tile_sprite);
+    const visualType = String(obj.tile_visual_type || "none");
+
+    if (!sprite || visualType === "none") continue;
+
+    if (visualType === "replace") {
+      replaceSprite = sprite;
+    } else if (visualType === "overlay") {
+      overlays.push(sprite);
+    }
+  }
+
+  return {
+    replaceSprite,
+    overlays
+  };
+}
+
 router.get("/world/current-region", async (req, res) => {
   const pid = (req.session as any).playerId;
   if (!pid) return res.status(401).json({ error: "Not logged in" });
 
   const [[player]]: any = await db.query(
-    `SELECT map_x, map_y FROM players WHERE id = ?`,
+    `SELECT map_x, map_y, level FROM players WHERE id = ? LIMIT 1`,
     [pid]
   );
-
   if (!player) return res.status(404).json({ error: "Player not found" });
 
-  const [[tile]]: any = await db.query(
+  const [[row]]: any = await db.query(
     `
-    SELECT region_name
-    FROM world_map
-    WHERE x = ? AND y = ?
+    SELECT
+      wm.region_id,
+      COALESCE(r.name, wm.region_name, 'Unknown Region') AS region_name,
+      COALESCE(r.level_min, 1) AS level_min,
+      COALESCE(r.level_max, 1) AS level_max,
+      r.controlling_guild_id
+    FROM world_map wm
+    LEFT JOIN regions r ON r.id = wm.region_id
+    WHERE wm.x = ? AND wm.y = ?
     LIMIT 1
     `,
     [player.map_x, player.map_y]
   );
 
+  const levelMin = Number(row?.level_min ?? 1);
+  const levelMax = Number(row?.level_max ?? levelMin);
+  const playerLevel = Number(player.level ?? 1);
+
+
+
+  // difficulty banding:
+  // - hard = player below zone min
+  // - easy = player above zone max
+  // - even = in the band
+  const difficulty =
+    playerLevel < levelMin ? "hard" :
+    playerLevel > levelMax ? "easy" :
+    "even";
+
+  if (!row) {
+    return res.json({
+      region_id: null,
+      region_name: "Unknown Region",
+      level_min: 1,
+      level_max: 1,
+      player_level: playerLevel,
+      difficulty: "even",
+      controlling_guild_id: null
+    });
+  }
+
   res.json({
-    region_name: tile?.region_name ?? "Unknown Region"
+    region_id: row.region_id ?? null,
+    region_name: row.region_name,
+    level_min: levelMin,
+    level_max: levelMax,
+    player_level: playerLevel,
+    difficulty,
+    controlling_guild_id: row.controlling_guild_id ?? null
   });
 });
+
+
 // =======================
 // WORLD VIEW
 // =======================
@@ -52,7 +150,23 @@ router.get("/world", async (req, res) => {
   const maxX = player.map_x + 3;
   const minY = player.map_y - 3;
   const maxY = player.map_y + 3;
+  const [worldObjects]: any = await db.query(`
+    SELECT
+      id,
+      name,
+      x,
+      y,
+      tile_sprite,
+      tile_visual_type,
+      z_index
+    FROM world_objects
+    WHERE is_active = 1
+      AND x BETWEEN ? AND ?
+      AND y BETWEEN ? AND ?
+    ORDER BY z_index ASC, id ASC
+  `, [minX, maxX, minY, maxY]);
 
+  const objectMap = buildWorldObjectMap(worldObjects);
   // Load tiles
   const [tiles]: any = await db.query(`
     SELECT *
@@ -78,602 +192,40 @@ res.send(`
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
-
   <title>Guildforge | World Map</title>
-
-  <style>
-    :root{
-      --bg0:#07090c;
-      --bg1:#0b0f14;
-      --panel:#0e131a;
-      --panel2:#0a0f15;
-
-      --ink:#d7dbe2;
-      --muted:#9aa3af;
-
-      --iron:#2b3440;
-      --ember:#b64b2e;
-      --blood:#7a1e1e;
-      --bone:#c9b89a;
-
-      --shadow: rgba(0,0,0,.60);
-      --frame: rgba(255,255,255,.04);
-      --glass: rgba(0,0,0,.18);
-
-      --tile: 70px;
-      --gap: 6px;
-    }
-
-    *{ box-sizing:border-box; }
-
-    html, body{
-      margin:0;
-      padding:0;
-      min-height:100%;
-      color: var(--ink);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-
-      background:
-        radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
-        linear-gradient(180deg, var(--bg1), var(--bg0));
-    }
-
-    /* grit overlay */
-    body::before{
-      content:"";
-      position:fixed;
-      inset:0;
-      pointer-events:none;
-      opacity:.10;
-      background:
-        repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
-        repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
-      mix-blend-mode: overlay;
-    }
-
-    /* Top header (FIXED: centered + stacked) */
-    .top{
-      width: min(980px, 94vw);
-      margin: 72px auto 0;
-
-      display:flex;
-      flex-direction: column;     /* ✅ stack */
-      align-items: center;        /* ✅ center */
-      justify-content: center;
-      gap: 10px;
-
-      text-align: center;         /* ✅ center text */
-    }
-    /* Make the title/coords block center properly */
-    .top > div{
-      display:flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-    }
-    .world-title{
-      font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
-      font-size: 22px;
-      letter-spacing: 2.2px;
-      text-transform: uppercase;
-      color: var(--bone);
-      text-shadow:
-        0 0 10px rgba(182,75,46,.20),
-        0 10px 18px rgba(0,0,0,.85);
-      margin:0;
-    }
-
-    .coords{
-      color: var(--muted);
-      font-size: 12px;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-      white-space: nowrap;
-      margin-top: 0;
-    }
-
-    /* Center the action button under coords */
-    .world-actions{
-      width: 100%;
-      display:flex;
-      justify-content: center;    /* ✅ center the button */
-      align-items: center;
-      gap: 10px;
-    }
-
-    /* Primary action button (matches new theme) */
-    .world-action-btn{
-      padding: 10px 12px;
-      min-width: 150px;
-
-      border-radius: 10px;
-      border: 1px solid rgba(182,75,46,.55);
-      background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
-      color: #f3e7db;
-
-      font-weight: 900;
-      font-size: 12px;
-      letter-spacing: .7px;
-      text-transform: uppercase;
-
-      cursor: pointer;
-      box-shadow: 0 14px 28px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.12);
-      transition: transform .12s ease, filter .12s ease;
-    }
-
-    .world-action-btn:hover{
-      filter: brightness(1.06);
-      transform: translateY(-1px);
-    }
-
-    .world-action-btn:active{
-      transform: translateY(0) scale(.99);
-    }
-
-    /* World layout wrapper (keeps your structure but cleans it up) */
-    .world-container{
-      width:100%;
-      margin-top: 75px; /* ✅ pushes map (and arrows) down */
-      display:flex;
-      justify-content:center;
-    }
-
-    .world-layout{
-      width: min(980px, 94vw);
-      display:flex;
-      justify-content:center;
-    }
-
-/* === MAP WRAPPER (make room for arrows inside the frame) === */
-.map-wrapper{
-  position: relative;
-  display: inline-block;
-
-  /* creates a gutter around the grid so arrows can live INSIDE the box */
-  padding: 70px; /* tweak 62-78 depending on taste */
-}
-
-    /* Map frame */
-    .grid{
-      display:grid;
-      grid-template-columns: repeat(7, var(--tile));
-      gap: var(--gap);
-      padding: 14px;
-
-      border-radius: 14px;
-      border: 1px solid rgba(43,52,64,.95);
-
-      background:
-        radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.10), transparent 60%),
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-
-      box-shadow: 0 18px 40px rgba(0,0,0,.70), inset 0 1px 0 rgba(255,255,255,.06);
-      position: relative;
-      overflow: visible;
-    }
-
-    .grid::before{
-      content:"";
-      position:absolute;
-      inset:10px;
-      pointer-events:none;
-      border: 0;
-      border-radius: 12px;
-    }
-
-    .tile{
-      width: var(--tile);
-      height: var(--tile);
-      border-radius: 10px;
-      position: relative;
-
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.22);
-
-      box-shadow:
-        inset 0 0 16px rgba(0,0,0,.85),
-        inset 0 1px 0 rgba(255,255,255,.05);
-
-      overflow: hidden;
-    }
-
-    /* Player tile highlight */
-    .tile.player{
-      border-color: rgba(182,75,46,.75);
-      box-shadow:
-        0 0 0 1px rgba(182,75,46,.14),
-        0 0 22px rgba(182,75,46,.35),
-        inset 0 0 16px rgba(0,0,0,.85),
-        inset 0 1px 0 rgba(255,255,255,.06);
-    }
-
-    /* Tile text chips */
-    /* Tile owner nameplate */
-    .owner{
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-
-      height: 22px;
-      display: flex;
-      align-items: center;      /* vertical center */
-      justify-content: center;  /* horizontal center */
-
-      font-size: 10px;
-      letter-spacing: .8px;
-      text-transform: uppercase;
-
-      color: rgba(215,219,226,.95);
-      background: rgba(0,0,0,.65);
-
-      text-shadow: 0 1px 2px rgba(0,0,0,.9);
-      pointer-events: none;
-    }
-    .tile.player .owner{
-      background:
-        linear-gradient(
-          180deg,
-          rgba(182,75,46,.75),
-          rgba(122,30,30,.55)
-        );
-      border-bottom-color: rgba(182,75,46,.6);
-      box-shadow: 0 0 12px rgba(182,75,46,.35);
-    }
-
-    .owner::after{
-      content:"";
-      display:block;
-      height: 1px;
-      margin: 4px auto 0;
-      width: 80%;
-
-      background: linear-gradient(
-        90deg,
-        transparent,
-        rgba(182,75,46,.55),
-        rgba(215,219,226,.20),
-        rgba(182,75,46,.55),
-        transparent
-      );
-      opacity: .9;
-    }
-    /* Terrain images (keep your assets) */
-    .plains   { background:url("/images/map_tiles/plains.png") center/cover; }
-    .forest   { background:url("/images/map_tiles/forest.png") center/cover; }
-    .mountain { background:url("/images/map_tiles/mountain.png") center/cover; }
-    .swamp    { background:url("/images/map_tiles/swamp.png") center/cover; }
-    .town     { background:url("/images/map_tiles/town.png") center/cover; }
-    .castle   { background:url("/images/map_tiles/castle.png") center/cover; }
-    .desert   { background:url("/images/map_tiles/desert.png") center/cover; }
-
-    /* Movement buttons — same placement, new theme */
-/* === MOVE BUTTONS (place INSIDE wrapper padding, no negatives) === */
-.move-btn{
-  position:absolute;
-  background: rgba(0,0,0,.22);
-  border: 1px solid rgba(43,52,64,.95);
-  color: #f3e7db;
-
-  font-weight: 900;
-  border-radius: 12px;
-  cursor:pointer;
-
-  box-shadow: 0 14px 28px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
-  transition: transform .12s ease, border-color .12s ease, filter .12s ease;
-}
-
-.move-btn:hover{
-  border-color: rgba(182,75,46,.55);
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.move-btn:active{
-  transform: translateY(0) scale(.99);
-}
-
-.move-btn.up, .move-btn.down{
-  width: 92px;
-  height: 44px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.move-btn.left, .move-btn.right{
-  width: 44px;
-  height: 92px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-/* ✅ NO MORE negative offsets */
-.move-btn.up   { top: 12px; }
-.move-btn.down { bottom: 12px; }
-.move-btn.left { left: 12px; }
-.move-btn.right{ right: 12px; }
-.nav-hud{
-  width: min(980px, 94vw);
-  margin: 10px auto 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.nav-card, .flavor-card{
-  border-radius: 14px;
-  border: 1px solid rgba(43,52,64,.95);
-  background:
-    radial-gradient(700px 180px at 20% 0%, rgba(182,75,46,.10), transparent 60%),
-    linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
-    linear-gradient(180deg, var(--panel), var(--panel2));
-  box-shadow: 0 18px 40px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
-  padding: 12px 12px;
-}
-
-.nav-top{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.nav-title{
-  display:flex;
-  align-items:center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.nav-icon{
-  filter: drop-shadow(0 0 8px rgba(182,75,46,.25));
-}
-
-.nav-label{
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.nav-badge{
-  min-width: 34px;
-  height: 26px;
-  padding: 0 10px;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  border-radius: 999px;
-  border: 1px solid rgba(182,75,46,.55);
-  background: rgba(0,0,0,.22);
-  color: #f3e7db;
-
-  font-weight: 900;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-}
-
-.nav-main{
-  display:flex;
-  align-items:flex-end;
-  justify-content:space-between;
-  gap: 10px;
-}
-
-.nav-name{
-  font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
-  font-weight: 800;
-  letter-spacing: .6px;
-  color: var(--bone);
-  text-shadow: 0 10px 18px rgba(0,0,0,.65);
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-  max-width: 70%;
-}
-
-.nav-meta{
-  display:flex;
-  gap: 8px;
-  align-items:center;
-}
-
-.nav-pill{
-  font-size: 11px;
-  letter-spacing: .6px;
-  text-transform: uppercase;
-  color: rgba(215,219,226,.92);
-
-  padding: 6px 10px;
-  border-radius: 999px;
-
-  background: rgba(0,0,0,.35);
-  border: 1px solid rgba(43,52,64,.85);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
-}
-
-.flavor-card{
-  grid-column: 1 / -1;
-}
-
-.flavor-title{
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.flavor-text{
-  color: rgba(215,219,226,.92);
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-/* Responsive */
-@media (max-width: 820px){
-  .nav-hud{ grid-template-columns: 1fr; }
-  .nav-name{ max-width: 100%; }
-  .nav-main{ align-items:flex-start; }
-}
-
-    /* Responsive: scale tile size down */
-    @media (max-width: 820px){
-      :root{ --tile: 62px; --gap: 5px; }
-      .top{ margin-top: 68px; }
-    }
-/* mobile tweak */
-@media (max-width: 520px){
-  .map-wrapper{ padding: 62px; }
-  .move-btn.up, .move-btn.down{ width: 86px; }
-}
-    @media (max-width: 520px){
-      :root{ --tile: 52px; --gap: 4px; }
-      .top{
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-      }
-      .world-actions{ width:100%; justify-content:flex-start; }
-      .world-action-btn{ width:100%; }
-      .move-btn.up, .move-btn.down{ width: 86px; }
-    }
-    /* === ONE WORLD FRAME === */
-.world-frame{
-  width: min(980px, 94vw);
-  margin: 72px auto 0;
-  border-radius: 18px;
-  border: 1px solid rgba(43,52,64,.95);
-
-  background:
-    radial-gradient(900px 340px at 18% 0%, rgba(182,75,46,.10), transparent 60%),
-    linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
-    linear-gradient(180deg, var(--panel), var(--panel2));
-
-  box-shadow: 0 26px 70px rgba(0,0,0,.70), inset 0 1px 0 rgba(255,255,255,.06);
-  overflow: hidden;
-}
-
-/* Header zone */
-.world-head{
-  padding: 18px 18px 10px;
-  border-bottom: 1px solid rgba(43,52,64,.70);
-  background: linear-gradient(180deg, rgba(0,0,0,.20), transparent);
-}
-.world-head-inner{
-  display:flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-}
-
-/* Body zone (map area) */
-.world-body{
-  padding: 16px 18px 22px;
-  display:flex;
-  justify-content:center;
-}
-
-/* === NAV HUD SHOULD FEEL LIKE AN AIDE === */
-.nav-hud{
-  width: 100%;
-  margin: 10px 0 0;
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-/* flatten the HUD: less shadow, less border contrast */
-.nav-card, .flavor-card{
-  border-radius: 14px;
-  border: 1px solid rgba(43,52,64,.65);
-  background: rgba(0,0,0,.22);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05); /* remove the big outer shadow */
-  padding: 12px;
-  opacity: .92;                 /* slightly subdued */
-}
-.nav-card:hover, .flavor-card:hover{
-  opacity: 1;
-}
-
-/* reduce visual loudness */
-.nav-name{
-  font-size: 13px;
-  text-shadow: none;
-}
-.nav-pill{
-  background: rgba(0,0,0,.28);
-}
-
-/* === MAP SHOULD FEEL HEAVIER THAN HUD === */
-.map-wrapper{
-  position: relative;
-  display: inline-block;
-}
-
-/* stronger map frame than HUD */
-.grid{
-  border-radius: 16px;
-  border: 1px solid rgba(43,52,64,.95);
-  box-shadow: 0 22px 55px rgba(0,0,0,.80), inset 0 1px 0 rgba(255,255,255,.06);
-}
-
-/* reduce dead vertical whitespace (you had a huge margin-top) */
-.world-container{ margin-top: 0; } /* if it still exists anywhere */
-.top{ margin: 0; width: auto; }    /* if top still exists anywhere */
-/* subtle divider between title/coords and HUD */
-.coords{
-  margin-bottom: 2px;
-}
-.nav-hud{
-  padding-top: 8px;
-  border-top: 1px solid rgba(43,52,64,.55);
-}
-/* NEW: footer zone for nav hud */
-.world-foot{
-  padding: 0 18px 18px;
-}
-
-.world-foot .nav-hud{
-  width: 100%;
-  margin: 0;                 /* no auto-centering margin needed inside frame */
-  padding-top: 14px;
-  border-top: 1px solid rgba(43,52,64,.55);
-}
-
-  </style>
+  <link rel="stylesheet" href="/world.css">
+  <link rel="stylesheet" href="/ui/itemTooltip.css">
 </head>
 
 <body>
-  <div class="world-frame">
-    <!-- TOP: Zone Name -->
-    <div class="world-head">
-      <div class="world-head-inner">
-        <div id="world-title" class="world-title">World Map</div>
+<div class="world-frame">
+  <!-- TOP: Zone Name -->
+  <div class="world-head">
+    <div class="world-head-inner">
+      <div id="world-title" class="world-title">World Map</div>
 
-        <!-- Coordinates -->
-        <div class="coords">Position: (${player.map_x}, ${player.map_y})</div>
+      <!-- Coordinates -->
+      <div class="coords">Position: (${player.map_x}, ${player.map_y})</div>
 
-        <!-- Enter Town Button -->
-        <div class="world-actions">
-          <button id="enter-town-btn"
-                  class="world-action-btn"
-                  style="display:none"
-                  onclick="enterTown()">
-            Enter Town
-          </button>
-        </div>
+      <!-- Enter Town Button -->
+      <div class="world-actions">
+        <button id="enter-town-btn"
+                class="world-action-btn"
+                style="display:none"
+                onclick="enterTown()">
+          Enter Town
+        </button>
+
+        <button id="btnQuestLog" class="world-action-btn world-action-btn-secondary">
+          Quest Log
+        </button>
       </div>
     </div>
+  </div>
 
-    <!-- World Map -->
-    <div class="world-body">
+  <!-- World Map -->
+  <div class="world-body">
+    <div class="map-stage">
       <div class="map-wrapper">
         <button class="move-btn up" onclick="moveWorld('north')">⬆</button>
         <button class="move-btn left" onclick="moveWorld('west')">⬅</button>
@@ -693,8 +245,24 @@ res.send(`
 
                 const isPlayer = x === player.map_x && y === player.map_y;
 
+                const { replaceSprite, overlays } = getTileVisualData(t, x, y, objectMap);
+
+                const baseStyle = replaceSprite
+                  ? `style="background-image: url('${replaceSprite}');"`
+                  : "";
+
                 return `
-                  <div class="tile ${t.terrain} ${isPlayer ? "player" : ""}">
+                  <div
+                    class="tile ${replaceSprite ? "" : t.terrain} ${isPlayer ? "player" : ""}"
+                    data-x="${x}"
+                    data-y="${y}"
+                    ${baseStyle}
+                  >
+                    ${
+                      overlays.map((src) => `
+                        <img class="tile-overlay" src="${src}" alt="" />
+                      `).join("")
+                    }
                     <div class="owner">${owner}</div>
                   </div>
                 `;
@@ -707,10 +275,21 @@ res.send(`
         <button class="move-btn down" onclick="moveWorld('south')">⬇</button>
       </div>
     </div>
+  </div>
 
-    <!-- Nav HUD (BOTTOM) -->
-    <div class="world-foot">
-      <div class="nav-hud" id="nav-hud">
+  <!-- Bottom HUD -->
+  <div class="world-foot">
+    <div class="nav-hud" id="nav-hud">
+
+      <!-- Travel Log -->
+      <div class="flavor-card travel-log-card">
+        <div class="flavor-title">Travel Log</div>
+        <div class="flavor-text" id="movement-flavor">You press onward.</div>
+      </div>
+
+      <!-- 3-column lower HUD -->
+      <div class="nav-grid">
+        <!-- Nearest Haven -->
         <div class="nav-card">
           <div class="nav-top">
             <div class="nav-title">
@@ -728,6 +307,24 @@ res.send(`
           </div>
         </div>
 
+        <!-- Nearby -->
+        <div class="nav-card nearby-card">
+          <div class="nav-top">
+            <div class="nav-title">
+              <span class="nav-icon">✦</span>
+              <span class="nav-label">Nearby</span>
+            </div>
+            <span class="nav-badge" id="nav-nearby-count">0</span>
+          </div>
+
+          <div class="world-interact__list" id="worldInteractList">
+            <div class="world-interact__empty">
+              Nothing to interact with nearby.
+            </div>
+          </div>
+        </div>
+
+        <!-- Nearest Dungeon -->
         <div class="nav-card">
           <div class="nav-top">
             <div class="nav-title">
@@ -744,15 +341,10 @@ res.send(`
             </div>
           </div>
         </div>
-
-        <div class="flavor-card">
-          <div class="flavor-title">Travel Log</div>
-          <div class="flavor-text" id="movement-flavor">You press onward.</div>
-        </div>
       </div>
     </div>
   </div>
-
+</div>
   <!-- keep these outside the frame -->
   <div class="world-right">
     <div id="statpanel-root"></div>
@@ -760,25 +352,85 @@ res.send(`
 
   <div id="combat-root"></div>
 
+  <!-- LOOT CHEST MODAL -->
+<div id="lootChestModal" class="loot-modal hidden">
+  <div class="loot-panel">
+    <div id="lootChestSealed" class="loot-sealed">
+      <img src="/images/chest.png" id="lootChestIcon" />
+      <p>Click the chest to open</p>
+    </div>
+
+    <div id="lootChestOpened" class="loot-opened hidden">
+      <h3>Loot</h3>
+      <div id="lootItems"></div>
+      <button id="lootClaimBtn">Collect</button>
+    </div>
+  </div>
+</div>
+
+<div id="loreModal" class="lore-modal hidden">
+  <div class="lore-backdrop"></div>
+
+  <div class="lore-card">
+    <div class="lore-header">
+      <div id="loreTitle" class="lore-title">Discovery</div>
+      <button id="loreCloseBtn" class="lore-close-btn" type="button">✕</button>
+    </div>
+
+    <div id="loreBody" class="lore-body"></div>
+
+    <div class="lore-footer">
+      <button id="loreOkBtn" class="lore-ok-btn" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PENDING CHEST INDICATOR -->
+<button id="pendingChestBtn" class="pending-chest hidden" title="You have unclaimed loot">
+  <img src="/images/chest.png" alt="Chest">
+  <span class="pending-chest-dot"></span>
+</button>
+  <script src="/ui/itemTooltip.js"></script>
+  <script src="/lootChest.js"></script>
   <link rel="stylesheet" href="/statpanel.css">
   <script src="/statpanel.js"></script>
+  <script src="/world.page.js" defer></script>
 
-  <script>
-    fetch("/statpanel.html")
-      .then(r => r.text())
-      .then(html => {
-        document.getElementById("statpanel-root").innerHTML = html;
-      });
-  </script>
+<!-- QUEST TRACKER (hidden until a quest is tracked) -->
+<div id="questTracker" class="qtracker hidden">
+  <div class="qtrackerHead">
+    <div class="qtrackerTitle" id="qtTitle">Tracking</div>
+    <div class="qtrackerBtns">
+      <button id="qtMinBtn" class="qtrackerBtn" title="Minimize">—</button>
+    </div>
+  </div>
+  <div class="qtrackerBody" id="qtBody">—</div>
+</div>
 
-  <script>
-    fetch("/combat-modal.html")
-      .then(r => r.text())
-      .then(html => {
-        document.getElementById("combat-root").innerHTML = html;
-      });
-  </script>
 
+<!-- QUEST MODAL -->
+<div id="questModal" class="qmodal hidden">
+  <div class="qmodalBackdrop"></div>
+  <div class="qmodalCard">
+    <div class="qmodalHeader">
+      <div>
+        <div class="qmodalTitle">Quest Log</div>
+        <div class="qmodalSub">Select a quest to track on the map.</div>
+      </div>
+      <button id="btnQuestClose" class="qbtn">✕</button>
+    </div>
+
+    <div class="qmodalBody">
+      <div id="questList" class="qlist"></div>
+    </div>
+
+    <div class="qmodalFooter">
+      <button id="btnQuestClearTrack" class="qbtn ghost">Clear Tracking</button>
+      <button id="btnQuestRefresh" class="qbtn">Refresh</button>
+    </div>
+  </div>
+</div>
+  <script src="world-quests.js"></script>
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>
 </body>
@@ -914,10 +566,14 @@ router.get("/world/move/:dir", async (req, res) => {
   const newY = player.map_y + dy;
 
   const [[tile]]: any = await db.query(
-    "SELECT terrain FROM world_map WHERE x=? AND y=?",
+    `
+    SELECT terrain, region_id
+    FROM world_map
+    WHERE x=? AND y=?
+    LIMIT 1
+    `,
     [newX, newY]
   );
-
   if (!tile) {
     return res.json({ success: false });
   }
@@ -927,23 +583,29 @@ router.get("/world/move/:dir", async (req, res) => {
     [newX, newY, pid]
   );
 
+  const enterAreaResult = await applyEnterAreaProgress(pid, tile.region_id ?? null);
   // ✅ Optional: region/zone data (only if you have it)
   // If you don't have these tables/columns yet, keep this block but allow it to fail safely.
   let regionName: string | null = null;
   let zoneLevel: number | null = null;
-  try {
-    const [[r]]: any = await db.query(
-      `SELECT region_name, level
-       FROM world_regions
-       WHERE x=? AND y=?
-       LIMIT 1`,
-      [newX, newY]
+
+  if (tile.region_id) {
+    const [[regionRow]]: any = await db.query(
+      `
+      SELECT name, level_min
+      FROM regions
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [tile.region_id]
     );
-    if (r) {
-      regionName = r.region_name;
-      zoneLevel = Number(r.level);
+
+    if (regionRow) {
+      regionName = String(regionRow.name || "");
+      zoneLevel = Number(regionRow.level_min || 1);
     }
-  } catch {}
+  }
+
 
 // ✅ Nearest "Haven" = nearest town tile in world_map
 let nearestHaven: any = null;
@@ -979,7 +641,34 @@ try {
 }
 
   // 🔥 Attempt spawn AFTER move
-const enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
+// =======================
+// ENCOUNTER PACING (server-side)
+// =======================
+const [[pstate]]: any = await db.query(
+  `SELECT steps_since_encounter FROM players WHERE id=? LIMIT 1`,
+  [pid]
+);
+
+let stepsSince = Number(pstate?.steps_since_encounter ?? 999);
+stepsSince += 1;
+
+let enemy: any = null;
+
+// only attempt encounter if we've walked enough steps since last one
+if (stepsSince >= ENCOUNTER_GAP_STEPS) {
+  if (Math.random() < ENCOUNTER_CHANCE) {
+    enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
+
+    // only reset if something actually spawned
+    if (enemy) stepsSince = 0;
+  }
+}
+
+await db.query(
+  `UPDATE players SET steps_since_encounter=? WHERE id=?`,
+  [stepsSince, pid]
+);
+
 
   return res.json({
     success: true,
@@ -994,13 +683,87 @@ const enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
       dungeon: nearestDungeon
     },
 
+    questProgress: {
+      enterArea: enterAreaResult
+    },
+
     inCombat: !!enemy,
     enemy
   });
 });
 
 
+router.get("/api/world/nearby-objects", async (req, res) => {
+  try {
+    const pid = (req.session as any)?.playerId;
+    if (!pid) return res.status(401).json({ error: "not_logged_in" });
 
+    const [[player]]: any = await db.query(
+      `
+      SELECT map_x, map_y
+      FROM players
+      WHERE id=?
+      LIMIT 1
+      `,
+      [pid]
+    );
+
+    if (!player) return res.status(404).json({ error: "player_not_found" });
+
+    const px = Number(player.map_x);
+    const py = Number(player.map_y);
+
+    const [rows]: any = await db.query(
+      `
+      SELECT
+        id,
+        name,
+        object_type,
+        region_name,
+        x,
+        y,
+        interaction_radius,
+        is_active,
+        icon,
+        lore_title,
+        lore_text
+      FROM world_objects
+      WHERE is_active = 1
+        AND x BETWEEN ? AND ?
+        AND y BETWEEN ? AND ?
+      ORDER BY id ASC
+      `,
+      [px - 3, px + 3, py - 3, py + 3]
+    );
+
+    const objects = (rows || []).map((r: any) => {
+      const dist = Math.abs(px - Number(r.x)) + Math.abs(py - Number(r.y));
+      const radius = Math.max(0, Number(r.interaction_radius) || 1);
+
+      return {
+        id: Number(r.id),
+        name: String(r.name || "Unknown Object"),
+        object_type: String(r.object_type || "quest"),
+        region_name: r.region_name ?? null,
+        x: Number(r.x),
+        y: Number(r.y),
+        interaction_radius: radius,
+        inRange: dist <= radius,
+        distance: dist,
+        icon: r.icon ?? null
+      };
+    });
+
+    res.json({
+      success: true,
+      player: { x: px, y: py },
+      objects
+    });
+  } catch (err) {
+    console.error("🔥 GET /api/world/nearby-objects ERROR:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
 
 //WORLD PARTIAL
 
@@ -1016,6 +779,21 @@ router.get("/world/partial", async (req, res) => {
   const minX = player.map_x - 3;
   const minY = player.map_y - 3;
 
+    const [worldObjects]: any = await db.query(`
+    SELECT
+      id,
+      name,
+      x,
+      y,
+      tile_sprite,
+      tile_visual_type,
+      z_index
+    FROM world_objects
+    WHERE is_active = 1
+      AND x BETWEEN ? AND ?
+      AND y BETWEEN ? AND ?
+  `, [minX, player.map_x + 3, minY, player.map_y + 3]);
+
   const [tiles]: any = await db.query(`
     SELECT *
     FROM world_map
@@ -1030,11 +808,34 @@ router.get("/world/partial", async (req, res) => {
   res.json({
     player,
     tiles,
-    guildMap
+    guildMap,
+    worldObjects
   });
 });
 
+router.post("/api/world/interact/:objectId", async (req, res) => {
+  try {
+    const pid = (req.session as any)?.playerId;
+    if (!pid) return res.status(401).json({ error: "not_logged_in" });
 
+    const objectId = Number(req.params.objectId);
+    if (!Number.isFinite(objectId)) {
+      return res.status(400).json({ error: "invalid_object_id" });
+    }
+
+    const out = await applyInteractProgress(pid, objectId);
+    return res.json(out);
+  } catch (err: any) {
+    const msg = String(err?.message || "");
+    console.error("🔥 POST /api/world/interact/:objectId ERROR:", err);
+
+    if (msg === "PLAYER_NOT_FOUND") return res.status(404).json({ error: "player_not_found" });
+    if (msg === "WORLD_OBJECT_NOT_FOUND") return res.status(404).json({ error: "world_object_not_found" });
+    if (msg === "TOO_FAR_AWAY") return res.status(400).json({ error: "too_far_away" });
+
+    return res.status(500).json({ error: "server_error" });
+  }
+});
 
 
 export default router;

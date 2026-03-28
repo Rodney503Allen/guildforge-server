@@ -1,12 +1,15 @@
-// church.routes.ts
+// church.routes.ts — Guildforge Sanctuary (revamp, single panel)
+// - Removed the Vitals side card + all its styling
+// - Keeps timer + heal/restore/revive logic intact
+
 import express from "express";
 import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
 
-
-
 const router = express.Router();
 
+const HEAL_COST = 10;
+const RESTORE_COST = 10;
 const REVIVE_COST = 50;
 const WAIT_TIME = 5 * 60 * 1000; // 5 minutes
 
@@ -14,87 +17,73 @@ type BasePlayerRow = {
   id: number;
   name: string;
   level: number;
-
-  attack: number;
-  defense: number;
-  agility: number;
-  vitality: number;
-  intellect: number;
-  crit: number;
-
   hpoints: number;
   spoints: number;
-
   gold: number;
   revive_at: number | null;
-
-  // these may exist in DB but we do NOT trust them for display/healing
-  maxhp?: number;
-  maxspoints?: number;
 };
 
+function requireLogin(req: any, res: any, next: any) {
+  if (!req.session || !req.session.playerId) return res.redirect("/login.html");
+  next();
+}
+
 async function loadBasePlayer(pid: number): Promise<BasePlayerRow | null> {
-  const [[row]]: any = await db.query(`SELECT * FROM players WHERE id=?`, [pid]);
+  const [[row]]: any = await db.query(
+    `SELECT id, name, level, hpoints, spoints, gold, revive_at FROM players WHERE id=? LIMIT 1`,
+    [pid]
+  );
   if (!row) return null;
 
   return {
-    ...row,
     id: Number(row.id),
-    level: Number(row.level),
-
-    attack: Number(row.attack),
-    defense: Number(row.defense),
-    agility: Number(row.agility),
-    vitality: Number(row.vitality),
-    intellect: Number(row.intellect),
-    crit: Number(row.crit),
-
-    hpoints: Number(row.hpoints),
-    spoints: Number(row.spoints),
-
-    gold: Number(row.gold),
-    revive_at: row.revive_at === null || row.revive_at === undefined ? null : Number(row.revive_at),
+    name: String(row.name ?? ""),
+    level: Number(row.level ?? 1),
+    hpoints: Number(row.hpoints ?? 0),
+    spoints: Number(row.spoints ?? 0),
+    gold: Number(row.gold ?? 0),
+    revive_at:
+      row.revive_at === null || row.revive_at === undefined ? null : Number(row.revive_at),
   };
 }
 
-
-async function getFinalStatsForPlayer(pid: number) {
-  const player = await getFinalPlayerStats(pid);
-  return player; // includes maxhp/maxspoints already computed with guild perks
+async function loadFinal(pid: number) {
+  return await getFinalPlayerStats(pid); // includes maxhp/maxspoints (guild perks)
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function fmt(n: number) {
+  return new Intl.NumberFormat("en-US").format(Number(n || 0));
+}
 
 // =======================
 // SANCTUARY PAGE
 // =======================
-router.get("/", async (req, res) => {
-  const pid = (req.session as any).playerId as number;
-  if (!pid) return res.redirect("/login.html");
+router.get("/", requireLogin, async (req, res) => {
+  const pid = Number((req.session as any).playerId);
 
-const base = await loadBasePlayer(pid);
-if (!base) return res.redirect("/login.html");
+  const base = await loadBasePlayer(pid);
+  if (!base) return res.redirect("/login.html");
 
-const stats = await getFinalStatsForPlayer(pid);
-if (!stats) return res.redirect("/login.html");
+  const stats = await loadFinal(pid);
+  if (!stats) return res.redirect("/login.html");
 
-// use computed maxes
-let hpoints = Math.min(base.hpoints, stats.maxhp);
-let spoints = Math.min(base.spoints, stats.maxspoints);
-let revive_at: number | null = base.revive_at;
+  // Trust computed maxes; clamp current values to max
+  let hpoints = clamp(base.hpoints, 0, stats.maxhp);
+  let spoints = clamp(base.spoints, 0, stats.maxspoints);
+  let revive_at: number | null = base.revive_at;
 
-
-  // =======================
-  // START TIMER AUTOMATICALLY IF DEAD
-  // =======================
+  // If dead and no timer started, start it
   if (hpoints <= 0 && !revive_at) {
     const reviveAt = Date.now() + WAIT_TIME;
     await db.query(`UPDATE players SET revive_at=? WHERE id=?`, [reviveAt, pid]);
     revive_at = reviveAt;
   }
 
-  // =======================
-  // AUTO REVIVE WHEN TIMER FINISHES
-  // =======================
+  // If timer finished, auto revive (free)
   if (revive_at && Date.now() >= revive_at) {
     await db.query(
       `
@@ -106,389 +95,276 @@ let revive_at: number | null = base.revive_at;
       `,
       [stats.maxhp, stats.maxspoints, pid]
     );
-
     hpoints = stats.maxhp;
     spoints = stats.maxspoints;
     revive_at = null;
   }
 
-  // =======================
-  // DEAD LOCK MODE
-  // =======================
   const isDead = hpoints <= 0;
-  let deadMessage = "";
-  let waitMessage = "";
-  const disableButtons = isDead ? "disabled" : "";
+  const secondsLeft =
+    revive_at ? Math.max(0, Math.ceil((revive_at - Date.now()) / 1000)) : 0;
 
-  if (isDead) {
-    deadMessage = `<p style="color:red;"><b>You walk between life and death...</b></p>`;
+  const hpFull = hpoints >= stats.maxhp;
+  const spFull = spoints >= stats.maxspoints;
 
-    if (revive_at) {
-      const secondsLeft = Math.max(0, Math.ceil((revive_at - Date.now()) / 1000));
-      waitMessage = `
-        <p>🕯 Resurrection in <span id="timer">${secondsLeft}</span> seconds...</p>
-        <script>
-          let seconds = ${secondsLeft};
-          const timer = setInterval(() => {
-            seconds--;
-            const el = document.getElementById("timer");
-            if (!el) return;
-            el.innerText = seconds;
-            if (seconds <= 0) {
-              clearInterval(timer);
-              location.reload();
-            }
-          }, 1000);
-        </script>
-      `;
-    }
-  }
+  const healDisabled = isDead || hpFull;
+  const restoreDisabled = isDead || spFull;
+
+  const healHint = isDead
+    ? "Unavailable while dead"
+    : hpFull
+      ? "Already at full health"
+      : `Cost: ${HEAL_COST}g`;
+
+  const restoreHint = isDead
+    ? "Unavailable while dead"
+    : spFull
+      ? "Already at full spirit"
+      : `Cost: ${RESTORE_COST}g`;
+
+  const reviveHint = !isDead ? "Only when dead" : `Cost: ${REVIVE_COST}g`;
 
 res.send(`
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>Sanctuary of Light</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Guildforge | Sanctuary</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="/statpanel.css">
-  <style>
-    /* =========================
-       CHURCH / SANCTUARY — Grit Iron/Ember Theme
-       ========================= */
-    :root{
-      --bg0:#07090c;
-      --bg1:#0b0f14;
-      --panel:#0e131a;
-      --panel2:#0a0f15;
+  <script defer src="/statpanel.js"></script>
 
-      --ink:#d7dbe2;
-      --muted:#9aa3af;
+  <link rel="stylesheet" href="/ui/toast.css">
+  <script defer src="/ui/toast.js"></script>
 
-      --iron:#2b3440;
-      --ember:#b64b2e;
-      --blood:#7a1e1e;
-      --bone:#c9b89a;
-
-      --shadow: rgba(0,0,0,.60);
-      --frame: rgba(255,255,255,.04);
-      --glass: rgba(0,0,0,.18);
-    }
-
-    *{ box-sizing:border-box; }
-
-    body{
-      margin:0;
-      color: var(--ink);
-      font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
-      text-align:center;
-
-      background:
-        radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
-        linear-gradient(180deg, var(--bg1), var(--bg0));
-    }
-
-    /* grit overlay */
-    body::before{
-      content:"";
-      position:fixed;
-      inset:0;
-      pointer-events:none;
-      opacity:.10;
-      background:
-        repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
-        repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
-      mix-blend-mode: overlay;
-    }
-
-    .wrap{
-      width: min(980px, 94vw);
-      margin: 0 auto;
-      padding: 22px 0 28px;
-    }
-
-    .church{
-      position:relative;
-      width: min(520px, 94vw);
-      margin: 18px auto 14px;
-      padding: 18px;
-      border-radius: 12px;
-
-      border: 1px solid rgba(43,52,64,.95);
-      background:
-        radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-
-      box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
-    }
-
-    .church::before{
-      content:"";
-      position:absolute;
-      inset:10px;
-      pointer-events:none;
-      border: 0;
-      border-radius: 10px;
-    }
-
-    h2{
-      margin: 0 0 8px;
-      letter-spacing: 2.6px;
-      text-transform: uppercase;
-      color: var(--bone);
-      text-shadow:
-        0 0 10px rgba(182,75,46,.20),
-        0 10px 18px rgba(0,0,0,.85);
-      font-size: 20px;
-      position:relative;
-      z-index:1;
-    }
-
-    .quote{
-      margin: 0 0 12px;
-      color: var(--muted);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      font-size: 13px;
-      line-height: 1.45;
-      position:relative;
-      z-index:1;
-    }
-
-    .status{
-      margin: 10px 0 12px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      font-size: 13px;
-      color: var(--ink);
-      position:relative;
-      z-index:1;
-    }
-
-    .status.danger{
-      border-color: rgba(122,30,30,.65);
-      box-shadow: 0 0 0 1px rgba(122,30,30,.14);
-    }
-    .status.danger b{ color: #ffd6d6; }
-
-    .rule{
-      height:1px;
-      border:none;
-      margin: 14px 0;
-      background: linear-gradient(90deg, transparent, rgba(182,75,46,.65), transparent);
-      opacity:.85;
-      position:relative;
-      z-index:1;
-    }
-
-    .stats{
-      display:grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-      margin: 6px 0 12px;
-      position:relative;
-      z-index:1;
-      text-align:left;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    }
-
-    .stat{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
-      color: var(--ink);
-      font-size: 13px;
-    }
-
-    .stat .k{
-      color: var(--muted);
-      letter-spacing: .6px;
-      text-transform: uppercase;
-      font-weight: 800;
-      font-size: 12px;
-      display:flex;
-      align-items:center;
-      gap: 8px;
-    }
-    .stat .v{
-      color: rgba(255,255,255,.92);
-      font-weight: 900;
-    }
-
-    .actions{
-      display:flex;
-      flex-direction:column;
-      gap: 10px;
-      position:relative;
-      z-index:1;
-      margin-top: 10px;
-    }
-
-    button{
-      width:100%;
-      padding: 12px 12px;
-
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-
-      background: rgba(0,0,0,.18);
-      color: var(--ink);
-
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      font-size: 13px;
-      font-weight: 900;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-
-      cursor:pointer;
-      box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
-      transition: transform .12s ease, border-color .12s ease, filter .12s ease;
-    }
-
-    button:hover{
-      border-color: rgba(182,75,46,.45);
-      transform: translateY(-1px);
-    }
-
-    button:active{ transform: translateY(0px) scale(.99); }
-
-    button:disabled{
-      opacity: .55;
-      cursor:not-allowed;
-      transform:none;
-      filter:none;
-    }
-
-    /* Make the REVIVE button “primary” */
-    .primary{
-      border-color: rgba(182,75,46,.55);
-      background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
-      color: #f3e7db;
-      box-shadow: 0 14px 28px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.12);
-    }
-    .primary:hover{ filter: brightness(1.06); }
-
-    a{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap: 8px;
-
-      margin-top: 14px;
-      padding: 10px 12px;
-
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      color: #f3e7db;
-
-      text-decoration:none;
-
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      font-size: 13px;
-      font-weight: 900;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-
-      box-shadow: 0 12px 24px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
-      transition: transform .12s ease, border-color .12s ease;
-      position:relative;
-      z-index:1;
-    }
-
-    a:hover{
-      border-color: rgba(182,75,46,.45);
-      transform: translateY(-1px);
-    }
-
-    /* Mobile */
-    @media (max-width: 520px){
-      .church{ margin-top: 70px; padding: 16px; }
-      h2{ font-size: 18px; letter-spacing: 2px; }
-    }
-      
-  </style>
+  <!-- NEW: Church page assets -->
+  <link rel="stylesheet" href="/church.css">
+  <script defer src="/church.js"></script>
 </head>
-<body>
 
+<body>
   <div id="statpanel-root"></div>
 
+  <script>
+    window.__SANCTUARY_IS_DEAD__ = ${isDead ? "true" : "false"};
+  </script>
+
+  <audio id="sanctuaryDeathMusic" loop preload="auto">
+    <source src="/music/sanctuary_dead.mp3" type="audio/mpeg">
+  </audio>
+
   <div class="wrap">
-    <div class="church">
-      <h2>Sanctuary of Light</h2>
-      <p class="quote"><i>"Rest... your soul lingers here."</i></p>
-
-      ${isDead ? `<div class="status danger">${deadMessage}${waitMessage}</div>` : ""}
-
-      <hr class="rule">
-
-      <div class="stats">
-        <div class="stat">
-          <div class="k">❤️ Health</div>
-          <div class="v">${hpoints} / ${stats.maxhp}</div>
-        </div>
-        <div class="stat">
-          <div class="k">✨ Spirit</div>
-          <div class="v">${spoints} / ${stats.maxspoints}</div>
-        </div>
-        <div class="stat">
-          <div class="k">💰 Gold</div>
-          <div class="v">${base.gold}</div>
-        </div>
+    <div class="topbar">
+      <div class="brand">
+        <div class="title"><span class="sigil"></span> Sanctuary of Light</div>
+        <div class="sub">A quiet refuge from war and corruption.</div>
       </div>
 
-      <div class="actions">
-        <form method="POST" action="/church/heal">
-          <button ${disableButtons}>Restore Health (10 gold)</button>
-        </form>
-
-        <form method="POST" action="/church/restore">
-          <button ${disableButtons}>Restore Spirit (10 gold)</button>
-        </form>
-
-        <form method="POST" action="/church/revive">
-          <button class="primary">Revival Blessing (${REVIVE_COST} gold)</button>
-        </form>
+      <div class="nav">
+        <span class="pill">Gold: <strong>${fmt(base.gold)}g</strong></span>
+        <a class="btn danger" href="/town">Return to Town</a>
       </div>
+    </div>
 
-      ${isDead ? "" : `<a href="/town">⬅ Return to Town</a>`}
+    <div class="grid">
+
+      <!-- LEFT: CHURCH SERVICES -->
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Church Services</h2>
+            <p>Rest, recover, and seek sacred aid.</p>
+          </div>
+          <span class="badge good">Sanctuary</span>
+        </div>
+
+        <div class="cardBody">
+
+          <div class="storyBox">
+            <p class="storyText">
+              <i>"Kneel, and let the ember-lanterns burn your wounds away. The Sanctuary asks only a coin... or your patience."</i>
+            </p>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="vitals">
+            <div class="v">
+              <div class="vk">❤️ Health</div>
+              <div class="vv">${hpoints} / ${stats.maxhp}</div>
+            </div>
+            <div class="v">
+              <div class="vk">✨ Spirit</div>
+              <div class="vv">${spoints} / ${stats.maxspoints}</div>
+            </div>
+            <div class="v">
+              <div class="vk">🧑 ${base.name}</div>
+              <div class="vv">Level ${base.level}</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="servicesGrid">
+
+            <!-- Heal HP -->
+            <div class="serviceTile">
+              <div class="serviceIcon">❤️</div>
+              <div class="serviceLabel">
+                <strong>Restore Health</strong>
+                <span>${healHint}</span>
+              </div>
+              <form method="POST" action="/church/heal">
+                <button class="btn ${healDisabled ? "disabled" : "primary"}" ${healDisabled ? "disabled" : ""}>
+                  Heal (${HEAL_COST}g)
+                </button>
+              </form>
+            </div>
+
+            <!-- Restore SP -->
+            <div class="serviceTile">
+              <div class="serviceIcon">✨</div>
+              <div class="serviceLabel">
+                <strong>Restore Spirit</strong>
+                <span>${restoreHint}</span>
+              </div>
+              <form method="POST" action="/church/restore">
+                <button class="btn ${restoreDisabled ? "disabled" : "primary"}" ${restoreDisabled ? "disabled" : ""}>
+                  Restore (${RESTORE_COST}g)
+                </button>
+              </form>
+            </div>
+
+            <!-- Coming Soon tiles -->
+            <div class="serviceTile isLocked">
+              <div class="serviceIcon">🕊️</div>
+              <div class="serviceLabel">
+                <strong>Blessings</strong>
+                <span>Temporary boons for your next venture.</span>
+              </div>
+              <button class="btn disabled" disabled>Coming Soon</button>
+            </div>
+
+            <div class="serviceTile isLocked">
+              <div class="serviceIcon">🧿</div>
+              <div class="serviceLabel">
+                <strong>Purification</strong>
+                <span>Cleanse curses and corruption.</span>
+              </div>
+              <button class="btn disabled" disabled>Coming Soon</button>
+            </div>
+
+            <div class="serviceTile isLocked">
+              <div class="serviceIcon">📿</div>
+              <div class="serviceLabel">
+                <strong>Donate</strong>
+                <span>Support the Sanctuary. Unlock favor later.</span>
+              </div>
+              <button class="btn disabled" disabled>Coming Soon</button>
+            </div>
+
+          </div>
+
+          <div class="note">
+            Services marked “Coming Soon” are placeholders for Sanctuary expansion (buffs, curse removal, favor, etc.).
+          </div>
+
+        </div>
+      </section>
+
+      <!-- RIGHT: REVIVE PANEL (ONLY ACTIVE WHEN DEAD) -->
+      <aside class="card ${isDead ? "isDanger" : "isMuted"}">
+        <div class="cardHeader">
+          <div class="cardTitle">
+            <h2>Revival</h2>
+            <p>${isDead ? "You walk between life and death." : "Only available when you fall in battle."}</p>
+          </div>
+          <span class="badge ${isDead ? "warn" : ""}">${isDead ? "Critical" : "Locked"}</span>
+        </div>
+
+        <div class="cardBody">
+
+          <div class="reviveBox">
+            <div class="reviveRow">
+              <div>
+                <div class="reviveTitle">🕯️ Revival Blessing</div>
+                <div class="reviveHint">${reviveHint}</div>
+              </div>
+
+              <form method="POST" action="/church/revive">
+                <button class="btn danger ${!isDead ? "disabled" : ""}" ${!isDead ? "disabled" : ""}>
+                  Revive (${REVIVE_COST}g)
+                </button>
+              </form>
+            </div>
+
+            <div class="divider"></div>
+
+            ${
+              revive_at
+                ? `
+                  <div class="timerRow">
+                    <div class="timerLabel">Free resurrection in</div>
+                    <div class="timerPill">
+                      <span id="timer" data-seconds="${secondsLeft}">${secondsLeft}</span>s
+                    </div>
+                  </div>
+                  <div class="timerNote">
+                    If you wait it out, you’ll be restored to full health and spirit automatically.
+                  </div>
+                `
+                : `
+                  <div class="timerRow">
+                    <div class="timerLabel">Free resurrection</div>
+                    <div class="timerNote">
+                      ${isDead ? "Timer will appear shortly if it hasn’t already." : "Not applicable while alive."}
+                    </div>
+                  </div>
+                `
+            }
+          </div>
+
+          <div class="divider"></div>
+
+          <a class="btn" href="/tavern">🍺 Tavern</a>
+          <a class="btn primary" href="/shop">🛒 Market</a>
+
+        </div>
+      </aside>
+
     </div>
   </div>
-  <script src="/statpanel.js"></script>
-  
+
+  <div class="toast-wrap" id="toastWrap"></div>
 </body>
 </html>
 `);
-
 });
 
 // =======================
 // HEAL HP
 // =======================
-router.post("/heal", async (req, res) => {
-  const pid = (req.session as any).playerId as number;
-  if (!pid) return res.redirect("/login.html");
+router.post("/heal", requireLogin, async (req, res) => {
+  const pid = Number((req.session as any).playerId);
 
   const base = await loadBasePlayer(pid);
   if (!base) return res.redirect("/login.html");
 
-  const stats = await getFinalStatsForPlayer(pid);
-
+  const stats = await loadFinal(pid);
   if (!stats) return res.redirect("/login.html");
 
   if (base.hpoints <= 0) return res.redirect("/church");
-  if (base.gold < 10) return res.send("Not enough gold.");
+  if (base.hpoints >= stats.maxhp) return res.redirect("/church");
+  if (base.gold < HEAL_COST) return res.send("Not enough gold.");
 
-  await db.query(`UPDATE players SET hpoints=?, gold=gold-10 WHERE id=?`, [
+  await db.query(`UPDATE players SET hpoints=?, gold=gold-? WHERE id=?`, [
     stats.maxhp,
+    HEAL_COST,
     pid,
   ]);
 
@@ -498,22 +374,22 @@ router.post("/heal", async (req, res) => {
 // =======================
 // RESTORE SP
 // =======================
-router.post("/restore", async (req, res) => {
-  const pid = (req.session as any).playerId as number;
-  if (!pid) return res.redirect("/login.html");
+router.post("/restore", requireLogin, async (req, res) => {
+  const pid = Number((req.session as any).playerId);
 
   const base = await loadBasePlayer(pid);
   if (!base) return res.redirect("/login.html");
 
-  const stats = await getFinalStatsForPlayer(pid);
-
+  const stats = await loadFinal(pid);
   if (!stats) return res.redirect("/login.html");
 
   if (base.hpoints <= 0) return res.redirect("/church");
-  if (base.gold < 10) return res.send("Not enough gold.");
+  if (base.spoints >= stats.maxspoints) return res.redirect("/church");
+  if (base.gold < RESTORE_COST) return res.send("Not enough gold.");
 
-  await db.query(`UPDATE players SET spoints=?, gold=gold-10 WHERE id=?`, [
+  await db.query(`UPDATE players SET spoints=?, gold=gold-? WHERE id=?`, [
     stats.maxspoints,
+    RESTORE_COST,
     pid,
   ]);
 
@@ -523,15 +399,13 @@ router.post("/restore", async (req, res) => {
 // =======================
 // REVIVE (GOLD)
 // =======================
-router.post("/revive", async (req, res) => {
-  const pid = (req.session as any).playerId as number;
-  if (!pid) return res.redirect("/login.html");
+router.post("/revive", requireLogin, async (req, res) => {
+  const pid = Number((req.session as any).playerId);
 
   const base = await loadBasePlayer(pid);
   if (!base) return res.redirect("/login.html");
 
-  const stats = await getFinalStatsForPlayer(pid);
-
+  const stats = await loadFinal(pid);
   if (!stats) return res.redirect("/login.html");
 
   if (base.hpoints > 0) return res.redirect("/church");

@@ -1,5 +1,11 @@
 import { db } from "../db";
 
+function randInt(min: number, max: number) {
+  const a = Math.ceil(min);
+  const b = Math.floor(max);
+  return Math.floor(Math.random() * (b - a + 1)) + a;
+}
+
 export async function trySpawnEnemy(
   playerId: number,
   mapX: number,
@@ -13,67 +19,74 @@ export async function trySpawnEnemy(
   );
   if (existing) return null;
 
-  // 2) Load player level (only what we need)
-  const [[player]]: any = await db.query(
-    "SELECT level FROM players WHERE id = ? LIMIT 1",
-    [playerId]
-  );
-  if (!player) return null;
-
-  const level = Number(player.level) || 1;
-
-  // 3) Select candidate creatures for THIS terrain (or 'any') and level range
-  const [candidates]: any = await db.query(
+  // 3) Load zone level band from tile -> region
+  const [[tile]]: any = await db.query(
     `
-    SELECT *
-    FROM creatures
-    WHERE (terrain = ? OR terrain = 'any')
-      AND min_level <= ?
-      AND max_level >= ?
+    SELECT
+      COALESCE(r.level_min, 1) AS level_min,
+      COALESCE(r.level_max, 1) AS level_max
+    FROM world_map wm
+    LEFT JOIN regions r ON r.id = wm.region_id
+    WHERE wm.x = ? AND wm.y = ?
+    LIMIT 1
     `,
-    [terrain, level, level] // ✅ use the terrain arg, not player.terrain
+    [mapX, mapY]
   );
+  if (!tile) return null;
+
+  const zoneMin = Math.max(1, Number(tile.level_min) || 1);
+  const zoneMax = Math.max(zoneMin, Number(tile.level_max) || zoneMin);
+
+  // 4) Pick an effective zone level (this is what you use to prevent mythics at level 1)
+  const zoneLevel = randInt(zoneMin, zoneMax);
+
+  // 5) Candidates: terrain match + creature's min_level must be <= zoneLevel
+  // (No creature.max_level needed. High-level players can still be in low zones and see low mobs.)
+const [candidates]: any = await db.query(
+  `
+  SELECT
+    c.*,
+    ca.img AS img
+  FROM creatures c
+  LEFT JOIN creature_archetypes ca ON ca.id = c.archetype_id
+  WHERE (c.terrain = ? OR c.terrain = 'any')
+    AND c.min_level <= ?
+  `,
+  [terrain, zoneLevel]
+);
 
   if (!candidates.length) return null;
 
-  // 4) 30% chance to spawn anything
-  if (Math.random() > 0.15) return null;
-
-  // 5) Weighted selection by base_spawn_chance
+  // 6) Weighted selection by base_spawn_chance
   const totalWeight = candidates.reduce(
     (sum: number, c: any) => sum + Number(c.base_spawn_chance || 0),
     0
   );
 
-  // Safety: if weights are bad, fallback to random candidate
+  let chosen: any = null;
+
   if (totalWeight <= 0) {
-    const c = candidates[Math.floor(Math.random() * candidates.length)];
-    await db.query(
-      `
-      INSERT INTO player_creatures (player_id, creature_id, hp, map_x, map_y)
-      VALUES (?, ?, ?, ?, ?)
-      `,
-      [playerId, c.id, c.maxhp, mapX, mapY] // ✅ use mapX/mapY args
-    );
-    return c;
-  }
-
-  let roll = Math.random() * totalWeight;
-
-  for (const c of candidates) {
-    roll -= Number(c.base_spawn_chance || 0);
-    if (roll <= 0) {
-      await db.query(
-        `
-        INSERT INTO player_creatures (player_id, creature_id, hp, map_x, map_y)
-        VALUES (?, ?, ?, ?, ?)
-        `,
-        [playerId, c.id, c.maxhp, mapX, mapY] // ✅ use mapX/mapY args
-      );
-
-      return c;
+    chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  } else {
+    let roll = Math.random() * totalWeight;
+    for (const c of candidates) {
+      roll -= Number(c.base_spawn_chance || 0);
+      if (roll <= 0) {
+        chosen = c;
+        break;
+      }
     }
+    if (!chosen) chosen = candidates[candidates.length - 1];
   }
 
-  return null;
+  // 7) Spawn it
+  await db.query(
+    `
+    INSERT INTO player_creatures (player_id, creature_id, hp, map_x, map_y)
+    VALUES (?, ?, ?, ?, ?)
+    `,
+    [playerId, chosen.id, chosen.maxhp, mapX, mapY]
+  );
+
+  return { ...chosen, zoneLevel, zoneMin, zoneMax };
 }

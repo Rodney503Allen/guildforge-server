@@ -1,642 +1,418 @@
 import express from "express";
 import { db } from "./db";
+import { addItemAtomic } from "./services/inventoryService";
 
 const router = express.Router();
 
-const CLASS_LOADOUTS: Record<string, {
-  armor: string[];
-  weapons: string[];
-}> = {
+type ClassShopLoadout = {
+  armorWeights: string[];
+  weaponSlots: string[];
+  offhandSlots: string[];
+};
+
+const CLASS_LOADOUTS: Record<string, ClassShopLoadout> = {
   Mage: {
-    armor: ["cloth", "orb"],
-    weapons: ["staff", "wand",]
+    armorWeights: ["light"],
+    weaponSlots: ["weapon"],
+    offhandSlots: ["offhand"]
   },
   Warlock: {
-    armor: ["cloth", "orb"],
-    weapons: ["staff", "wand"]
+    armorWeights: ["light"],
+    weaponSlots: ["weapon"],
+    offhandSlots: ["offhand"]
   },
   Warrior: {
-    armor: ["plate", "shield"],
-    weapons: ["sword", "axe"]
+    armorWeights: ["heavy"],
+    weaponSlots: ["weapon"],
+    offhandSlots: ["offhand"]
   },
   Berserker: {
-    armor: ["plate"],
-    weapons: ["axe", "sword"]
+    armorWeights: ["heavy"],
+    weaponSlots: ["weapon"],
+    offhandSlots: []
   },
   Ranger: {
-    armor: ["leather"],
-    weapons: ["bow", "dagger"]
+    armorWeights: ["medium"],
+    weaponSlots: ["weapon"],
+    offhandSlots: []
   },
   Marksman: {
-    armor: ["leather"],
-    weapons: ["bow", "crossbow"]
+    armorWeights: ["medium"],
+    weaponSlots: ["weapon"],
+    offhandSlots: []
   },
   Cleric: {
-    armor: ["blessed", "tome", "shield"],
-    weapons: ["mace"]
+    armorWeights: ["light", "medium"],
+    weaponSlots: ["weapon"],
+    offhandSlots: ["offhand"]
   },
   Druid: {
-    armor: ["blessed", "totem"],
-    weapons: ["staff"]
+    armorWeights: ["light", "medium"],
+    weaponSlots: ["weapon"],
+    offhandSlots: ["offhand"]
   }
 };
 
+function escapeHtml(input: any) {
+  return String(input ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-// ========================
+function getTownLevel(town: any) {
+  if (town.recommended_level != null) return Number(town.recommended_level);
+  if (town.level != null) return Number(town.level);
+
+  const min = Number(town.min_level ?? 1);
+  const max = Number(town.max_level ?? min);
+  return Math.floor((min + max) / 2);
+}
+
+function getTownShopChoiceCount(townLevel: number) {
+  if (townLevel <= 5) return 2;
+  if (townLevel <= 10) return 3;
+  if (townLevel <= 20) return 4;
+  if (townLevel <= 30) return 5;
+  return 6;
+}
+
+function getBasePrice(base: any) {
+  const sellValue = Number(base.sell_value ?? 0);
+  const requiredLevel = Number(base.required_level ?? 1);
+  const atk = Number(base.base_attack ?? 0);
+  const def = Number(base.base_defense ?? 0);
+
+  if (sellValue > 0) {
+    return Math.max(1, sellValue * 4);
+  }
+
+  return Math.max(10, Math.floor(requiredLevel * 10 + atk * 3 + def * 3));
+}
+
+function getDisplayCategory(base: any): "weapon" | "armor" {
+  return String(base.item_type) === "armor" ? "armor" : "weapon";
+}
+
+// ============================================================================
 // VIEW SHOP
-// ========================
-router.get("/shop/:id", async (req, res) => {
+// ============================================================================
+router.get("/shop", async (req, res) => {
+  try {
+    const pid = (req.session as any).playerId;
+    if (!pid) return res.redirect("/login.html");
 
-  const pid = (req.session as any).playerId;
-  const shopId = req.params.id;
-  const [[player]]: any = await db.query(
-    "SELECT pclass, gold FROM players WHERE id = ? LIMIT 1",
-    [pid]
-  );
+    const [[player]]: any = await db.query(
+      `SELECT id, pclass, gold, map_x, map_y FROM players WHERE id=? LIMIT 1`,
+      [pid]
+    );
+    if (!player) return res.redirect("/login.html");
 
-if (!player) return res.redirect("/login.html");
+    const loadout = CLASS_LOADOUTS[player.pclass] ?? {
+      armorWeights: [],
+      weaponSlots: [],
+      offhandSlots: []
+    };
 
-const loadout = CLASS_LOADOUTS[player.pclass];
-const goldFmt = new Intl.NumberFormat("en-US").format(Number(player.gold ?? 0));
-  if (!pid) return res.redirect("/login.html");
+    const goldFmt = new Intl.NumberFormat("en-US").format(Number(player.gold ?? 0));
 
-  // Load shop info
-  const [[shop]]: any = await db.query(`
-    SELECT s.*, l.name AS town
-    FROM shops s
-    JOIN locations l ON l.id = s.location_id
-    WHERE s.id = ?
-  `, [shopId]);
+    const [[town]]: any = await db.query(
+      `SELECT * FROM locations WHERE map_x=? AND map_y=? LIMIT 1`,
+      [player.map_x, player.map_y]
+    );
+    if (!town) return res.redirect("/world");
 
-  if (!shop) return res.send("Shop not found.");
+    const townLevel = getTownLevel(town);
+    const choiceCount = getTownShopChoiceCount(townLevel);
 
-  // Load shop items
-let itemQuery = `
-  SELECT
-    si.id AS shopItemId,
-    i.name,
-    i.icon,
-    i.rarity,
-    i.value,
-    si.price,
-    si.stock,
-    i.category,
-    i.item_type,
+    const [shops]: any = await db.query(
+      `SELECT * FROM shops WHERE location_id=?`,
+      [town.id]
+    );
 
-    i.attack,
-    i.defense,
-    i.agility,
-    i.vitality,
-    i.intellect,
-    i.crit,
+    if (!shops.length) {
+      return res.send(`No shops exist in ${escapeHtml(town.name)} yet.`);
+    }
 
-    i.description
-  FROM shop_items si
-  JOIN items i ON i.id = si.item_id
-  WHERE si.shop_id = ?
-`;
+    const shopTypeById = new Map<number, string>();
+    for (const s of shops) shopTypeById.set(Number(s.id), String(s.type));
 
-const params: any[] = [shopId];
+    const shopIds = shops
+      .map((s: any) => Number(s.id))
+      .filter((n: number) => Number.isFinite(n));
 
-// Armor filtering
-if (shop.type === "armor") {
-  itemQuery += ` AND i.category = 'armor' AND i.item_type IN (?)`;
-  params.push(loadout.armor);
-}
+    // =========================================================================
+    // CONSUMABLES
+    // =========================================================================
+    let consumables: any[] = [];
 
-// Weapon filtering
-if (shop.type === "weapon") {
-  itemQuery += ` AND i.category = 'weapon' AND i.item_type IN (?)`;
-  params.push(loadout.weapons);
-}
+    if (shopIds.length) {
+      const [rawConsumables]: any = await db.query(
+        `
+        SELECT
+          si.id AS shopItemId,
+          si.shop_id,
+          si.price,
+          si.stock,
+          si.item_id,
 
-// General store = potions only (for now)
-if (shop.type === "general") {
-  itemQuery += ` AND i.category = 'consumable'`;
-}
+          i.name,
+          i.icon,
+          i.rarity,
+          i.value,
+          i.category,
+          i.item_type,
 
-const [items]: any = await db.query(itemQuery, params);
+          i.attack,
+          i.defense,
+          i.agility,
+          i.vitality,
+          i.intellect,
+          i.crit,
 
+          i.effect_type,
+          i.effect_target,
+          i.effect_value,
 
+          i.description
+        FROM shop_items si
+        JOIN items i ON i.id = si.item_id
+        WHERE si.shop_id IN (?)
+          AND i.category = 'consumable'
+        `,
+        [shopIds]
+      );
 
-// HTML Rendering
-const rows = items.map((i: any) => {
-  const stats = [
-    i.attack ? `⚔ Attack +${i.attack}` : null,
-    i.defense ? `🛡 Defense +${i.defense}` : null,
-    i.agility ? `🏃 Agility +${i.agility}` : null,
-    i.vitality ? `❤️ Vitality +${i.vitality}` : null,
-    i.intellect ? `🧠 Intellect +${i.intellect}` : null,
-    i.crit ? `🎯 Crit +${i.crit}%` : null,
-    i.effect_type === "heal"
-      ? `✨ Heals ${i.effect_value} ${i.effect_target === "hp" ? "HP" : "SP"}`
-      : null
-  ].filter(Boolean).join("<br>");
+      consumables = (rawConsumables || []).filter((row: any) => {
+        const shopType = String(shopTypeById.get(Number(row.shop_id)) || "");
+        return shopType === "general";
+      });
+    }
 
-  // Icon handling (image path/url OR emoji fallback)
-  const rawIcon = (i.icon ?? "").toString().trim();
-  const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(rawIcon);
-  
-  const iconSrc =
-    isImage && rawIcon && !rawIcon.startsWith("http") && !rawIcon.startsWith("/")
-      ? `/${rawIcon}`
-      : rawIcon;
+    // =========================================================================
+    // WEAPONS / OFFHANDS FROM item_bases
+    // =========================================================================
+    let weaponBases: any[] = [];
+    const canShowWeapons =
+      shops.some((s: any) => String(s.type) === "weapon") &&
+      (loadout.weaponSlots.length > 0 || loadout.offhandSlots.length > 0);
 
-  const thumbHtml = isImage
-    ? `<img class="item-thumb" src="${iconSrc}" alt="${i.name}" loading="lazy"
-         onerror="this.replaceWith(document.createTextNode('📦'));">`
-    : `<div class="item-emoji" aria-label="${i.name}">${rawIcon || "📦"}</div>`;
+    if (canShowWeapons) {
+      const [rows]: any = await db.query(
+        `
+        SELECT
+          ib.id,
+          ib.name,
+          ib.slot,
+          ib.item_type,
+          ib.armor_weight,
+          ib.required_level,
+          ib.max_level,
+          ib.base_attack,
+          ib.base_defense,
+          ib.sell_value,
+          ib.icon,
+          ib.description,
+          ib.is_active,
+          'common' AS rarity
+        FROM item_bases ib
+        WHERE ib.is_active = 1
+          AND (
+            (ib.item_type = 'weapon' AND ib.slot IN (?))
+            OR
+            (ib.item_type = 'offhand' AND ib.slot IN (?))
+          )
+          AND ib.required_level <= ?
+          AND ib.required_level >= GREATEST(1, ? - 5)
+        ORDER BY ABS(ib.required_level - ?) ASC, RAND()
+        LIMIT ?
+        `,
+        [
+          loadout.weaponSlots.length ? loadout.weaponSlots : ["__none__"],
+          loadout.offhandSlots.length ? loadout.offhandSlots : ["__none__"],
+          townLevel,
+          townLevel,
+          townLevel,
+          choiceCount
+        ]
+      );
 
-  // Tooltip info (ALL item info lives here)
-  const infoLines = [
-    `<div class="t-line"><span class="t-k">Price</span><span class="t-v">💰 ${i.price}</span></div>`,
-    `<div class="t-line"><span class="t-k">Stock</span><span class="t-v">${i.stock}</span></div>`,
-    i.category ? `<div class="t-line"><span class="t-k">Category</span><span class="t-v">${i.category}</span></div>` : "",
-    i.item_type ? `<div class="t-line"><span class="t-k">Type</span><span class="t-v">${i.item_type}</span></div>` : "",
-    i.value ? `<div class="t-line"><span class="t-k">Value</span><span class="t-v">${i.value}</span></div>` : ""
-  ].filter(Boolean).join("");
+      weaponBases = (rows || []).map((b: any) => ({
+        ...b,
+        category: "weapon",
+        price: getBasePrice(b),
+        stock: 9999,
+        sourceType: "base",
+        attack: Number(b.base_attack ?? 0),
+        defense: Number(b.base_defense ?? 0),
+        agility: 0,
+        vitality: 0,
+        intellect: 0,
+        crit: 0,
+        value: Number(b.sell_value ?? 0)
+      }));
+    }
 
-  const canBuy = i.stock > 0;
+    // =========================================================================
+    // ARMOR FROM item_bases
+    // =========================================================================
+    let armorBases: any[] = [];
+    const canShowArmor =
+      shops.some((s: any) => String(s.type) === "armor") &&
+      loadout.armorWeights.length > 0;
 
-  return `
-    <div class="item tooltip-parent" tabindex="0" aria-label="${i.name}">
-      <div class="thumb">
-        ${thumbHtml}
-      </div>
+    if (canShowArmor) {
+      const [rows]: any = await db.query(
+        `
+        SELECT
+          ib.id,
+          ib.name,
+          ib.slot,
+          ib.item_type,
+          ib.armor_weight,
+          ib.required_level,
+          ib.max_level,
+          ib.base_attack,
+          ib.base_defense,
+          ib.sell_value,
+          ib.icon,
+          ib.description,
+          ib.is_active,
+          'common' AS rarity
+        FROM item_bases ib
+        WHERE ib.is_active = 1
+          AND ib.item_type = 'armor'
+          AND ib.armor_weight IN (?)
+          AND ib.required_level <= ?
+          AND ib.required_level >= GREATEST(1, ? - 5)
+        ORDER BY ABS(ib.required_level - ?) ASC, RAND()
+        LIMIT ?
+        `,
+        [
+          loadout.armorWeights,
+          townLevel,
+          townLevel,
+          townLevel,
+          choiceCount
+        ]
+      );
 
-      <button ${canBuy ? "" : "disabled"} onclick="buy(${i.shopItemId})">
-        ${canBuy ? "Buy" : "Sold Out"}
-      </button>
+      armorBases = (rows || []).map((b: any) => ({
+        ...b,
+        category: "armor",
+        price: getBasePrice(b),
+        stock: 9999,
+        sourceType: "base",
+        attack: Number(b.base_attack ?? 0),
+        defense: Number(b.base_defense ?? 0),
+        agility: 0,
+        vitality: 0,
+        intellect: 0,
+        crit: 0,
+        value: Number(b.sell_value ?? 0)
+      }));
+    }
 
-      <div class="tooltip">
-        <div class="t-name ${i.rarity || "common"}">${i.name}</div>
-        ${infoLines ? `<div class="t-info">${infoLines}</div>` : ""}
-        ${stats ? `<div class="t-stats">${stats}</div>` : ""}
-        ${i.description ? `<div class="t-desc">${i.description}</div>` : ""}
-      </div>
-    </div>
-  `;
-}).join("");
+    const groups: Record<"consumable" | "weapon" | "armor", any[]> = {
+      consumable: consumables,
+      weapon: weaponBases,
+      armor: armorBases
+    };
 
+    function renderItemCard(i: any) {
+      const stats = [
+        i.attack ? `Attack +${i.attack}` : null,
+        i.defense ? `Defense +${i.defense}` : null,
+        i.agility ? `Agility +${i.agility}` : null,
+        i.vitality ? `Vitality +${i.vitality}` : null,
+        i.intellect ? `Intellect +${i.intellect}` : null,
+        i.crit ? `Crit +${i.crit}%` : null,
+        i.effect_type === "restore"
+          ? `✨ Restores ${i.effect_value} ${i.effect_target === "hp" ? "HP" : "SP"}`
+          : null,
+        i.slot ? `Slot: ${i.slot}` : null,
+        i.armor_weight ? `Weight: ${i.armor_weight}` : null,
+        i.required_level ? `Requires Level ${i.required_level}` : null
+      ]
+        .filter(Boolean)
+        .join("<br>");
 
+      const rawIcon = (i.icon ?? "").toString().trim();
+      const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(rawIcon);
 
+      const iconSrc =
+        isImage && rawIcon && !rawIcon.startsWith("http") && !rawIcon.startsWith("/")
+          ? `/${rawIcon}`
+          : rawIcon;
 
-res.send(`
+      const thumbHtml = isImage
+        ? `<img class="item-thumb" src="${iconSrc}" alt="${escapeHtml(i.name)}" loading="lazy"
+             onerror="this.replaceWith(document.createTextNode('📦'));">`
+        : `<div class="item-emoji" aria-label="${escapeHtml(i.name)}">${escapeHtml(rawIcon || "📦")}</div>`;
+
+      const canBuy = Number(i.stock) > 0;
+
+      let buyButton = "";
+
+      if (i.sourceType === "base") {
+        buyButton = `
+          <button ${canBuy ? "" : "disabled"} onclick="buyBase(${Number(i.id)}, '${escapeHtml(i.category)}')">
+            ${canBuy ? "Buy" : "Sold Out"}
+          </button>
+        `;
+      } else {
+        buyButton = `
+          <button ${canBuy ? "" : "disabled"} onclick="buy(${Number(i.shopItemId)})">
+            ${canBuy ? "Buy" : "Sold Out"}
+          </button>
+        `;
+      }
+
+      return `
+        <div class="item"
+          data-tooltip="item"
+          tabindex="0"
+          aria-label="${escapeHtml(i.name)}"
+          data-name="${escapeHtml(i.name)}"
+          data-rarity="${escapeHtml(i.rarity || "common")}"
+          data-value="${Number(i.value || 0)}"
+          data-price="${Number(i.price || 0)}"
+          data-qty="1"
+          data-stats="${escapeHtml(stats)}"
+          data-desc="${escapeHtml(i.description || "")}"
+        >
+          <div class="thumb">${thumbHtml}</div>
+          ${buyButton}
+        </div>
+      `;
+    }
+
+    function renderCards(arr: any[]) {
+      return (arr || []).map(renderItemCard).join("") || `<div class="empty">No items.</div>`;
+    }
+
+    res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Guildforge | ${shop.name}</title>
+  <title>Guildforge | Shop</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="/ui/toast.css">
   <script src="/ui/toast.js"></script>
-  <style>
-    :root{
-      --bg0:#07090c;
-      --bg1:#0b0f14;
-      --panel:#0e131a;
-      --panel2:#0a0f15;
 
-      --ink:#d7dbe2;
-      --muted:#9aa3af;
+  <link rel="stylesheet" href="/ui/itemTooltip.css">
+  <script defer src="/ui/itemTooltip.js"></script>
 
-      --iron:#2b3440;
-      --ember:#b64b2e;
-      --blood:#7a1e1e;
-      --bone:#c9b89a;
-
-      --shadow: rgba(0,0,0,.60);
-      --frame: rgba(255,255,255,.04);
-      --glass: rgba(0,0,0,.18);
-    }
-
-    *{ box-sizing:border-box; }
-
-    html, body{
-      margin:0;
-      padding:0;
-      color: var(--ink);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-
-      background:
-        radial-gradient(1100px 600px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        radial-gradient(900px 500px at 82% 10%, rgba(122,30,30,.08), transparent 55%),
-        linear-gradient(180deg, var(--bg1), var(--bg0));
-    }
-
-    /* grit overlay */
-    body::before{
-      content:"";
-      position:fixed;
-      inset:0;
-      pointer-events:none;
-      opacity:.10;
-      background:
-        repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px),
-        repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 2px, transparent 2px 7px);
-      mix-blend-mode: overlay;
-    }
-
-    .wrap{
-      width: min(980px, 94vw);
-      margin: 0 auto;
-      padding: 18px 0 28px;
-    }
-
-    .panel{
-      position:relative;
-      margin: 80px auto 0;
-      padding: 18px;
-      border-radius: 12px;
-
-      border: 1px solid rgba(43,52,64,.95);
-      background:
-        radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
-        linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.20)),
-        linear-gradient(180deg, var(--panel), var(--panel2));
-
-      box-shadow: 0 18px 40px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
-    }
-
-    .panel::before{
-      content:"";
-      position:absolute;
-      inset:10px;
-      pointer-events:none;
-      border: 0;
-      border-radius: 10px;
-    }
-
-    .head{
-      display:flex;
-      align-items:flex-end;
-      justify-content:space-between;
-      gap: 14px;
-      position:relative;
-      z-index:1;
-      padding-bottom: 12px;
-      border-bottom: 1px solid rgba(43,52,64,.85);
-      margin-bottom: 12px;
-    }
-
-    .title{
-      text-align:left;
-    }
-
-    .title h2{
-      margin:0;
-      font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
-      letter-spacing: 2.2px;
-      text-transform: uppercase;
-      color: var(--bone);
-      font-size: 22px;
-      text-shadow:
-        0 0 10px rgba(182,75,46,.20),
-        0 10px 18px rgba(0,0,0,.85);
-    }
-
-    .sub{
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 12px;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-    }
-
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap: 8px;
-      padding: 8px 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      color: var(--ink);
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .6px;
-      text-transform: uppercase;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-      white-space: nowrap;
-    }
-
-    .rule{
-      height:1px;
-      border:none;
-      margin: 14px 0;
-      background: linear-gradient(90deg, transparent, rgba(182,75,46,.65), transparent);
-      opacity:.85;
-      position:relative;
-      z-index:1;
-    }
-
-/* ITEM GRID (thumbnail cards) */
-.items{
-  display:grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-  gap: 12px;
-  position:relative;
-  z-index:1;
-  margin-top: 6px;
-}
-.item{
-  position:relative;
-  border-radius: 12px;
-  border: 1px solid rgba(43,52,64,.95);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
-    linear-gradient(180deg, var(--panel), var(--panel2));
-  box-shadow: 0 16px 34px rgba(0,0,0,.60), inset 0 1px 0 rgba(255,255,255,.06);
-
-  padding: 12px;
-  display:flex;
-  flex-direction:column;
-  gap: 10px;
-  align-items:center;
-  justify-content:space-between;
-  min-height: 164px;
-
-  transition: transform .12s ease, border-color .12s ease, filter .12s ease;
-  outline: none;
-}
-
-    .item:hover{
-      border-color: rgba(182,75,46,.55);
-      filter: brightness(1.03);
-      box-shadow:
-        0 0 0 1px rgba(182,75,46,.10),
-        0 20px 44px rgba(0,0,0,.75),
-        inset 0 1px 0 rgba(255,255,255,.06);
-    }
-.item:hover,
-.item:focus{
-  border-color: rgba(182,75,46,.55);
-  filter: brightness(1.03);
-  box-shadow:
-    0 0 0 1px rgba(182,75,46,.10),
-    0 20px 44px rgba(0,0,0,.75),
-    inset 0 1px 0 rgba(255,255,255,.06);
-}
-
-    .name{
-      text-align:left;
-      font-weight: 900;
-      letter-spacing: .3px;
-      color: var(--bone);
-      font-size: 14px;
-      display:flex;
-      align-items:center;
-      gap: 8px;
-      line-height: 1.2;
-    }
-
-    .meta{
-      margin-top: 8px;
-      text-align:left;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.35;
-      font-weight: 600;
-    }
-
-    .buycol{
-      display:flex;
-      flex-direction:column;
-      align-items:flex-end;
-      justify-content:space-between;
-      gap: 10px;
-    }
-
-    .price{
-      font-size: 12px;
-      color: var(--ink);
-      letter-spacing: .6px;
-      font-weight: 900;
-      text-transform: uppercase;
-      padding: 6px 8px;
-      border-radius: 10px;
-      border: 1px solid rgba(43,52,64,.95);
-      background: rgba(0,0,0,.18);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-      white-space: nowrap;
-    }
-
-    button{
-      border-radius: 10px;
-      border: 1px solid rgba(182,75,46,.55);
-      background: linear-gradient(180deg, rgba(182,75,46,.92), rgba(122,30,30,.88));
-      color: #f3e7db;
-
-      padding: 10px 12px;
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: .7px;
-      text-transform: uppercase;
-
-      cursor:pointer;
-      box-shadow: 0 14px 28px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.12);
-      transition: transform .12s ease, filter .12s ease, border-color .12s ease;
-      min-width: 96px;
-    }
-
-    button:hover{
-      filter: brightness(1.06);
-      transform: translateY(-1px);
-    }
-
-    button:active{ transform: translateY(0) scale(.99); }
-
-    button:disabled{
-      opacity:.55;
-      cursor:not-allowed;
-      transform:none;
-      filter:none;
-    }
-
-    .returnBtn{
-      width:100%;
-      margin-top: 12px;
-    }
-
-    .empty{
-      color: var(--muted);
-      font-style: italic;
-      padding: 8px 0;
-      position:relative;
-      z-index:1;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    }
-.thumb{
-  width: 92px;
-  height: 92px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius: 12px;
-  border: 1px solid rgba(43,52,64,.85);
-  background: rgba(0,0,0,.18);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-}
-
-.item-thumb{
-  width: 76px;
-  height: 76px;
-  object-fit: contain;
-  image-rendering: pixelated; /* remove if not pixel art */
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,.65));
-}
-
-.item-emoji{
-  font-size: 44px;
-  line-height: 1;
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,.65));
-}
-
-.item-emoji{
-  font-size: 44px;
-  line-height: 1;
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,.65));
-}
-
-/* Button stays, but make it full width inside card */
-.item > button{
-  width: 100%;
-  min-width: 0;
-}
-
-/* TOOLTIP SYSTEM (make it work on hover AND keyboard focus) */
-.tooltip-parent{ position:relative; z-index:1; }
-.tooltip-parent:hover{ z-index:9999; }
-.tooltip-parent:focus{ z-index:9999; }
-
-.tooltip{
-  position:absolute;
-  left: 50%;
-  top: calc(100% + 10px);
-  transform: translate(-50%, -5px);
-  width: 310px;
-
-  background: rgba(9,12,16,.96);
-  border: 1px solid rgba(43,52,64,.95);
-  border-radius: 12px;
-  padding: 10px;
-
-  color: var(--ink);
-  font-size: 12px;
-  box-shadow: 0 18px 40px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.06);
-  z-index: 10000;
-
-  opacity: 0;
-  pointer-events:none;
-  transition: .15s ease;
-}
-
-.tooltip::before{
-  content:"";
-  position:absolute;
-  inset:10px;
-  pointer-events:none;
-  border: 1px solid rgba(255,255,255,.04);
-  border-radius: 10px;
-  opacity: .8;
-}
-
-
-.tooltip-parent:hover .tooltip,
-.tooltip-parent:focus .tooltip{
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-.t-name{
-  font-weight: 900;
-  margin-bottom: 8px;
-  letter-spacing: .4px;
-  position:relative;
-  z-index:1;
-}
-.t-info{
-  margin-bottom: 8px;
-  position:relative;
-  z-index:1;
-}
-  .t-line{
-  display:flex;
-  justify-content:space-between;
-  gap: 10px;
-  padding: 3px 0;
-  border-bottom: 1px dashed rgba(255,255,255,.06);
-}
-
-.t-line:last-child{ border-bottom: 0; }
-
-.t-k{
-  color: var(--muted);
-  font-weight: 800;
-  letter-spacing: .4px;
-  text-transform: uppercase;
-  font-size: 11px;
-}
-
-.t-v{
-  color: rgba(215,219,226,.95);
-  font-weight: 800;
-}
-.t-stats{
-  margin-bottom: 8px;
-  line-height: 1.4;
-  color: rgba(215,219,226,.92);
-  position:relative;
-  z-index:1;
-}
-
-.t-desc{
-  font-style: italic;
-  color: var(--muted);
-  position:relative;
-  z-index:1;
-}
-
-    /* Rarity colors (same classes you already output) */
-    .common{ color: #c9cfd9; }
-    .uncommon{ color: #77f29a; }
-    .rare{ color: #78c8ff; }
-    .epic{ color: #d38cff; }
-    .legendary{ color: #ffb84a; }
-
-    /* Responsive */
-    @media (max-width: 820px){
-      .items{ grid-template-columns: 1fr; }
-      .panel{ margin-top: 76px; }
-    }
-/* --- TOOLTIP MUST FLOAT ABOVE ALL SHOP ITEMS --- */
-    .tooltip-parent{
-      position: relative;
-      z-index: 1;
-    }
-
-    .tooltip-parent:hover{
-      z-index: 9999;
-    }
-
-    .tooltip{
-      z-index: 10000;
-    }
-    .item-icon{
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-    flex: 0 0 22px;
-    image-rendering: pixelated; /* remove if not pixel art */
-    filter: drop-shadow(0 2px 3px rgba(0,0,0,.65));
-  }
-
-
-  </style>
+  <link rel="stylesheet" href="/shop.css">
+  <script defer src="/shop.js"></script>
 </head>
 
 <body>
@@ -645,133 +421,323 @@ res.send(`
   <script src="/statpanel.js"></script>
 
   <div class="wrap">
-    <div class="panel">
-      <div class="head">
-        <div class="title">
-          <h2>${shop.name}</h2>
-          <div class="sub">${shop.town}</div>
+    <div class="panel market">
+
+      <div class="marketHead">
+        <div class="marketTitle">
+          <h2>Market of ${escapeHtml(town.name)}</h2>
+          <div class="sub">Lanternlight, loud deals, and guarded coin</div>
         </div>
-        <div class="pill">🪙 ${goldFmt}</div>
+        <div class="marketMeta">
+          <div class="pill">🪙 ${goldFmt}</div>
+          <button class="btnGhost" type="button" onclick="location.href='/town'">Return</button>
+        </div>
       </div>
 
-      <div class="items">
-        ${rows || "<div class='empty'>No items for sale.</div>"}
+      <div class="marketTabs" role="tablist" aria-label="Market categories">
+        <button class="tab isActive" role="tab" aria-selected="true" data-tab="consumable">
+          🧪 Consumables
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="weapon">
+          ⚔ Weapons
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="armor">
+          🛡 Armor
+        </button>
+      </div>
+
+      <div class="marketPanels">
+        <section class="marketPanel isActive" role="tabpanel" data-panel="consumable">
+          <div class="panelHead">
+            <div class="panelName">Apothecary Stall</div>
+            <div class="panelNote">Restock before you step outside the walls.</div>
+          </div>
+          <div class="items">${renderCards(groups.consumable)}</div>
+        </section>
+
+        <section class="marketPanel" role="tabpanel" data-panel="weapon">
+          <div class="panelHead">
+            <div class="panelName">Steel & Edge</div>
+            <div class="panelNote">A few practical weapons and offhands suited to your class.</div>
+          </div>
+          <div class="items">${renderCards(groups.weapon)}</div>
+        </section>
+
+        <section class="marketPanel" role="tabpanel" data-panel="armor">
+          <div class="panelHead">
+            <div class="panelName">Armorer’s Row</div>
+            <div class="panelNote">Region-appropriate armor matched to your training.</div>
+          </div>
+          <div class="items">${renderCards(groups.armor)}</div>
+        </section>
       </div>
 
       <hr class="rule">
-
       <button class="returnBtn" onclick="location.href='/town'">Return to Town</button>
     </div>
   </div>
-<div class="toast-wrap" id="toastWrap"></div>
 
-<script>
-  const TOAST_VISIBLE_MS = 3800;
-
-  async function buy(id) {
-    const res = await fetch("/api/shop/buy", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ shopItemId:id })
-    });
-
-    const data = await res.json();
-
-    if (data.error) {
-      // shared toast
-      if (window.GFToast?.show) {
-        GFToast.show("Purchase Failed", data.error, { type: "error", durationMs: TOAST_VISIBLE_MS });
-      }
-      return;
-    }
-
-    if (window.GFToast?.show) {
-      GFToast.show("Purchased", "Item added to your inventory.", { type: "success", durationMs: TOAST_VISIBLE_MS });
-    }
-
-    setTimeout(() => location.reload(), TOAST_VISIBLE_MS + 250);
-  }
-</script>
-
-
-
+  <div class="toast-wrap" id="toastWrap"></div>
 </body>
 </html>
-`);
-
-});
-
-// ========================
-// BUY ITEM API
-// ========================
-router.post("/api/shop/buy", async (req, res) => {
-
-  const pid = (req.session as any).playerId;
-  const { shopItemId } = req.body;
-
-  if (!pid) return res.json({ error: "Not logged in" });
-
-  // Load item
-  const [[item]]: any = await db.query(`
-    SELECT
-      si.id,
-      si.price,
-      si.stock,
-      si.item_id,
-      i.name
-    FROM shop_items si
-    JOIN items i ON i.id = si.item_id
-    WHERE si.id = ?
-  `, [shopItemId]);
-
-  if (!item) return res.json({ error: "Item not found" });
-  if (item.stock <= 0) return res.json({ error: "Out of stock" });
-
-// Load player gold
-const [[player]]: any = await db.query(
-  `SELECT gold FROM players WHERE id = ? LIMIT 1`,
-  [pid]
-);
-
-if (!player) return res.json({ error: "Player not found" });
-if (Number(player.gold) < Number(item.price)) return res.json({ error: "Not enough gold" });
-
-
-  // Deduct gold
-  await db.query(`
-    UPDATE players
-    SET gold = gold - ?
-    WHERE id=?
-  `, [item.price, pid]);
-
-  // Reduce stock
-  await db.query(`
-    UPDATE shop_items
-    SET stock = stock - 1
-    WHERE id=?
-  `, [shopItemId]);
-
-  // Add item to inventory (stack-safe)
-  const [[existing]]: any = await db.query(`
-    SELECT inventory_id, quantity
-    FROM inventory
-    WHERE player_id = ? AND item_id = ?
-  `, [pid, item.item_id]);
-
-  if (existing) {
-    await db.query(`
-      UPDATE inventory
-      SET quantity = quantity + 1
-      WHERE inventory_id = ?
-    `, [existing.inventory_id]);
-  } else {
-    await db.query(`
-      INSERT INTO inventory (player_id, item_id, quantity)
-      VALUES (?, ?, 1)
-    `, [pid, item.item_id]);
+    `);
+  } catch (err) {
+    console.error("GET /shop failed:", err);
+    res.status(500).send("Shop failed to load.");
   }
-
-  res.json({ success: true });
 });
 
+router.get("/shop/:id", (req, res) => res.redirect("/shop"));
+
+// ============================================================================
+// BUY CONSUMABLE
+// ============================================================================
+router.post("/api/shop/buy", async (req, res) => {
+  try {
+    const pid = (req.session as any).playerId;
+    const shopItemId = Number(req.body?.shopItemId);
+
+    if (!pid) return res.json({ error: "Not logged in" });
+    if (!Number.isFinite(shopItemId)) return res.json({ error: "Invalid item id" });
+
+    const [r]: any = await db.query(
+      `
+      UPDATE players p
+      JOIN shop_items si ON si.id = ?
+      SET
+        p.gold = p.gold - si.price,
+        si.stock = si.stock - 1
+      WHERE
+        p.id = ?
+        AND si.stock > 0
+        AND p.gold >= si.price
+      `,
+      [shopItemId, pid]
+    );
+
+    if (!r?.affectedRows) {
+      const [[si]]: any = await db.query(
+        `SELECT price, stock FROM shop_items WHERE id=? LIMIT 1`,
+        [shopItemId]
+      );
+      if (!si) return res.json({ error: "Item not found" });
+      if (Number(si.stock) <= 0) return res.json({ error: "Out of stock" });
+
+      const [[pl]]: any = await db.query(
+        `SELECT gold FROM players WHERE id=? LIMIT 1`,
+        [pid]
+      );
+      if (!pl) return res.json({ error: "Player not found" });
+      if (Number(pl.gold) < Number(si.price)) return res.json({ error: "Not enough gold" });
+
+      return res.json({ error: "Purchase failed" });
+    }
+
+    const [[row]]: any = await db.query(
+      `SELECT item_id FROM shop_items WHERE id=? LIMIT 1`,
+      [shopItemId]
+    );
+    if (!row) return res.json({ error: "Purchase succeeded but item missing." });
+
+    await addItemAtomic(Number(pid), Number(row.item_id), 1);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("POST /api/shop/buy failed:", err);
+    res.json({ error: "Purchase failed" });
+  }
+});
+
+// ============================================================================
+// BUY BASE ITEM
+// ============================================================================
+router.post("/api/shop/buy-base", async (req, res) => {
+  const conn = await db.getConnection();
+
+  try {
+    const pid = (req.session as any).playerId;
+    const baseItemId = Number(req.body?.baseItemId);
+    const category = String(req.body?.category || "");
+
+    if (!pid) {
+      conn.release();
+      return res.json({ error: "Not logged in" });
+    }
+
+    if (!Number.isFinite(baseItemId)) {
+      conn.release();
+      return res.json({ error: "Invalid base item id" });
+    }
+
+    if (!["weapon", "armor"].includes(category)) {
+      conn.release();
+      return res.json({ error: "Invalid category" });
+    }
+
+    const [[player]]: any = await conn.query(
+      `SELECT id, pclass, gold, map_x, map_y FROM players WHERE id=? LIMIT 1`,
+      [pid]
+    );
+    if (!player) {
+      conn.release();
+      return res.json({ error: "Player not found" });
+    }
+
+    const loadout = CLASS_LOADOUTS[player.pclass] ?? {
+      armorWeights: [],
+      weaponSlots: [],
+      offhandSlots: []
+    };
+
+    const [[town]]: any = await conn.query(
+      `SELECT * FROM locations WHERE map_x=? AND map_y=? LIMIT 1`,
+      [player.map_x, player.map_y]
+    );
+    if (!town) {
+      conn.release();
+      return res.json({ error: "Town not found" });
+    }
+
+    const townLevel = getTownLevel(town);
+
+    const [[base]]: any = await conn.query(
+      `
+      SELECT
+        ib.id,
+        ib.name,
+        ib.slot,
+        ib.item_type,
+        ib.armor_weight,
+        ib.required_level,
+        ib.max_level,
+        ib.base_attack,
+        ib.base_defense,
+        ib.sell_value,
+        ib.icon,
+        ib.description,
+        ib.is_active
+      FROM item_bases ib
+      WHERE ib.id = ?
+        AND ib.is_active = 1
+      LIMIT 1
+      `,
+      [baseItemId]
+    );
+
+    if (!base) {
+      conn.release();
+      return res.json({ error: "Base item not found" });
+    }
+
+    const itemDisplayCategory = getDisplayCategory(base);
+    if (itemDisplayCategory !== category) {
+      conn.release();
+      return res.json({ error: "Invalid item category" });
+    }
+
+    if (category === "armor") {
+      if (String(base.item_type) !== "armor") {
+        conn.release();
+        return res.json({ error: "Invalid armor item" });
+      }
+
+      if (!loadout.armorWeights.includes(String(base.armor_weight || ""))) {
+        conn.release();
+        return res.json({ error: "Your class cannot buy that armor type" });
+      }
+    } else {
+      const isWeaponAllowed =
+        String(base.item_type) === "weapon" &&
+        loadout.weaponSlots.includes(String(base.slot));
+
+      const isOffhandAllowed =
+        String(base.item_type) === "offhand" &&
+        loadout.offhandSlots.includes(String(base.slot));
+
+      if (!isWeaponAllowed && !isOffhandAllowed) {
+        conn.release();
+        return res.json({ error: "Your class cannot buy that item type" });
+      }
+    }
+
+    const reqLevel = Number(base.required_level ?? 1);
+    if (reqLevel > townLevel || reqLevel < Math.max(1, townLevel - 5)) {
+      conn.release();
+      return res.json({ error: "That item is not sold in this town" });
+    }
+
+    const price = getBasePrice(base);
+
+    await conn.beginTransaction();
+
+    const [goldUpdate]: any = await conn.query(
+      `
+      UPDATE players
+      SET gold = gold - ?
+      WHERE id = ?
+        AND gold >= ?
+      `,
+      [price, pid, price]
+    );
+
+    if (!goldUpdate?.affectedRows) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Not enough gold" });
+    }
+
+    const [playerItemInsert]: any = await conn.query(
+      `
+      INSERT INTO player_items (
+        player_id,
+        item_base_id,
+        name,
+        item_level,
+        rarity,
+        is_equipped,
+        is_claimed,
+        roll_json,
+        source_type,
+        source_id
+      )
+      VALUES (?, ?, ?, ?, 'base', 0, 1, NULL, 'shop', ?)
+      `,
+      [
+        Number(pid),
+        Number(base.id),
+        String(base.name),
+        Number(base.required_level ?? 1),
+        Number(town.id)
+      ]
+    );
+
+    const playerItemId = Number(playerItemInsert.insertId);
+
+    await conn.query(
+      `
+      INSERT INTO inventory (
+        player_id,
+        item_id,
+        player_item_id,
+        quantity,
+        durability,
+        randid,
+        equipped
+      )
+      VALUES (?, NULL, ?, 1, NULL, NULL, 0)
+      `,
+      [Number(pid), playerItemId]
+    );
+
+    await conn.commit();
+    conn.release();
+
+    res.json({ success: true });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    conn.release();
+    console.error("POST /api/shop/buy-base failed:", err);
+    res.json({ error: "Purchase failed" });
+  }
+});
 export default router;

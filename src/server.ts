@@ -1,12 +1,10 @@
 import express from "express";
 import session from "express-session";
-
 import shopRoutes from "./shop.routes";
 import authRoutes from "./auth.routes";
 import playerRoutes from "./player.routes";
 import trainerRoutes from "./trainer.routes";
 import churchRoutes from "./church.routes";
-import travelRoutes from "./travel.routes";
 import equipmentRoutes from "./equipment.routes";
 import guildRoutes from "./guild.routes";
 import worldRoutes from "./world.routes";
@@ -20,6 +18,12 @@ import { startStatusHeartbeat } from "./services/statusHeartbeat";
 import { db } from "./db";
 import combatPollRoutes from "./combatPoll.routes";
 import sellRoutes from "./sell.routes";
+import questRoutes from "./quest.routes";
+import tavernRoutes from "./tavern.routes";
+import chestRoutes from "./chests.routes";
+import adminRoutes from "./admin.routes";
+import journalRoutes from "./journal.routes";
+import interactablesRoutes from "./interactables.routes";
 
 const app = express();
 
@@ -42,23 +46,6 @@ app.use(session({
   cookie: { secure: false }
 }));
 
-app.use(shopRoutes);
-app.use(equipmentRoutes);
-app.use(guildRoutes);
-app.use("/api", authRoutes);
-app.use(playerRoutes);
-app.use("/trainer", trainerRoutes);
-app.use("/church", churchRoutes);
-app.use("/travel", travelRoutes);
-app.use(worldRoutes);
-app.use(townRoutes);
-app.use(inventoryRoutes);
-app.use(chatRoutes);
-app.use(characterRoutes);
-app.use(combatRoutes);
-app.use(spellRoutes);
-app.use(combatPollRoutes);
-app.use(sellRoutes);
 // =======================
 // GLOBAL DEATH CHECK
 // =======================
@@ -82,7 +69,9 @@ app.use(async (req, res, next) => {
     "/auth/login",
     "/auth/register",
     "/church",
-    "/death"
+    "/death",
+    "/me",
+    "/statpanel.html",
   ];
 
   if (allowed.some(path => req.path.startsWith(path))) {
@@ -113,6 +102,29 @@ try {
   next();
 });
 
+app.use(shopRoutes);
+app.use(equipmentRoutes);
+app.use(guildRoutes);
+app.use("/api", authRoutes);
+app.use(playerRoutes);
+app.use("/trainer", trainerRoutes);
+app.use("/church", churchRoutes);
+app.use(worldRoutes);
+app.use(townRoutes);
+app.use(inventoryRoutes);
+app.use(chatRoutes);
+app.use(characterRoutes);
+app.use(combatRoutes);
+app.use(spellRoutes);
+app.use(combatPollRoutes);
+app.use(sellRoutes);
+app.use("/api", questRoutes);
+app.use("/api", tavernRoutes);
+app.use(chestRoutes);
+app.use(adminRoutes);
+app.use(journalRoutes);
+app.use("/api", interactablesRoutes);
+
 // =======================
 // MAIN PAGE
 // =======================
@@ -122,7 +134,6 @@ app.get("/", (req, res) => {
 
   return res.redirect("/town");
 });
-
 
 // =======================
 // INVENTORY
@@ -186,12 +197,6 @@ app.get("/logout", (req, res) => {
     res.redirect("/login.html");
   });
 });
-
-
-
-
-
-
 
 // =======================
 // START

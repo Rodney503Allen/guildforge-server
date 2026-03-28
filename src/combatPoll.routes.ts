@@ -78,9 +78,14 @@ router.get("/combat/poll", async (req, res) => {
       enemyHP,
       enemyMaxHP: enemy.maxhp,
       enemyDead: enemyHP <= 0,
+
       exp: reward?.expGained,
       gold: reward?.goldGained,
       levelUp: reward?.levelUp,
+
+      chest: reward?.chest ?? null,
+      quest: reward?.quest ?? null,
+
       log: combatLog
     });
 
