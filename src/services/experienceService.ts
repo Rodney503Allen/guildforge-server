@@ -106,7 +106,7 @@ async function applyLevelUp(
   levelsGained: number,
   querySource: any
 ) {
-  const hpGainPerLevel = 25;
+  const hpGainPerLevel = 10;
   const spGainPerLevel = 10;
   const statPointsPerLevel = 5;
 
