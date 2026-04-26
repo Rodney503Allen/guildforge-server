@@ -103,9 +103,9 @@ const RARITY_CONFIG: Record<LootRarity, { affixCount: number }> = {
 const TRANSCENDENT_RESONANCE_MULTIPLIER = 1.2;
 
 const DEFAULT_GEAR_DROP_CHANCES = {
-  common: 1.0,
-  uncommon: 0.28,
-  elite: 0.55,
+  common: 0.35,
+  uncommon: 0.55,
+  elite: 0.80,
   boss: 1.0,
 };
 
