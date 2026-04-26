@@ -90,6 +90,28 @@ const [candidates]: any = await db.query(
     [playerId, chosen.id, chosen.maxhp, mapX, mapY]
   );
 
-  return { ...chosen, zoneLevel, zoneMin, zoneMax };
+  return {
+  id: chosen.id,
+  name: chosen.name,
+
+  level: chosen.level,
+  description: chosen.description,
+
+  hp: chosen.maxhp,
+  maxHP: chosen.maxhp,
+  maxhp: chosen.maxhp,
+
+  img: chosen.img || chosen.creatureimage || chosen.image || "images/default_creature.png",
+
+  attack: chosen.attack,
+  defense: chosen.defense,
+  agility: chosen.agility,
+  crit: chosen.crit,
+
+  creatureId: chosen.id,
+  zoneLevel,
+  zoneMin,
+  zoneMax
+};
 }
 

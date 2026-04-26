@@ -12,6 +12,9 @@ export type CombatActor = {
   side: "player" | "enemy";
   name: string;
 
+  level?: number;
+  description?: string;
+
   hp: number;
   maxHp: number;
 
@@ -93,7 +96,9 @@ async function refreshSessionEnemy(session: CombatSession) {
       c.defense,
       c.agility,
       c.crit,
-      c.maxhp
+      c.maxhp,
+      c.level,
+      c.description
     FROM player_creatures pc
     JOIN creatures c ON c.id = pc.creature_id
     WHERE pc.id = ?
@@ -130,6 +135,8 @@ async function refreshSessionEnemy(session: CombatSession) {
   session.enemy.hp = Number(enemyRow.hp ?? 0);
   session.enemy.maxHp = Number(enemyRow.maxhp ?? 1);
   session.enemy.stats = enemyStats;
+  session.enemy.level = Number(enemyRow.level ?? 1);
+  session.enemy.description = String(enemyRow.description ?? "");
 
   return enemyStats;
 }
@@ -290,7 +297,9 @@ const [[enemyRow]]: any = await db.query(
     c.attack,
     c.defense,
     c.agility,
-    c.crit
+    c.crit,
+    c.level,
+    c.description
   FROM player_creatures pc
   JOIN creatures c ON c.id = pc.creature_id
   WHERE pc.player_id = ?
@@ -304,7 +313,7 @@ const [[enemyRow]]: any = await db.query(
   const now = Date.now();
 
 const enemyStats: DerivedStats = {
-  level: 1,
+  level: Number(enemyRow.level ?? 1),
   attack: Number(enemyRow.attack ?? 0),
   defense: Number(enemyRow.defense ?? 0),
   agility: Number(enemyRow.agility ?? 0),
@@ -346,14 +355,16 @@ const enemyStats: DerivedStats = {
     enemy: {
       side: "enemy",
       name: String(enemyRow.name ?? "Enemy"),
-      hp: Number(enemyRow.hp),
-      maxHp: Number(enemyRow.maxhp),
+      level: Number(enemyRow.level ?? 1),
+      description: String(enemyRow.description ?? ""),
+      hp: Number(enemyRow.hp ?? 0),
+      maxHp: Number(enemyRow.maxhp ?? 1),
       sp: 0,
       maxSp: 0,
-      stats: enemyStats,
       gauge: 0,
       ready: false,
-      recoveryUntil: 0,
+      recoveryUntil: Date.now() + Number(enemyRow.attack_speed ?? 1500),
+      stats: enemyStats as any,
       cooldowns: {}
     },
 
@@ -449,6 +460,8 @@ export function buildCombatSnapshot(session: CombatSession) {
     },
     enemy: {
       name: session.enemy.name,
+      level: session.enemy.level,
+      description: session.enemy.description,
       hp: session.enemy.hp,
       maxHp: session.enemy.maxHp,
       gauge: session.enemy.gauge,

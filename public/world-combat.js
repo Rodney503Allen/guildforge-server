@@ -282,6 +282,8 @@ function syncCombatSnapshot(snapshot) {
     }
 
     setText("enemyName", enemy.name);
+    setText("enemyLevel", enemy.level);
+    setText("enemyDescription", enemy.description);
     setText("enemyHP", enemy.hp);
     setText("enemyMaxHP", enemy.maxHp);
     updateBar("enemyHPBar", enemy.hp, enemy.maxHp);
@@ -349,12 +351,16 @@ if (enemyImg) {
   currentEnemy = {
     id: enemy?.id,
     name: enemy?.name ?? "Enemy",
+    level: enemy?.level ?? "",
+    description: enemy?.description ?? "",
     hp: Number.isFinite(hp) ? hp : 0,
     maxHP: Number.isFinite(max) ? max : (Number.isFinite(hp) ? hp : 1)
   };
 
   // ✅ Update ENEMY UI immediately (DO NOT wait on /me)
   setText("enemyName", currentEnemy.name);
+  setText("enemyLevel", currentEnemy.level);
+  setText("enemyDescription", currentEnemy.description);
   setText("enemyHP", currentEnemy.hp);
   setText("enemyMaxHP", currentEnemy.maxHP);
   updateBar("enemyHPBar", currentEnemy.hp, currentEnemy.maxHP);
@@ -560,6 +566,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     openCombatModal({
       id: state.snapshot.enemy.id,
       name: state.snapshot.enemy.name,
+      level: state.snapshot.enemy.level,
+      description: state.snapshot.enemy.description,
       hp: state.snapshot.enemy.hp,
       maxHP: state.snapshot.enemy.maxHp
     });

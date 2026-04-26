@@ -188,6 +188,8 @@ const [[enemyRow]]: any = await db.query(
     pc.id,
     pc.hp,
     c.name,
+    c.level,
+    c.description,
     c.attack,
     c.defense,
     c.agility,
@@ -207,7 +209,7 @@ const [[enemyRow]]: any = await db.query(
   const debuffs = await getCreatureDebuffTotals(enemyRow.id);
 
 const enemyStats = {
-  level: 1,
+  level: Number(enemyRow.level ?? 1),
   attack: Number(enemyRow.attack ?? 0) + Number(debuffs.attack || 0),
   defense: Number(enemyRow.defense ?? 0) + Number(debuffs.defense || 0),
   agility: Number(enemyRow.agility ?? 0) + Number(debuffs.agility || 0),
@@ -228,6 +230,8 @@ const enemyStats = {
 };
 
   session.enemy.name = String(enemyRow.name ?? "Enemy");
+  session.enemy.level = Number(enemyRow.level ?? 1);
+  session.enemy.description = String(enemyRow.description ?? "");
   session.enemy.hp = Number(enemyRow.hp ?? 0);
   session.enemy.maxHp = Number(enemyRow.maxhp ?? 1);
   session.enemy.stats = enemyStats as any;
