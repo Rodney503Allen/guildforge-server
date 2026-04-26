@@ -532,8 +532,43 @@ body{
 
 
 
+/* =======================
+   LevelUp
+======================= */
+.level-up-banner-big {
+  transform: translateX(-50%) scale(1.15);
+  z-index: 99999;
+}
 
+.level-up-banner-big .qcb-inner {
+  min-width: 420px;
+  padding: 22px 30px;
+}
 
+.level-up-banner-big .qcb-badge {
+  font-size: 42px;
+}
+
+.level-up-banner-big .qcb-title {
+  font-size: 22px;
+  letter-spacing: 1px;
+}
+
+.level-up-banner-big .qcb-name {
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.level-up-banner-big .qcb-sub {
+  font-size: 15px;
+}
+.level-up-banner .qcb-badge {
+  font-size: 20px;
+  font-weight: 800;
+  color: gold;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
 /* =======================
    QUEST COMPLETE BANNER (GLOBAL)
 ======================= */

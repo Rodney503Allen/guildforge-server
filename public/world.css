@@ -351,14 +351,14 @@ body::before{
 }
 
 /* Terrain images */
-.plains   { background:url("/images/map_tiles/plains.png") center/cover; }
-.forest   { background:url("/images/map_tiles/forest.png") center/cover; }
-.mountain { background:url("/images/map_tiles/mountain.png") center/cover; }
-.swamp    { background:url("/images/map_tiles/swamp.png") center/cover; }
-.town     { background:url("/images/map_tiles/town.png") center/cover; }
-.castle   { background:url("/images/map_tiles/castle.png") center/cover; }
-.desert   { background:url("/images/map_tiles/desert.png") center/cover; }
-.road     { background:url("/images/map_tiles/road.png") center/cover; }
+.plains   { background:url("/images/map_tiles/plains.webp") center/cover; }
+.forest   { background:url("/images/map_tiles/forest.webp") center/cover; }
+.mountain { background:url("/images/map_tiles/mountain.webp") center/cover; }
+.swamp    { background:url("/images/map_tiles/swamp.webp") center/cover; }
+.town     { background:url("/images/map_tiles/town.webp") center/cover; }
+.castle   { background:url("/images/map_tiles/castle.webp") center/cover; }
+.desert   { background:url("/images/map_tiles/desert.webp") center/cover; }
+.road     { background:url("/images/map_tiles/road.webp") center/cover; }
 
 /* Move buttons */
 .move-btn{

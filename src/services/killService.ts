@@ -1,6 +1,6 @@
-//services/killervice.ts
+//services/killService.ts
 import { db } from "../db";
-import { checkAndApplyLevelUp } from "./experienceService";
+import { grantExperience } from "./experienceService";
 import { rollCreatureLoot } from "./lootService";
 import { createChestFromDrops } from "./chestService";
 import { applyKillProgress } from "./questService";
@@ -68,27 +68,38 @@ export async function handleCreatureKill(
   playerId: number,
   playerCreatureId: number
 ) {
-  // Load creature data BEFORE deletion
-  const [[row]]: any = await db.query(`
-    SELECT
-      pc.creature_id,
-      c.name,
-      c.exper,
-      c.level,
-      c.rarity
-    FROM player_creatures pc
-    JOIN creatures c ON c.id = pc.creature_id
-    WHERE pc.id = ?
-  `, [playerCreatureId]);
+// Load creature data + current mapped region BEFORE deletion
+const [[row]]: any = await db.query(`
+  SELECT
+    pc.creature_id,
+    c.name,
+    c.exper,
+    c.level,
+    c.rarity,
+    COALESCE(wm.region_name, r.name) AS region_name
+  FROM player_creatures pc
+  JOIN creatures c
+    ON c.id = pc.creature_id
+  JOIN players p
+    ON p.id = pc.player_id
+  LEFT JOIN world_map wm
+    ON wm.x = p.map_x
+   AND wm.y = p.map_y
+  LEFT JOIN regions r
+    ON r.id = wm.region_id
+  WHERE pc.id = ?
+    AND pc.player_id = ?
+  LIMIT 1
+`, [playerCreatureId, playerId]);
 
-  if (!row) return null;
+if (!row) return null;
 
-  const creatureId = Number(row.creature_id);
-  const creatureName = String(row.name || "Creature");
-  const creatureLevel = Number(row.level) || 1;
-  const creatureRarity = String(row.rarity || "common");
-  const baseExp = Number(row.exper) || 0;
-
+const creatureId = Number(row.creature_id);
+const creatureName = String(row.name || "Creature");
+const creatureLevel = Number(row.level) || 1;
+const creatureRarity = String(row.rarity || "common");
+const baseExp = Number(row.exper) || 0;
+const regionName = row.region_name ? String(row.region_name).trim() : null;
   // BASE RANGE
   const base = 2 + (creatureLevel * 3);
   const min = Math.floor(base * 0.85);
@@ -114,13 +125,16 @@ export async function handleCreatureKill(
   const expGained = Math.max(0, Math.floor(baseExp * (mults.expMult || 1)));
   const goldGained = Math.max(0, Math.floor(rolledGold * (mults.goldMult || 1)));
 
-  // Add EXP + GOLD
-  await db.query(
-    `UPDATE players
-     SET exper = exper + ?, gold = gold + ?
-     WHERE id = ?`,
-    [expGained, goldGained, playerId]
-  );
+  const { levelUp } = await grantExperience(playerId, expGained);
+
+  if (goldGained > 0) {
+    await db.query(
+      `UPDATE players
+      SET gold = gold + ?
+      WHERE id = ?`,
+      [goldGained, playerId]
+    );
+  }
 
   const drops = await rollCreatureLoot(playerId, creatureId);
 
@@ -136,7 +150,7 @@ export async function handleCreatureKill(
     }
   );
 
-  const killProg = await applyKillProgress(playerId, creatureId);
+  const killProg = await applyKillProgress(playerId, creatureId, regionName);
   const completedQuests = await hydrateCompletedQuests(
     playerId,
     killProg?.completedPlayerQuestIds ?? []
@@ -168,8 +182,6 @@ await db.query(
   `DELETE FROM player_creatures WHERE id = ? AND player_id = ?`,
   [playerCreatureId, playerId]
 );
-
-  const levelUp = await checkAndApplyLevelUp(playerId);
 
   return {
     expGained,

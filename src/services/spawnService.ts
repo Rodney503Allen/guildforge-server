@@ -1,3 +1,5 @@
+//services/spawnService.ts
+
 import { db } from "../db";
 
 function randInt(min: number, max: number) {
@@ -90,3 +92,4 @@ const [candidates]: any = await db.query(
 
   return { ...chosen, zoneLevel, zoneMin, zoneMax };
 }
+

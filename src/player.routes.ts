@@ -2,6 +2,7 @@ import express from "express";
 import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
 import { getActiveBuffs } from "./services/buffService";
+import { getExpForLevel } from "./services/experienceService";
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ res.json({
   archetype: p.archetype,
   level: p.level,
   exper: p.exper,
+  xpNeeded: getExpForLevel(p.level),
   location: p.location,
 
   attack: p.attack,

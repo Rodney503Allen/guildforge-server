@@ -1,5 +1,6 @@
 // services/questService.ts
 import { db } from "../db";
+import { grantExperienceTx } from "./experienceService";
 
 export type QuestLogRow = {
   playerQuestId: number;
@@ -20,8 +21,10 @@ export type QuestLogRow = {
   required_count: number;
   target_item_id: number | null;
   target_item_name: string | null;
+  target_item_icon: string | null;
   target_creature_id: number | null;
   target_creature_name: string | null;
+  target_creature_icon: string | null;
   target_world_object_id: number | null;
   region_name: string | null;
 
@@ -100,8 +103,11 @@ export async function getJournalQuests(pid: number) {
   return { active, completed, claimed, rumors: rumorsWithLock };
 }
 
-
-export async function acceptQuest(pid: number, questId: number, source: "tavern" | "bounty_board" = "tavern") {
+export async function acceptQuest(
+  pid: number,
+  questId: number,
+  source: "tavern" | "bounty_board" = "tavern"
+) {
   const [[q]]: any = await db.query(
     `SELECT id, type, is_active, expires_at FROM quests WHERE id=? AND is_active=1 LIMIT 1`,
     [questId]
@@ -112,7 +118,6 @@ export async function acceptQuest(pid: number, questId: number, source: "tavern"
     throw new Error("BOUNTY_EXPIRED");
   }
 
-  // Create player quest
   const [ins]: any = await db.query(
     `INSERT INTO player_quests (player_id, quest_id, expires_at, source)
      VALUES (?, ?, ?, ?)`,
@@ -121,7 +126,6 @@ export async function acceptQuest(pid: number, questId: number, source: "tavern"
 
   const playerQuestId = Number(ins.insertId);
 
-  // Create objective progress rows
   const [objs]: any = await db.query(
     `SELECT id FROM quest_objectives WHERE quest_id=?`,
     [questId]
@@ -149,71 +153,65 @@ export async function getQuestLog(pid: number) {
     [pid]
   );
 
-const [rows]: any = await db.query(
-  `
-  SELECT
-    pq.id AS playerQuestId,
-    pq.status,
-    pq.accepted_at,
-    pq.completed_at,
-    pq.claimed_at,
+  const [rows]: any = await db.query(
+    `
+    SELECT
+      pq.id AS playerQuestId,
+      pq.status,
+      pq.accepted_at,
+      pq.completed_at,
+      pq.claimed_at,
 
-    q.id AS questId,
-    q.type,
-    q.title,
-    q.description,
-    q.dialog_intro,
-    q.dialog_complete,
-    q.turn_in_location_id,
+      q.id AS questId,
+      q.type,
+      q.title,
+      q.description,
+      q.dialog_intro,
+      q.dialog_complete,
+      q.turn_in_location_id,
 
-    til.name AS turn_in_location_name,
+      til.name AS turn_in_location_name,
 
-    o.id AS objectiveId,
-    o.type AS objectiveType,
-    o.required_count,
-    o.target_item_id,
-    o.target_creature_id,
-    o.region_name,
-    o.target_world_object_id,
+      o.id AS objectiveId,
+      o.type AS objectiveType,
+      o.required_count,
+      o.target_item_id,
+      o.target_creature_id,
+      o.region_name,
+      o.target_world_object_id,
 
-    pqo.progress_count,
-    pqo.is_complete,
+      pqo.progress_count,
+      pqo.is_complete,
 
-    -- ✅ add these:
-    i.name AS item_name,
-    i.icon AS item_icon,
+      i.name AS target_item_name,
+      i.icon AS target_item_icon,
 
-    c.name AS creature_name,
-    c.creatureimage AS creature_icon,
+      c.name AS target_creature_name,
+      c.creatureimage AS target_creature_icon,
 
-    COALESCE(r.gold, 0) AS reward_gold,
-    COALESCE(r.xp, 0) AS reward_xp
+      COALESCE(r.gold, 0) AS reward_gold,
+      COALESCE(r.xp, 0) AS reward_xp
 
-  FROM player_quests pq
-  JOIN quests q ON q.id = pq.quest_id
-  LEFT JOIN locations til ON til.id = q.turn_in_location_id
-  JOIN player_quest_objectives pqo ON pqo.player_quest_id = pq.id
-  JOIN quest_objectives o ON o.id = pqo.objective_id
-
-  -- ✅ add these joins:
-  LEFT JOIN items i ON i.id = o.target_item_id
-  LEFT JOIN creatures c ON c.id = o.target_creature_id
-
-  LEFT JOIN quest_rewards r ON r.quest_id = q.id
-  WHERE pq.player_id=?
-  ORDER BY
-    FIELD(pq.status,'active','completed','claimed','abandoned','expired') ASC,
-    pq.accepted_at DESC,
-    pq.id DESC,
-    o.id ASC
-  `,
-  [pid]
-);
-
+    FROM player_quests pq
+    JOIN quests q ON q.id = pq.quest_id
+    LEFT JOIN locations til ON til.id = q.turn_in_location_id
+    JOIN player_quest_objectives pqo ON pqo.player_quest_id = pq.id
+    JOIN quest_objectives o ON o.id = pqo.objective_id
+    LEFT JOIN items i ON i.id = o.target_item_id
+    LEFT JOIN creatures c ON c.id = o.target_creature_id
+    LEFT JOIN quest_rewards r ON r.quest_id = q.id
+    WHERE pq.player_id=?
+    ORDER BY
+      FIELD(pq.status,'active','completed','claimed','abandoned','expired') ASC,
+      pq.accepted_at DESC,
+      pq.id DESC,
+      o.id ASC
+    `,
+    [pid]
+  );
 
   return (rows || []) as QuestLogRow[];
 }
-
 
 /**
  * TURN_IN all-at-once:
@@ -226,7 +224,6 @@ export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
   try {
     await conn.beginTransaction();
 
-    // lock quest instance
     const [[pq]]: any = await conn.query(
       `SELECT id, status, quest_id, expires_at
        FROM player_quests
@@ -237,9 +234,10 @@ export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
     );
     if (!pq) throw new Error("PLAYER_QUEST_NOT_FOUND");
     if (pq.status !== "active") throw new Error("QUEST_NOT_ACTIVE");
-    if (pq.expires_at && new Date(pq.expires_at).getTime() <= Date.now()) throw new Error("QUEST_EXPIRED");
+    if (pq.expires_at && new Date(pq.expires_at).getTime() <= Date.now()) {
+      throw new Error("QUEST_EXPIRED");
+    }
 
-    // get the TURN_IN objective row + target item + required
     const [[obj]]: any = await conn.query(
       `
       SELECT
@@ -263,7 +261,6 @@ export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
     const itemId = Number(obj.target_item_id);
     const required = Math.max(1, Number(obj.required_count) || 1);
 
-    // lock inventory rows for that item (unequipped)
     const [invRows]: any = await conn.query(
       `
       SELECT inventory_id, quantity
@@ -278,11 +275,12 @@ export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
     );
 
     let available = 0;
-    for (const r of invRows || []) available += Math.max(0, Number(r.quantity) || 0);
+    for (const r of invRows || []) {
+      available += Math.max(0, Number(r.quantity) || 0);
+    }
 
     if (available < required) throw new Error("NOT_ENOUGH_ITEMS");
 
-    // remove exactly required across stacks
     let remaining = required;
     for (const r of invRows || []) {
       if (remaining <= 0) break;
@@ -308,7 +306,6 @@ export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
       remaining -= take;
     }
 
-    // mark objective complete
     await conn.query(
       `
       UPDATE player_quest_objectives
@@ -318,52 +315,58 @@ export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
       [required, obj.pqoId]
     );
 
-    // mark quest complete (since Phase 1 is single-objective)
-const completedNow = await finalizeQuestIfAllObjectivesComplete(conn, pid, playerQuestId);
+    const completedNow = await finalizeQuestIfAllObjectivesComplete(conn, pid, playerQuestId);
 
-let gold = 0;
-let xp = 0;
-let claimed = false;
+    let gold = 0;
+    let xp = 0;
+    let claimed = false;
+    let levelUp = null;
 
-if (completedNow) {
-  const [[rew]]: any = await conn.query(
-    `SELECT COALESCE(gold,0) AS gold, COALESCE(xp,0) AS xp
-     FROM quest_rewards
-     WHERE quest_id=? LIMIT 1`,
-    [pq.quest_id]
-  );
+    if (completedNow) {
+      const [[rew]]: any = await conn.query(
+        `SELECT COALESCE(gold,0) AS gold, COALESCE(xp,0) AS xp
+         FROM quest_rewards
+         WHERE quest_id=? LIMIT 1`,
+        [pq.quest_id]
+      );
 
-  gold = Math.max(0, Number(rew?.gold) || 0);
-  xp = Math.max(0, Number(rew?.xp) || 0);
+      gold = Math.max(0, Number(rew?.gold) || 0);
+      xp = Math.max(0, Number(rew?.xp) || 0);
 
-  if (gold > 0 || xp > 0) {
-    await conn.query(
-      `UPDATE players
-       SET gold = gold + ?, exper = exper + ?
-       WHERE id = ?`,
-      [gold, xp, pid]
-    );
-  }
+      if (gold > 0) {
+        await conn.query(
+          `UPDATE players
+           SET gold = gold + ?
+           WHERE id = ?`,
+          [gold, pid]
+        );
+      }
 
-  await conn.query(
-    `UPDATE player_quests
-     SET status='claimed', claimed_at=NOW()
-     WHERE id=? AND player_id=? AND status='completed'`,
-    [playerQuestId, pid]
-  );
+      if (xp > 0) {
+        const xpResult = await grantExperienceTx(conn, pid, xp);
+        levelUp = xpResult.levelUp;
+      }
 
-  claimed = true;
-}
+      await conn.query(
+        `UPDATE player_quests
+         SET status='claimed', claimed_at=NOW()
+         WHERE id=? AND player_id=? AND status='completed'`,
+        [playerQuestId, pid]
+      );
 
-await conn.commit();
+      claimed = true;
+    }
 
-return {
-  success: true,
-  removed: required,
-  goldGained: gold,
-  expGained: xp,
-  claimed
-};
+    await conn.commit();
+
+    return {
+      success: true,
+      removed: required,
+      goldGained: gold,
+      expGained: xp,
+      claimed,
+      levelUp
+    };
   } catch (e) {
     try { await conn.rollback(); } catch {}
     throw e;
@@ -377,7 +380,6 @@ export async function claimQuestRewards(pid: number, playerQuestId: number) {
   try {
     await conn.beginTransaction();
 
-    // lock quest instance
     const [[pq]]: any = await conn.query(
       `SELECT id, status, quest_id
        FROM player_quests
@@ -393,7 +395,6 @@ export async function claimQuestRewards(pid: number, playerQuestId: number) {
     if (status === "claimed") throw new Error("ALREADY_CLAIMED");
     if (status !== "completed") throw new Error("QUEST_NOT_COMPLETED");
 
-    // rewards
     const [[rew]]: any = await conn.query(
       `SELECT COALESCE(gold,0) AS gold, COALESCE(xp,0) AS xp
        FROM quest_rewards
@@ -404,16 +405,22 @@ export async function claimQuestRewards(pid: number, playerQuestId: number) {
     const gold = Math.max(0, Number(rew?.gold) || 0);
     const xp = Math.max(0, Number(rew?.xp) || 0);
 
-    if (gold > 0 || xp > 0) {
+    let levelUp = null;
+
+    if (gold > 0) {
       await conn.query(
         `UPDATE players
-         SET gold = gold + ?, exper = exper + ?
+         SET gold = gold + ?
          WHERE id = ?`,
-        [gold, xp, pid]
+        [gold, pid]
       );
     }
 
-    // mark claimed
+    if (xp > 0) {
+      const xpResult = await grantExperienceTx(conn, pid, xp);
+      levelUp = xpResult.levelUp;
+    }
+
     await conn.query(
       `UPDATE player_quests
        SET status='claimed', claimed_at=NOW()
@@ -422,7 +429,12 @@ export async function claimQuestRewards(pid: number, playerQuestId: number) {
     );
 
     await conn.commit();
-    return { success: true, goldGained: gold, expGained: xp };
+    return {
+      success: true,
+      goldGained: gold,
+      expGained: xp,
+      levelUp
+    };
   } catch (e) {
     try { await conn.rollback(); } catch {}
     throw e;
@@ -431,13 +443,11 @@ export async function claimQuestRewards(pid: number, playerQuestId: number) {
   }
 }
 
-
 export async function syncTurnInObjectivesFromInventory(pid: number) {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
 
-    // 1) Find all active TURN_IN objectives for this player + compute have_qty
     const [rows]: any = await conn.query(
       `
       SELECT
@@ -464,30 +474,24 @@ export async function syncTurnInObjectivesFromInventory(pid: number) {
       [pid]
     );
 
-    const touchedQuestIds = new Set<number>();
-
-    // 2) Update objective progress/is_complete based on inventory truth
     for (const r of rows || []) {
-const required = Math.max(1, Number(r.required_count) || 1);
-const have = Math.max(0, Number(r.have_qty) || 0);
-const next = Math.min(required, have);
+      const required = Math.max(1, Number(r.required_count) || 1);
+      const have = Math.max(0, Number(r.have_qty) || 0);
+      const next = Math.min(required, have);
 
-// IMPORTANT:
-// For TURN_IN objectives, inventory sync should reflect progress,
-// but should NOT mark the objective complete.
-// Completion only happens when the items are actually removed.
-
-await conn.query(
-  `
-  UPDATE player_quest_objectives
-  SET progress_count = ?
-  WHERE id = ?
-  `,
-  [next, Number(r.pqoId)]
-);
+      // IMPORTANT:
+      // For TURN_IN objectives, inventory sync should reflect progress,
+      // but should NOT mark the objective complete.
+      // Completion only happens when the items are actually removed.
+      await conn.query(
+        `
+        UPDATE player_quest_objectives
+        SET progress_count = ?
+        WHERE id = ?
+        `,
+        [next, Number(r.pqoId)]
+      );
     }
-
-    // 3) Any quests where ALL objectives are complete -> mark quest completed
 
     await conn.commit();
     return { success: true, updated: (rows || []).length };
@@ -498,7 +502,6 @@ await conn.query(
     try { conn.release(); } catch {}
   }
 }
-
 
 async function finalizeQuestIfAllObjectivesComplete(
   conn: any,
@@ -533,7 +536,6 @@ async function finalizeQuestIfAllObjectivesComplete(
   return false;
 }
 
-
 export async function applyInteractProgress(
   pid: number,
   worldObjectId: number
@@ -556,7 +558,6 @@ export async function applyInteractProgress(
   try {
     await conn.beginTransaction();
 
-    // lock player position
     const [[player]]: any = await conn.query(
       `
       SELECT id, map_x, map_y
@@ -569,7 +570,6 @@ export async function applyInteractProgress(
     );
     if (!player) throw new Error("PLAYER_NOT_FOUND");
 
-    // lock world object
     const [[obj]]: any = await conn.query(
       `
       SELECT
@@ -606,7 +606,6 @@ export async function applyInteractProgress(
       throw new Error("TOO_FAR_AWAY");
     }
 
-    // find active INTERACT objectives matching this object
     const [rows]: any = await conn.query(
       `
       SELECT
@@ -660,7 +659,6 @@ export async function applyInteractProgress(
       const next = Math.min(required, Number(r.progress_count || 0) + 1);
       const nowComplete = next >= required ? 1 : 0;
 
-      // Grant quest item if configured on this INTERACT objective
       const targetItemId = Number(r.target_item_id || 0);
       if (targetItemId > 0) {
         const [[existingStack]]: any = await conn.query(
@@ -682,7 +680,7 @@ export async function applyInteractProgress(
             UPDATE inventory
             SET quantity = quantity + 1
             WHERE inventory_id = ?
-          `,
+            `,
             [existingStack.inventory_id]
           );
         } else {
@@ -690,7 +688,7 @@ export async function applyInteractProgress(
             `
             INSERT INTO inventory (player_id, item_id, quantity, equipped)
             VALUES (?, ?, 1, 0)
-          `,
+            `,
             [pid, targetItemId]
           );
         }
@@ -870,6 +868,7 @@ export async function applyEnterAreaProgress(
 export async function applyKillProgress(
   pid: number,
   creatureId: number,
+  regionName: string | null,
   amount = 1
 ): Promise<{
   updatedObjectives: Array<{
@@ -883,12 +882,12 @@ export async function applyKillProgress(
 }> {
   amount = Math.max(1, Math.floor(amount));
   creatureId = Number(creatureId);
+  regionName = regionName ? String(regionName).trim() : null;
 
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
 
-    // Lock matching active KILL objectives for this creature + pull quest title for UI
     const [rows]: any = await conn.query(
       `
       SELECT
@@ -898,6 +897,8 @@ export async function applyKillProgress(
         pqo.is_complete,
         o.id AS objectiveId,
         o.required_count,
+        o.target_creature_id,
+        o.region_name,
         q.title AS questTitle
       FROM player_quest_objectives pqo
       JOIN quest_objectives o ON o.id = pqo.objective_id
@@ -906,10 +907,16 @@ export async function applyKillProgress(
       WHERE pq.player_id = ?
         AND pq.status = 'active'
         AND o.type = 'KILL'
-        AND o.target_creature_id = ?
+        AND (
+          (o.target_creature_id IS NOT NULL AND o.region_name IS NULL AND o.target_creature_id = ?)
+          OR
+          (o.target_creature_id IS NULL AND o.region_name IS NOT NULL AND TRIM(o.region_name) = TRIM(?))
+          OR
+          (o.target_creature_id = ? AND o.region_name IS NOT NULL AND TRIM(o.region_name) = TRIM(?))
+        )
       FOR UPDATE
       `,
-      [pid, creatureId]
+      [pid, creatureId, regionName, creatureId, regionName]
     );
 
     if (!rows || rows.length === 0) {
@@ -959,13 +966,12 @@ export async function applyKillProgress(
       touchedQuestIds.add(playerQuestId);
     }
 
-    // If any objectives updated, check if those quests are now fully complete
     const completedPlayerQuestIds: number[] = [];
 
-for (const pqId of touchedQuestIds) {
-  const completedNow = await finalizeQuestIfAllObjectivesComplete(conn, pid, pqId);
-  if (completedNow) completedPlayerQuestIds.push(Number(pqId));
-}
+    for (const pqId of touchedQuestIds) {
+      const completedNow = await finalizeQuestIfAllObjectivesComplete(conn, pid, pqId);
+      if (completedNow) completedPlayerQuestIds.push(Number(pqId));
+    }
 
     await conn.commit();
     return { updatedObjectives, completedPlayerQuestIds };

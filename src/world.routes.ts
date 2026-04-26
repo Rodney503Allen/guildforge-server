@@ -430,7 +430,7 @@ res.send(`
     </div>
   </div>
 </div>
-  <script src="world-quests.js"></script>
+  <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>
 </body>

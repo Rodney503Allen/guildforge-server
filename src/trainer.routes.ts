@@ -277,22 +277,21 @@ res.send(`
       <aside class="card">
         <div class="cardHeader">
           <div class="cardTitle">
-            <h2>Trainer’s Notes</h2>
-            <p>Reminders before you spend coin.</p>
+            <h2>Talent Tree</h2>
+            <p>Character progression through passive abilities.</p>
           </div>
-          <span class="badge">Info</span>
+          <span class="badge warn">Coming Soon</span>
         </div>
 
         <div class="cardBody">
           <div class="infoBox">
             <div class="infoTitle">
-              <strong>How to learn</strong>
-              <span class="badge good">Simple</span>
+              <strong>Passive Skill Tree</strong>
+              <span class="badge good">Planned</span>
             </div>
             <p class="infoText">
-• Meet the required level
-• Pay the gold cost
-• Spell becomes available in combat
+      Unlock powerful passive bonuses by investing Talent Points into your class tree.
+      Each class will have its own unique paths and playstyles.
             </p>
           </div>
 
@@ -300,18 +299,42 @@ res.send(`
 
           <div class="infoBox">
             <div class="infoTitle">
-              <strong>Tip</strong>
-              <span class="badge warn">Smart Spend</span>
+              <strong>How it Works</strong>
+              <span class="badge">Progression</span>
             </div>
             <p class="infoText">
-Learn 1–2 core spells first, then branch into utility.
+      • You will earn <strong>1 Talent Point every 2 levels</strong><br>
+      • Points can be spent on passive bonuses<br>
+      • Paths will branch into different playstyles<br>
+      • Choices will matter — no full respec (planned)
             </p>
           </div>
 
           <div class="divider"></div>
 
-          <a class="btn primary" href="/shop">🛒 Market</a>
-          <a class="btn" href="/tavern">🍺 Tavern</a>
+          <div class="infoBox">
+            <div class="infoTitle">
+              <strong>Examples</strong>
+              <span class="badge warn">Preview</span>
+            </div>
+            <p class="infoText">
+      • +5% Damage<br>
+      • +10% Critical Chance<br>
+      • +15% Healing Power<br>
+      • Reduced Cooldowns<br>
+      • Class-specific bonuses
+            </p>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="noteBox">
+            Talent Trees are currently in development and will be added in a future update.
+          </div>
+
+          <div class="divider"></div>
+
+          <a class="btn primary disabled" href="#">🌳 Talent Tree (Locked)</a>
         </div>
       </aside>
     </div>
