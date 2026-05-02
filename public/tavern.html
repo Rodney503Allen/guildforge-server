@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&display=swap" rel="stylesheet">
   <title>Guildforge | Tavern</title>
 
   <link rel="stylesheet" href="/statpanel.css">
@@ -17,52 +17,51 @@
 <body>
   <div id="statpanel-root"></div>
 
-  <div class="wrap">
-    <div class="topbar">
-      <div class="brand">
-        <div class="title"><span class="sigil"></span> The Tavern</div>
-        <div class="sub">A warm den of rumors, recruits, and questionable deals.</div>
-      </div>
-
-      <div class="nav">
-        <span class="pill">Haven: <strong id="townName">—</strong></span>
-        <span class="pill">Online: <strong id="onlineCount">—</strong></span>
-
-        <button class="btn danger" type="button" id="btnReturnTown">
-          Return to Town
-        </button>
-      </div>
-    </div>
-
-    <div class="grid">
-      <!-- LEFT: WORLD CHAT -->
-      <section class="card">
-        <div class="cardHeader">
-          <div class="cardTitle">
-            <h2>World Chat</h2>
-            <p>All voices pass through the tavern first.</p>
+  <main class="tavern-page">
+    <section class="tavern-shell">
+      <div class="tavern-main">
+        <header class="tavern-hero card-frame">
+          <div class="hero-copy">
+            <div class="eyebrow"><span class="mug">🍺</span> The Tavern</div>
+            <h1 id="tavernTitle">Port Haven Tavern</h1>
+            <p>
+              A warm den of rumors, recruits, and questionable deals.
+              All voices pass through the smoke before the wilds claim them again.
+            </p>
           </div>
-          <span class="badge good">Live Hub</span>
-        </div>
 
-        <div class="cardBody">
+          <div class="hero-meta">
+            <span class="pill">Haven: <strong id="townName">—</strong></span>
+            <span class="pill">Online: <strong id="onlineCount">—</strong></span>
+            <button class="btn danger" type="button" id="btnReturnTown">Return to Town</button>
+          </div>
+        </header>
+
+        <section class="chat-card card-frame">
+          <div class="section-head">
+            <div>
+              <h2>World Chat</h2>
+              <p>All voices pass through the tavern first.</p>
+            </div>
+            <span class="badge good">Live Hub</span>
+          </div>
+
           <div class="chatShell">
             <div class="chatLog" id="chatLog" aria-label="Chat log">
-              <!-- Placeholder messages -->
-              <div class="chatLine">
-                <div class="chatName">Barkeep</div>
+              <div class="chatLine placeholder-line">
+                <div class="chatTime">now</div>
+                <div class="chatName barkeep">Barkeep</div>
                 <div class="chatMsg">Keep it civil. The floorboards have ears.</div>
-                <div class="chatMeta">now</div>
               </div>
-              <div class="chatLine">
-                <div class="chatName">Traveler</div>
+              <div class="chatLine placeholder-line">
+                <div class="chatTime">now</div>
+                <div class="chatName traveler">Traveler</div>
                 <div class="chatMsg">Heard the Viridian Wilds are crawling again…</div>
-                <div class="chatMeta">now</div>
               </div>
-              <div class="chatLine">
-                <div class="chatName">The Archivist</div>
+              <div class="chatLine placeholder-line">
+                <div class="chatTime">now</div>
+                <div class="chatName archivist">The Archivist</div>
                 <div class="chatMsg">Chat with others here. Soon.</div>
-                <div class="chatMeta">now</div>
               </div>
             </div>
 
@@ -71,24 +70,26 @@
               <button class="btn" id="chatSend" type="button">Send</button>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- RIGHT: RUMORS + SOCIAL -->
-      <aside class="card">
-        <div class="cardHeader">
-          <div class="cardTitle">
-            <h2>Rumors & Company</h2>
-            <p>Quests, parties, and the tavern’s social systems.</p>
+        <section class="tavern-art card-frame" aria-label="Tavern atmosphere">
+          <div class="tavern-art-copy">
+            <h3>Tavern Tip</h3>
+            <p>Not all heroes seek glory. Some just want a warm meal and a listening ear.</p>
           </div>
-          <div class="btnRow">
-            <button class="btn primary" id="btnRumor" type="button">
-              Listen for Rumors
-            </button>
-          </div>
-        </div>
+        </section>
+      </div>
 
-        <div class="cardBody">
+      <aside class="tavern-side">
+        <section class="side-card card-frame rumor-card">
+          <div class="side-head">
+            <div>
+              <h2>Rumors & Company</h2>
+              <p>Quests, parties, and the tavern’s social systems.</p>
+            </div>
+            <button class="btn primary" id="btnRumor" type="button">Listen for Rumors</button>
+          </div>
+
           <div class="rumorBox" id="rumorBox">
             <div class="rumorTitle">
               <strong>Rumor</strong>
@@ -99,43 +100,31 @@
               The tavern is loud tonight. Somewhere in the noise, opportunity waits.
             </p>
 
-            <div class="divider"></div>
-
             <div class="actionBtns">
-              <button class="btn" id="btnAcceptRumor" disabled title="Accept is enabled once a rumor is found." type="button">
-                Accept Quest
-              </button>
-              <button class="btn disabled" disabled title="Coming soon" type="button">
-                Decline <span class="badge soon">Soon</span>
-              </button>
+              <button class="btn" id="btnAcceptRumor" disabled title="Accept is enabled once a rumor is found." type="button">Accept Quest</button>
+              <button class="btn disabled" disabled title="Coming soon" type="button">Decline <span class="badge soon">Soon</span></button>
             </div>
           </div>
+        </section>
 
-          <div class="divider"></div>
-
-          <div class="rumorBox" id="turninBox">
-            <div class="rumorTitle">
-              <strong>Turn In Quests</strong>
-              <span class="hint">Claim rewards from completed work.</span>
-            </div>
-            <div id="turninList"></div>
+        <section class="side-card card-frame" id="turninBox">
+          <div class="compact-head">
+            <h2>Turn In Quests</h2>
+            <span>Claim rewards from completed work.</span>
           </div>
+          <div id="turninList"></div>
+        </section>
 
-          <div class="divider"></div>
-
+        <section class="side-card card-frame social-card">
           <div class="actionGrid">
             <div class="actionItem">
               <div>
                 <h3>Form Party</h3>
                 <p>Invite allies, share progress, and coordinate hunts.</p>
               </div>
-              <div class="actionBtns">
-                <button class="btn disabled" disabled type="button">
-                  Create Party <span class="badge soon">Soon</span>
-                </button>
-                <button class="btn disabled" disabled type="button">
-                  Browse Parties <span class="badge soon">Soon</span>
-                </button>
+              <div class="actionBtns stacked">
+                <button class="btn disabled" disabled type="button">Create Party <span class="badge soon">Soon</span></button>
+                <button class="btn disabled" disabled type="button">Browse Parties <span class="badge soon">Soon</span></button>
               </div>
             </div>
 
@@ -144,13 +133,9 @@
                 <h3>Guild Corner</h3>
                 <p>Recruitment posts, guild announcements, and quick actions.</p>
               </div>
-              <div class="actionBtns">
-                <button class="btn disabled" disabled type="button">
-                  Post Recruitment <span class="badge soon">Soon</span>
-                </button>
-                <button class="btn disabled" disabled type="button">
-                  View Guilds <span class="badge soon">Soon</span>
-                </button>
+              <div class="actionBtns stacked">
+                <button class="btn disabled" disabled type="button">Post Recruitment <span class="badge soon">Soon</span></button>
+                <button class="btn disabled" disabled type="button">View Guilds <span class="badge soon">Soon</span></button>
               </div>
             </div>
 
@@ -159,13 +144,9 @@
                 <h3>Trade Table</h3>
                 <p>Player-to-player offers and crafting material requests.</p>
               </div>
-              <div class="actionBtns">
-                <button class="btn disabled" disabled type="button">
-                  Create Offer <span class="badge soon">Soon</span>
-                </button>
-                <button class="btn disabled" disabled type="button">
-                  Browse Offers <span class="badge soon">Soon</span>
-                </button>
+              <div class="actionBtns stacked">
+                <button class="btn disabled" disabled type="button">Create Offer <span class="badge soon">Soon</span></button>
+                <button class="btn disabled" disabled type="button">Browse Offers <span class="badge soon">Soon</span></button>
               </div>
             </div>
 
@@ -174,23 +155,19 @@
                 <h3>Dice & Deeds</h3>
                 <p>Light tavern mini-games and social interactions.</p>
               </div>
-              <div class="actionBtns">
-                <button class="btn disabled" disabled type="button">
-                  Roll Dice <span class="badge soon">Soon</span>
-                </button>
-                <button class="btn disabled" disabled type="button">
-                  Arm Wrestle <span class="badge soon">Soon</span>
-                </button>
+              <div class="actionBtns stacked">
+                <button class="btn disabled" disabled type="button">Roll Dice <span class="badge soon">Soon</span></button>
+                <button class="btn disabled" disabled type="button">Arm Wrestle <span class="badge soon">Soon</span></button>
               </div>
             </div>
           </div>
+        </section>
 
-          <div class="note">
-            Buttons marked <span class="badge soon">Soon</span> are intentionally disabled until we wire the systems.
-          </div>
+        <div class="note card-frame">
+          Buttons marked <span class="badge soon">Soon</span> are intentionally disabled until we wire the systems.
         </div>
       </aside>
-    </div>
-  </div>
+    </section>
+  </main>
 </body>
 </html>

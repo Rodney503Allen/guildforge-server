@@ -1874,3 +1874,318 @@ body::before{
             drop-shadow(0 0 24px rgba(255,184,74,.24));
   }
 }
+
+/* ==========================================================
+   RESPONSIVE WORLD MAP REDESIGN
+   Layout goal:
+   - Map stays on the left/center.
+   - Travel log, nearby, haven, and dungeon stay visible on the right.
+   - On narrow screens, panels stack cleanly.
+   ========================================================== */
+
+.world-frame{
+  width: min(1260px, 94vw);
+  margin: clamp(58px, 7vh, 82px) auto 0;
+}
+
+.world-head{
+  padding: 14px 18px 10px;
+}
+
+.world-head-inner{
+  gap: 6px;
+}
+
+.world-title{
+  font-size: clamp(18px, 1.45vw, 22px);
+}
+
+.world-layout{
+  display: grid;
+  grid-template-columns: minmax(560px, 1fr) minmax(300px, 360px);
+  gap: 16px;
+  padding: 16px;
+  align-items: stretch;
+}
+
+.world-map-panel{
+  min-width: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(43,52,64,.58);
+  background:
+    radial-gradient(760px 260px at 18% 0%, rgba(182,75,46,.08), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.18)),
+    rgba(0,0,0,.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.035),
+    0 14px 36px rgba(0,0,0,.22);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.world-map-panel .map-stage{
+  min-height: 100%;
+  padding: 4px;
+}
+
+.world-map-panel .map-wrapper{
+  padding: clamp(44px, 5.4vw, 66px);
+}
+
+/* Sidebar overrides the old bottom HUD layout */
+.world-sidebar.nav-hud,
+.world-sidebar{
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  max-height: min(660px, calc(100vh - 190px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(182,75,46,.45) rgba(0,0,0,.18);
+}
+
+.world-sidebar::-webkit-scrollbar{
+  width: 8px;
+}
+
+.world-sidebar::-webkit-scrollbar-thumb{
+  background: rgba(182,75,46,.45);
+  border-radius: 999px;
+}
+
+.world-sidebar::-webkit-scrollbar-track{
+  background: rgba(0,0,0,.18);
+  border-radius: 999px;
+}
+
+.world-sidebar-card{
+  flex-shrink: 0;
+}
+
+.world-sidebar-card-grow{
+  min-height: 172px;
+}
+
+.world-sidebar-two{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+/* Compact the existing cards for side panel use */
+.world-sidebar .flavor-card,
+.world-sidebar .nav-card{
+  min-height: unset;
+  padding: 12px;
+}
+
+.world-sidebar .travel-log-card{
+  min-height: 88px;
+}
+
+.world-sidebar .nearby-card{
+  max-height: 260px;
+  overflow: hidden;
+}
+
+.world-sidebar .world-interact__list{
+  overflow-y: auto;
+  padding-right: 2px;
+  max-height: 190px;
+}
+
+.world-sidebar .world-interact__row{
+  padding: 9px 10px;
+}
+
+.world-sidebar .world-interact__actions{
+  gap: 6px;
+}
+
+.world-sidebar .world-interact__status{
+  font-size: 10px;
+  padding: 5px 7px;
+}
+
+.world-sidebar .world-interact__btn{
+  padding: 7px 9px;
+}
+
+.world-sidebar .nav-name{
+  white-space: normal;
+  line-height: 1.25;
+}
+
+/* Slightly better map sizing on common laptop heights */
+@media (max-height: 820px) and (min-width: 981px){
+  :root{
+    --tile: 58px;
+    --gap: 5px;
+  }
+
+  .world-frame{
+    margin-top: 58px;
+  }
+
+  .world-layout{
+    padding: 14px;
+  }
+
+  .world-map-panel .map-wrapper{
+    padding: 46px;
+  }
+
+  .world-sidebar{
+    max-height: calc(100vh - 168px);
+  }
+
+  .world-sidebar .nearby-card{
+    max-height: 220px;
+  }
+
+  .world-sidebar .world-interact__list{
+    max-height: 150px;
+  }
+}
+
+@media (max-height: 700px) and (min-width: 981px){
+  :root{
+    --tile: 52px;
+    --gap: 4px;
+  }
+
+  .world-head{
+    padding: 10px 14px 8px;
+  }
+
+  .world-action-btn{
+    padding: 8px 10px;
+  }
+
+  .world-layout{
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .world-map-panel .map-wrapper{
+    padding: 42px;
+  }
+
+  .move-btn.up,
+  .move-btn.down{
+    height: 36px;
+  }
+
+  .move-btn.left,
+  .move-btn.right{
+    width: 36px;
+  }
+}
+
+/* Medium screens: stack sidebar below map, but use two columns so it is still readable */
+@media (max-width: 980px){
+  .world-frame{
+    width: min(860px, 94vw);
+  }
+
+  .world-layout{
+    grid-template-columns: 1fr;
+  }
+
+  .world-sidebar{
+    max-height: none;
+    overflow: visible;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .world-sidebar-two{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    grid-column: 1 / -1;
+  }
+
+  .world-sidebar .nearby-card{
+    max-height: none;
+  }
+
+  .world-sidebar .world-interact__list{
+    max-height: none;
+  }
+}
+
+/* Small screens: everything becomes a clean single-column feed */
+@media (max-width: 680px){
+  :root{
+    --tile: 46px;
+    --gap: 4px;
+  }
+
+  .world-frame{
+    width: 96vw;
+    margin-top: 56px;
+  }
+
+  .world-layout{
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .world-map-panel .map-wrapper{
+    padding: 52px 44px;
+  }
+
+  .world-sidebar{
+    grid-template-columns: 1fr;
+  }
+
+  .world-sidebar-two{
+    grid-template-columns: 1fr;
+  }
+
+  .move-btn.up,
+  .move-btn.down{
+    width: 78px;
+    height: 38px;
+  }
+
+  .move-btn.left,
+  .move-btn.right{
+    width: 38px;
+    height: 78px;
+  }
+
+  .move-btn.up{ top: 8px; }
+  .move-btn.down{ bottom: 8px; }
+  .move-btn.left{ left: 6px; }
+  .move-btn.right{ right: 6px; }
+}
+
+@media (max-width: 430px){
+  :root{
+    --tile: 40px;
+    --gap: 3px;
+  }
+
+  .grid{
+    padding: 10px;
+  }
+
+  .world-map-panel .map-wrapper{
+    padding: 48px 36px;
+  }
+
+  .owner{
+    font-size: 8px;
+    height: 18px;
+  }
+}

@@ -157,30 +157,36 @@ async function loadRegionName() {
       credentials: "include"
     });
     const data = await res.json();
-
-    const title = document.getElementById("world-title");
-    if (!title) return;
-
-    const min = Number(data.level_min ?? 1);
-    const max = Number(data.level_max ?? min);
-    const band = (min === max) ? `Lv ${min}` : `Lv ${min}–${max}`;
-
-    title.textContent = `${data.region_name} (${band})`;
-
-    title.classList.remove("zone-easy", "zone-even", "zone-hard");
-    const diff = String(data.difficulty || "even").toLowerCase();
-    title.classList.add(
-      diff === "easy" ? "zone-easy"
-      : diff === "hard" ? "zone-hard"
-      : "zone-even"
-    );
+    renderRegionHeader(data);
   } catch (err) {
     console.error("Failed to load region name", err);
   }
 }
 
+// Accepts either a /world/current-region response or a regionData block from /world/move
+function renderRegionHeader(data) {
+  const title = document.getElementById("world-title");
+  if (!title || !data) return;
 
+  const min = Number(data.level_min ?? 1);
+  const max = Number(data.level_max ?? min);
+  const band = (min === max) ? `Lv ${min}` : `Lv ${min}–${max}`;
+  const name = data.region_name ?? "Unknown Region";
 
+  title.textContent = `${name} (${band})`;
+
+  title.classList.remove("zone-easy", "zone-even", "zone-hard");
+  const diff = String(data.difficulty || "even").toLowerCase();
+  title.classList.add(
+    diff === "easy" ? "zone-easy"
+    : diff === "hard" ? "zone-hard"
+    : "zone-even"
+  );
+}
+
+// =======================
+// SPRITE / OBJECT HELPERS
+// =======================
 function normalizeSpritePath(src) {
   if (!src) return null;
   return src.startsWith("/") ? src : `/${src}`;
@@ -224,17 +230,13 @@ function getTileVisualData(x, y, objectMap) {
 
   return { replaceSprite, overlays };
 }
+
 // =======================
 // WORLD RENDER
 // =======================
-async function refreshWorld() {
-  const res = await fetch("/world/partial", {
-    credentials: "include"
-  });
 
-  const data = await res.json();
-  const { player, tiles, guildMap, worldObjects } = data;
-
+// Shared render logic — used by both refreshWorld() and moveWorld()
+function renderWorldFromData({ player, tiles, guildMap, worldObjects }) {
   const tileMap = {};
   for (const t of tiles || []) {
     tileMap[`${t.x},${t.y}`] = t;
@@ -273,12 +275,12 @@ async function refreshWorld() {
         ? ` style="background-image: url('${escapeHtml(replaceSprite)}');"`
         : "";
 
-        grid.innerHTML += `
-          <div
-            class="tile ${terrainClass} ${isPlayer ? "player" : ""} ${isPlayer && lastMoveDir ? `moving-${lastMoveDir}` : ""}"
-            data-x="${x}"
-            data-y="${y}"${baseStyle}
-          >
+      grid.innerHTML += `
+        <div
+          class="tile ${terrainClass} ${isPlayer ? "player" : ""} ${isPlayer && lastMoveDir ? `moving-${lastMoveDir}` : ""}"
+          data-x="${x}"
+          data-y="${y}"${baseStyle}
+        >
           ${overlays.map(src => `
             <img class="tile-overlay" src="${escapeHtml(src)}" alt="">
           `).join("")}
@@ -298,7 +300,16 @@ async function refreshWorld() {
   if (coords) {
     coords.textContent = `Position: (${player.map_x}, ${player.map_y})`;
   }
+}
 
+// Initial page load — still fetches /world/partial directly
+async function refreshWorld() {
+  const res = await fetch("/world/partial", {
+    credentials: "include"
+  });
+
+  const data = await res.json();
+  renderWorldFromData(data);
   updateNavHUD(data);
 }
 
@@ -350,6 +361,10 @@ async function moveWorld(dir) {
   moveLock = true;
   lastMoveAt = now;
 
+  // ⚡ Animate immediately — don't wait for the server response
+  lastMoveDir = normalizeMoveDir(dir);
+  animateStep(dir);
+
   try {
     const res = await fetch(`/world/move/${dir}`, {
       credentials: "include"
@@ -358,12 +373,10 @@ async function moveWorld(dir) {
 
     if (!data?.success) return;
 
-    lastMoveDir = normalizeMoveDir(dir);
-    animateStep(dir);
-
-    await refreshWorld();
-    await loadNearbyObjects();
-    await loadRegionName();
+    // Use bundled data from the single move response — no extra fetches
+    if (data.world) renderWorldFromData(data.world);
+    if (data.nearbyObjects) renderNearbyObjects(data.nearbyObjects);
+    if (data.regionData) renderRegionHeader(data.regionData);
 
     updateNavHUD(data);
 
@@ -383,6 +396,8 @@ async function moveWorld(dir) {
 // =======================
 // NEARBY OBJECTS / INTERACTIONS
 // =======================
+
+// Initial page load — still fetches directly
 async function loadNearbyObjects() {
   try {
     const res = await fetch("/api/world/nearby-objects", {
