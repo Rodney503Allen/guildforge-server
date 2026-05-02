@@ -1,5 +1,7 @@
+//chestService.ts
 import { db } from "../db";
 import { addItemWithConn } from "./inventoryService";
+import { syncTurnInObjectivesFromInventory } from "./questService";
 
 /**
  * Drop type expected from loot rolls.
@@ -272,7 +274,6 @@ export async function claimChest(playerId: number, chestId: number) {
       `SELECT item_id, player_item_id, qty FROM player_chest_items WHERE chest_id=?`,
       [chestId]
     );
-
     for (const it of items ?? []) {
       if (it.item_id != null) {
         await addItemWithConn(conn, playerId, Number(it.item_id), Number(it.qty));
@@ -311,6 +312,10 @@ export async function claimChest(playerId: number, chestId: number) {
       `UPDATE player_chests SET state='claimed', claimed_at=NOW() WHERE id=? AND player_id=?`,
       [chestId, playerId]
     );
+
+    await conn.commit();
+
+    await syncTurnInObjectivesFromInventory(playerId);
 
     await conn.commit();
     return { ok: true };

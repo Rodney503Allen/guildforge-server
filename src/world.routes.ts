@@ -98,8 +98,6 @@ router.get("/world/current-region", async (req, res) => {
   const levelMax = Number(row?.level_max ?? levelMin);
   const playerLevel = Number(player.level ?? 1);
 
-
-
   // difficulty banding:
   // - hard = player below zone min
   // - easy = player above zone max
@@ -223,74 +221,90 @@ res.send(`
     </div>
   </div>
 
-  <!-- World Map -->
-  <div class="world-body">
-    <div class="map-stage">
-      <div class="map-wrapper">
-        <button class="move-btn up" onclick="moveWorld('north')">⬆</button>
-        <button class="move-btn left" onclick="moveWorld('west')">⬅</button>
+  <!-- Responsive World Layout -->
+  <div class="world-layout">
+    <!-- LEFT: Tile map -->
+    <section class="world-map-panel" aria-label="World map">
+      <div class="map-stage">
+        <div class="map-wrapper">
+          <button class="move-btn up" onclick="moveWorld('north')">⬆</button>
+          <button class="move-btn left" onclick="moveWorld('west')">⬅</button>
 
-        <div class="grid" id="Grid">
-          ${
-            Array.from({ length: 7 }).map((_, r) => {
-              const y = minY + r;
-              return Array.from({ length: 7 }).map((_, c) => {
-                const x = minX + c;
-                const t = tileMap[x + "," + y];
-                if (!t) return '<div class="tile"></div>';
+          <div class="grid" id="Grid">
+            ${
+              Array.from({ length: 7 }).map((_, r) => {
+                const y = minY + r;
+                return Array.from({ length: 7 }).map((_, c) => {
+                  const x = minX + c;
+                  const t = tileMap[x + "," + y];
+                  if (!t) return '<div class="tile"></div>';
 
-                const owner = t.controlling_guild_id
-                  ? guildMap[t.controlling_guild_id]
-                  : "Neutral";
+                  const owner = t.controlling_guild_id
+                    ? guildMap[t.controlling_guild_id]
+                    : "Neutral";
 
-                const isPlayer = x === player.map_x && y === player.map_y;
+                  const isPlayer = x === player.map_x && y === player.map_y;
 
-                const { replaceSprite, overlays } = getTileVisualData(t, x, y, objectMap);
+                  const { replaceSprite, overlays } = getTileVisualData(t, x, y, objectMap);
 
-                const baseStyle = replaceSprite
-                  ? `style="background-image: url('${replaceSprite}');"`
-                  : "";
+                  const baseStyle = replaceSprite
+                    ? `style="background-image: url('${replaceSprite}');"`
+                    : "";
 
-                return `
-                  <div
-                    class="tile ${replaceSprite ? "" : t.terrain} ${isPlayer ? "player" : ""}"
-                    data-x="${x}"
-                    data-y="${y}"
-                    ${baseStyle}
-                  >
-                    ${
-                      overlays.map((src) => `
-                        <img class="tile-overlay" src="${src}" alt="" />
-                      `).join("")
-                    }
-                    <div class="owner">${owner}</div>
-                  </div>
-                `;
-              }).join("");
-            }).join("")
-          }
+                  return `
+                    <div
+                      class="tile ${replaceSprite ? "" : t.terrain} ${isPlayer ? "player" : ""}"
+                      data-x="${x}"
+                      data-y="${y}"
+                      ${baseStyle}
+                    >
+                      ${
+                        overlays.map((src) => `
+                          <img class="tile-overlay" src="${src}" alt="" />
+                        `).join("")
+                      }
+                      <div class="owner">${owner}</div>
+                    </div>
+                  `;
+                }).join("");
+              }).join("")
+            }
+          </div>
+
+          <button class="move-btn right" onclick="moveWorld('east')">➡</button>
+          <button class="move-btn down" onclick="moveWorld('south')">⬇</button>
         </div>
-
-        <button class="move-btn right" onclick="moveWorld('east')">➡</button>
-        <button class="move-btn down" onclick="moveWorld('south')">⬇</button>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <!-- Bottom HUD -->
-  <div class="world-foot">
-    <div class="nav-hud" id="nav-hud">
-
+    <!-- RIGHT: Always-visible world info -->
+    <aside class="world-sidebar" id="nav-hud" aria-label="Nearby world information">
       <!-- Travel Log -->
-      <div class="flavor-card travel-log-card">
+      <div class="flavor-card travel-log-card world-sidebar-card">
         <div class="flavor-title">Travel Log</div>
         <div class="flavor-text" id="movement-flavor">You press onward.</div>
       </div>
 
-      <!-- 3-column lower HUD -->
-      <div class="nav-grid">
+      <!-- Nearby -->
+      <div class="nav-card nearby-card world-sidebar-card world-sidebar-card-grow">
+        <div class="nav-top">
+          <div class="nav-title">
+            <span class="nav-icon">✦</span>
+            <span class="nav-label">Nearby</span>
+          </div>
+          <span class="nav-badge" id="nav-nearby-count">0</span>
+        </div>
+
+        <div class="world-interact__list" id="worldInteractList">
+          <div class="world-interact__empty">
+            Nothing to interact with nearby.
+          </div>
+        </div>
+      </div>
+
+      <div class="world-sidebar-two">
         <!-- Nearest Haven -->
-        <div class="nav-card">
+        <div class="nav-card world-sidebar-card">
           <div class="nav-top">
             <div class="nav-title">
               <span class="nav-icon">🏠</span>
@@ -307,25 +321,8 @@ res.send(`
           </div>
         </div>
 
-        <!-- Nearby -->
-        <div class="nav-card nearby-card">
-          <div class="nav-top">
-            <div class="nav-title">
-              <span class="nav-icon">✦</span>
-              <span class="nav-label">Nearby</span>
-            </div>
-            <span class="nav-badge" id="nav-nearby-count">0</span>
-          </div>
-
-          <div class="world-interact__list" id="worldInteractList">
-            <div class="world-interact__empty">
-              Nothing to interact with nearby.
-            </div>
-          </div>
-        </div>
-
         <!-- Nearest Dungeon -->
-        <div class="nav-card">
+        <div class="nav-card world-sidebar-card">
           <div class="nav-top">
             <div class="nav-title">
               <span class="nav-icon">🕳</span>
@@ -342,9 +339,8 @@ res.send(`
           </div>
         </div>
       </div>
-    </div>
+    </aside>
   </div>
-</div>
   <!-- keep these outside the frame -->
   <div class="world-right">
     <div id="statpanel-root"></div>
@@ -471,7 +467,6 @@ router.get("/town/enter", async (req, res) => {
 // =======================
 // MOVE PLAYER
 // =======================
-// helpers (put near top of file)
 function dirArrow(dx: number, dy: number) {
   const h = dx === 0 ? "" : (dx > 0 ? "→" : "←");
   const v = dy === 0 ? "" : (dy > 0 ? "↓" : "↑");
@@ -548,7 +543,9 @@ mountain: [
   return bucket[Math.floor(Math.random() * bucket.length)];
 }
 
-// inside your route:
+// =======================
+// MOVE ROUTE — bundles world/partial + nearby-objects + region into one response
+// =======================
 router.get("/world/move/:dir", async (req, res) => {
 
   const pid = (req.session as any).playerId;
@@ -584,15 +581,18 @@ router.get("/world/move/:dir", async (req, res) => {
   );
 
   const enterAreaResult = await applyEnterAreaProgress(pid, tile.region_id ?? null);
-  // ✅ Optional: region/zone data (only if you have it)
-  // If you don't have these tables/columns yet, keep this block but allow it to fail safely.
+
   let regionName: string | null = null;
   let zoneLevel: number | null = null;
+  let levelMin = 1;
+  let levelMax = 1;
+  let difficulty = "even";
+  let controllingGuildId: number | null = null;
 
   if (tile.region_id) {
     const [[regionRow]]: any = await db.query(
       `
-      SELECT name, level_min
+      SELECT name, level_min, level_max, controlling_guild_id
       FROM regions
       WHERE id = ?
       LIMIT 1
@@ -603,72 +603,134 @@ router.get("/world/move/:dir", async (req, res) => {
     if (regionRow) {
       regionName = String(regionRow.name || "");
       zoneLevel = Number(regionRow.level_min || 1);
+      levelMin = Number(regionRow.level_min ?? 1);
+      levelMax = Number(regionRow.level_max ?? levelMin);
+      controllingGuildId = regionRow.controlling_guild_id ?? null;
+
+      // Need player level for difficulty — fetch it
+      const [[playerLevel]]: any = await db.query(
+        `SELECT level FROM players WHERE id = ? LIMIT 1`,
+        [pid]
+      );
+      const pLevel = Number(playerLevel?.level ?? 1);
+      difficulty =
+        pLevel < levelMin ? "hard" :
+        pLevel > levelMax ? "easy" :
+        "even";
     }
   }
 
+  // Nearest Haven
+  let nearestHaven: any = null;
+  let nearestDungeon: any = null;
 
-// ✅ Nearest "Haven" = nearest town tile in world_map
-let nearestHaven: any = null;
-let nearestDungeon: any = null; // keep for later if you add dungeons as POIs
+  try {
+    const [towns]: any = await db.query(`
+      SELECT x, y, region_name
+      FROM world_map
+      WHERE terrain = 'town'
+    `);
 
-try {
-  const [towns]: any = await db.query(`
-    SELECT x, y, region_name
+    const dist = (tx: number, ty: number) => Math.abs(tx - newX) + Math.abs(ty - newY);
+
+    if (Array.isArray(towns) && towns.length) {
+      let best = towns[0];
+      let bestD = dist(best.x, best.y);
+
+      for (const t of towns) {
+        const d = dist(t.x, t.y);
+        if (d < bestD) { best = t; bestD = d; }
+      }
+
+      nearestHaven = {
+        name: best.region_name || "Town",
+        level: zoneLevel ?? 1,
+        distance: bestD,
+        arrow: dirArrow(best.x - newX, best.y - newY)
+      };
+    }
+  } catch (e) {
+    console.warn("nearest town lookup failed", e);
+  }
+
+  // Encounter pacing
+  const [[pstate]]: any = await db.query(
+    `SELECT steps_since_encounter FROM players WHERE id=? LIMIT 1`,
+    [pid]
+  );
+
+  let stepsSince = Number(pstate?.steps_since_encounter ?? 999);
+  stepsSince += 1;
+
+  let enemy: any = null;
+
+  if (stepsSince >= ENCOUNTER_GAP_STEPS) {
+    if (Math.random() < ENCOUNTER_CHANCE) {
+      enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
+      if (enemy) stepsSince = 0;
+    }
+  }
+
+  await db.query(
+    `UPDATE players SET steps_since_encounter=? WHERE id=?`,
+    [stepsSince, pid]
+  );
+
+  // =======================
+  // BUNDLE: world/partial data
+  // =======================
+  const minX = newX - 3;
+  const maxX = newX + 3;
+  const minY = newY - 3;
+  const maxY = newY + 3;
+
+  const [worldObjects]: any = await db.query(`
+    SELECT id, name, x, y, tile_sprite, tile_visual_type, z_index
+    FROM world_objects
+    WHERE is_active = 1
+      AND x BETWEEN ? AND ?
+      AND y BETWEEN ? AND ?
+    ORDER BY z_index ASC, id ASC
+  `, [minX, maxX, minY, maxY]);
+
+  const [tiles]: any = await db.query(`
+    SELECT *
     FROM world_map
-    WHERE terrain = 'town'
-  `);
+    WHERE x BETWEEN ? AND ?
+      AND y BETWEEN ? AND ?
+  `, [minX, maxX, minY, maxY]);
 
-  const dist = (tx:number, ty:number) => Math.abs(tx - newX) + Math.abs(ty - newY);
+  const [guilds]: any = await db.query("SELECT id, name FROM guilds");
+  const guildMap: any = {};
+  guilds.forEach((g: any) => guildMap[g.id] = g.name);
 
-  if (Array.isArray(towns) && towns.length) {
-    let best = towns[0];
-    let bestD = dist(best.x, best.y);
+  // =======================
+  // BUNDLE: nearby-objects data
+  // =======================
+  const [nearbyRows]: any = await db.query(`
+    SELECT id, name, object_type, region_name, x, y, interaction_radius, icon
+    FROM world_objects
+    WHERE is_active = 1
+      AND x BETWEEN ? AND ?
+      AND y BETWEEN ? AND ?
+  `, [newX - 3, newX + 3, newY - 3, newY + 3]);
 
-    for (const t of towns) {
-      const d = dist(t.x, t.y);
-      if (d < bestD) { best = t; bestD = d; }
-    }
-
-    nearestHaven = {
-      name: best.region_name || "Town",
-      level: zoneLevel ?? 1,
-      distance: bestD,
-      arrow: dirArrow(best.x - newX, best.y - newY)
+  const nearbyObjects = (nearbyRows || []).map((r: any) => {
+    const d = Math.abs(newX - Number(r.x)) + Math.abs(newY - Number(r.y));
+    const radius = Math.max(0, Number(r.interaction_radius) || 1);
+    return {
+      id: Number(r.id),
+      name: String(r.name || "Unknown Object"),
+      object_type: String(r.object_type || "quest"),
+      region_name: r.region_name ?? null,
+      x: Number(r.x),
+      y: Number(r.y),
+      interaction_radius: radius,
+      inRange: d <= radius,
+      distance: d,
+      icon: r.icon ?? null
     };
-  }
-} catch (e) {
-  console.warn("nearest town lookup failed", e);
-}
-
-  // 🔥 Attempt spawn AFTER move
-// =======================
-// ENCOUNTER PACING (server-side)
-// =======================
-const [[pstate]]: any = await db.query(
-  `SELECT steps_since_encounter FROM players WHERE id=? LIMIT 1`,
-  [pid]
-);
-
-let stepsSince = Number(pstate?.steps_since_encounter ?? 999);
-stepsSince += 1;
-
-let enemy: any = null;
-
-// only attempt encounter if we've walked enough steps since last one
-if (stepsSince >= ENCOUNTER_GAP_STEPS) {
-  if (Math.random() < ENCOUNTER_CHANCE) {
-    enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
-
-    // only reset if something actually spawned
-    if (enemy) stepsSince = 0;
-  }
-}
-
-await db.query(
-  `UPDATE players SET steps_since_encounter=? WHERE id=?`,
-  [stepsSince, pid]
-);
-
+  });
 
   return res.json({
     success: true,
@@ -688,7 +750,27 @@ await db.query(
     },
 
     inCombat: !!enemy,
-    enemy
+    enemy,
+
+    // Bundled — replaces separate /world/partial fetch
+    world: {
+      player: { map_x: newX, map_y: newY },
+      tiles,
+      guildMap,
+      worldObjects
+    },
+
+    // Bundled — replaces separate /api/world/nearby-objects fetch
+    nearbyObjects,
+
+    // Bundled — replaces separate /world/current-region fetch
+    regionData: tile.region_id ? {
+      region_name: regionName ?? "Unknown Region",
+      level_min: levelMin,
+      level_max: levelMax,
+      difficulty,
+      controlling_guild_id: controllingGuildId
+    } : null
   });
 });
 
@@ -839,4 +921,3 @@ router.post("/api/world/interact/:objectId", async (req, res) => {
 
 
 export default router;
-
