@@ -1,5 +1,6 @@
 // experienceService.ts
 import { db } from "../db";
+import { getFinalPlayerStats } from "./playerService";
 
 export function getExpForLevel(level: number): number {
   return level * 50 + level * level * 50;
@@ -114,14 +115,13 @@ async function applyLevelUp(
   const totalSpGain = spGainPerLevel * levelsGained;
   const totalStatPoints = statPointsPerLevel * levelsGained;
 
+  // First apply level/max/stat point gains
   await querySource.query(`
     UPDATE players
     SET level = ?,
         exper = ?,
         maxhp = maxhp + ?,
         maxspoints = maxspoints + ?,
-        hpoints = hpoints + ?,
-        spoints = spoints + ?,
         stat_points = stat_points + ?
     WHERE id = ?
   `, [
@@ -129,11 +129,25 @@ async function applyLevelUp(
     exp,
     totalHpGain,
     totalSpGain,
-    totalHpGain,
-    totalSpGain,
     totalStatPoints,
     playerId
   ]);
+
+  // Then calculate final derived maxes from stat engine/playerService
+  const finalStats = await getFinalPlayerStats(playerId);
+
+  if (finalStats) {
+    await querySource.query(`
+      UPDATE players
+      SET hpoints = ?,
+          spoints = ?
+      WHERE id = ?
+    `, [
+      finalStats.maxhp,
+      finalStats.maxspoints,
+      playerId
+    ]);
+  }
 
   return {
     oldLevel: p.level,
@@ -142,6 +156,7 @@ async function applyLevelUp(
     exp,
     hpGain: totalHpGain,
     spGain: totalSpGain,
-    statPoints: totalStatPoints
+    statPoints: totalStatPoints,
+    restoredToFull: true
   };
 }
