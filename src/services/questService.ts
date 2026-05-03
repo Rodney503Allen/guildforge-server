@@ -221,24 +221,40 @@ export async function getQuestLog(pid: number) {
  */
 export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
   const conn = await db.getConnection();
+
   try {
     await conn.beginTransaction();
 
     const [[pq]]: any = await conn.query(
-      `SELECT id, status, quest_id, expires_at
-       FROM player_quests
-       WHERE id=? AND player_id=?
-       LIMIT 1
-       FOR UPDATE`,
+      `
+      SELECT id, status, quest_id, expires_at
+      FROM player_quests
+      WHERE id = ?
+        AND player_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
       [playerQuestId, pid]
     );
+
     if (!pq) throw new Error("PLAYER_QUEST_NOT_FOUND");
     if (pq.status !== "active") throw new Error("QUEST_NOT_ACTIVE");
+
     if (pq.expires_at && new Date(pq.expires_at).getTime() <= Date.now()) {
+      await conn.query(
+        `
+        UPDATE player_quests
+        SET status = 'expired'
+        WHERE id = ?
+          AND player_id = ?
+        `,
+        [playerQuestId, pid]
+      );
+
       throw new Error("QUEST_EXPIRED");
     }
 
-    const [[obj]]: any = await conn.query(
+    const [objectives]: any = await conn.query(
       `
       SELECT
         pqo.id AS pqoId,
@@ -248,124 +264,107 @@ export async function turnInAllAtOnce(pid: number, playerQuestId: number) {
         o.target_item_id
       FROM player_quest_objectives pqo
       JOIN quest_objectives o ON o.id = pqo.objective_id
-      WHERE pqo.player_quest_id=?
-        AND o.type='TURN_IN'
-      LIMIT 1
+      WHERE pqo.player_quest_id = ?
+        AND o.type = 'TURN_IN'
       FOR UPDATE
       `,
       [playerQuestId]
     );
-    if (!obj) throw new Error("NO_TURNIN_OBJECTIVE");
-    if (Number(obj.is_complete) === 1) throw new Error("ALREADY_COMPLETE");
 
-    const itemId = Number(obj.target_item_id);
-    const required = Math.max(1, Number(obj.required_count) || 1);
-
-    const [invRows]: any = await conn.query(
-      `
-      SELECT inventory_id, quantity
-      FROM inventory
-      WHERE player_id=?
-        AND item_id=?
-        AND equipped=0
-      ORDER BY inventory_id ASC
-      FOR UPDATE
-      `,
-      [pid, itemId]
-    );
-
-    let available = 0;
-    for (const r of invRows || []) {
-      available += Math.max(0, Number(r.quantity) || 0);
+    if (!objectives || objectives.length === 0) {
+      throw new Error("NO_TURNIN_OBJECTIVE");
     }
 
-    if (available < required) throw new Error("NOT_ENOUGH_ITEMS");
+    let totalRemoved = 0;
 
-    let remaining = required;
-    for (const r of invRows || []) {
-      if (remaining <= 0) break;
+    for (const obj of objectives) {
+      if (Number(obj.is_complete) === 1) continue;
 
-      const rowQty = Math.max(0, Number(r.quantity) || 0);
-      if (rowQty <= 0) continue;
+      const itemId = Number(obj.target_item_id);
+      const required = Math.max(1, Number(obj.required_count) || 1);
 
-      const take = Math.min(rowQty, remaining);
-      const newQty = rowQty - take;
-
-      if (newQty > 0) {
-        await conn.query(
-          `UPDATE inventory SET quantity=? WHERE inventory_id=? AND player_id=?`,
-          [newQty, r.inventory_id, pid]
-        );
-      } else {
-        await conn.query(
-          `DELETE FROM inventory WHERE inventory_id=? AND player_id=?`,
-          [r.inventory_id, pid]
-        );
+      if (!itemId) {
+        throw new Error("TURNIN_OBJECTIVE_MISSING_ITEM");
       }
 
-      remaining -= take;
-    }
-
-    await conn.query(
-      `
-      UPDATE player_quest_objectives
-      SET progress_count = ?, is_complete = 1
-      WHERE id = ?
-      `,
-      [required, obj.pqoId]
-    );
-
-    const completedNow = await finalizeQuestIfAllObjectivesComplete(conn, pid, playerQuestId);
-
-    let gold = 0;
-    let xp = 0;
-    let claimed = false;
-    let levelUp = null;
-
-    if (completedNow) {
-      const [[rew]]: any = await conn.query(
-        `SELECT COALESCE(gold,0) AS gold, COALESCE(xp,0) AS xp
-         FROM quest_rewards
-         WHERE quest_id=? LIMIT 1`,
-        [pq.quest_id]
+      const [invRows]: any = await conn.query(
+        `
+        SELECT inventory_id, quantity
+        FROM inventory
+        WHERE player_id = ?
+          AND item_id = ?
+          AND equipped = 0
+        ORDER BY inventory_id ASC
+        FOR UPDATE
+        `,
+        [pid, itemId]
       );
 
-      gold = Math.max(0, Number(rew?.gold) || 0);
-      xp = Math.max(0, Number(rew?.xp) || 0);
+      let available = 0;
 
-      if (gold > 0) {
-        await conn.query(
-          `UPDATE players
-           SET gold = gold + ?
-           WHERE id = ?`,
-          [gold, pid]
-        );
+      for (const r of invRows || []) {
+        available += Math.max(0, Number(r.quantity) || 0);
       }
 
-      if (xp > 0) {
-        const xpResult = await grantExperienceTx(conn, pid, xp);
-        levelUp = xpResult.levelUp;
+      if (available < required) {
+        throw new Error("NOT_ENOUGH_ITEMS");
+      }
+
+      let remaining = required;
+
+      for (const r of invRows || []) {
+        if (remaining <= 0) break;
+
+        const rowQty = Math.max(0, Number(r.quantity) || 0);
+        if (rowQty <= 0) continue;
+
+        const take = Math.min(rowQty, remaining);
+        const newQty = rowQty - take;
+
+        if (newQty > 0) {
+          await conn.query(
+            `
+            UPDATE inventory
+            SET quantity = ?
+            WHERE inventory_id = ?
+              AND player_id = ?
+            `,
+            [newQty, r.inventory_id, pid]
+          );
+        } else {
+          await conn.query(
+            `
+            DELETE FROM inventory
+            WHERE inventory_id = ?
+              AND player_id = ?
+            `,
+            [r.inventory_id, pid]
+          );
+        }
+
+        remaining -= take;
+        totalRemoved += take;
       }
 
       await conn.query(
-        `UPDATE player_quests
-         SET status='claimed', claimed_at=NOW()
-         WHERE id=? AND player_id=? AND status='completed'`,
-        [playerQuestId, pid]
+        `
+        UPDATE player_quest_objectives
+        SET progress_count = ?,
+            is_complete = 1
+        WHERE id = ?
+        `,
+        [required, obj.pqoId]
       );
-
-      claimed = true;
     }
+
+        const completedNow = await finalizeQuestIfAllObjectivesComplete(conn, pid, playerQuestId);
 
     await conn.commit();
 
     return {
       success: true,
-      removed: required,
-      goldGained: gold,
-      expGained: xp,
-      claimed,
-      levelUp
+      removed: totalRemoved,
+      completed: completedNow
     };
   } catch (e) {
     try { await conn.rollback(); } catch {}

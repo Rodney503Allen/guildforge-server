@@ -1,25 +1,19 @@
 <div id="statpanel">
 
-  <!-- CENTERED LOGO (absolute, over the bar) -->
   <div id="statpanel-logo">
     <div class="logo-text">GUILDFORGE</div>
     <div class="logo-slogan">Forged in Battle. Bound by Guild.</div>
   </div>
 
-  <!-- LEFT SIDE GRID: only the player section lives here -->
   <div class="statpanel-grid">
-
-    <!-- LEFT PLAYER INFO -->
     <div class="left-section">
 
-      <!-- Portrait -->
       <a href="/character" class="portrait-link">
         <div class="portrait-frame">
           <img id="player-portrait" src="/images/portraits/default.png">
         </div>
       </a>
 
-      <!-- Player Info -->
       <div class="player-info">
         <div id="player-name" class="pi-name"></div>
 
@@ -33,9 +27,7 @@
         <img id="guild-banner-img" class="guild-banner-img" src="/images/guilds/default-banner.png">
       </div>
 
-      <!-- BARS -->
       <div class="bars">
-
         <div class="bar-row">
           <div class="bar-label">HP</div>
           <div class="bar">
@@ -59,22 +51,38 @@
             <div id="xp-text" class="bar-text"></div>
           </div>
         </div>
+      </div>
+
+      <div class="statpanel-side-stack">
+        
+        <div class="statpanel-gold">
+          <span class="gold-icon">🪙</span>
+          <span id="player-gold">0</span>
+        </div>
         <div id="buff-container">
           <div id="buff-icon">
             <div class="buff-icon-symbol">✨</div>
             <div class="buff-icon-label">BUFFS</div>
+            <div id="buff-tooltip"></div>
           </div>
 
-  <div id="buff-tooltip"></div>
-</div>
+          
+        </div>
+
+
+
       </div>
+
     </div>
-
-  </div> <!-- end .statpanel-grid -->
-
-  <!-- RIGHT-SIDE ACTION BUTTONS (absolute, hard-right) -->
-  <div class="right-actions">
-    <a id="logout-btn" class="action-btn" href="/logout">Logout</a>
   </div>
+
+  <div class="right-actions">
+  <a id="quest-journal-btn" class="nav-action-btn" href="/journal">
+    <span class="nav-action-icon">📖</span>
+    <span>Quest Log</span>
+  </a>
+
+  <a id="logout-btn" class="action-btn" href="/logout">Logout</a>
+</div>
 
 </div>

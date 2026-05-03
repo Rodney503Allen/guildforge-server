@@ -638,10 +638,7 @@ res.send(`
 </body>
 </html>
 `);
-
-
 });
-
 
 router.post("/guild/member/role", requireLogin, async (req:any, res:any) => {
   const pid = req.session.playerId;

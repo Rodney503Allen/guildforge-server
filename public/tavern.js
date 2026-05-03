@@ -118,41 +118,47 @@ async function listenForRumors() {
   // -------------------------
   // Turn-ins
   // -------------------------
-  function group(rows) {
-    const map = new Map();
+function group(rows) {
+  const map = new Map();
 
-    for (const r of rows || []) {
-      const pqid = Number(r.playerQuestId);
+  for (const r of rows || []) {
+    const pqid = Number(r.playerQuestId);
 
-      if (!map.has(pqid)) {
-        map.set(pqid, {
-          playerQuestId: pqid,
-          status: String(r.status || "").toLowerCase(),
-          title: r.title,
-          description: r.description || "",
-          isComplete: Number(r.quest_is_complete ?? r.is_complete ?? 0) === 1,
-          objectives: [],
-        });
-      }
-
-      map.get(pqid).objectives.push({
-        type: r.objectiveType,
-        required: Number(r.required_count || 1),
-        progress: Number(r.progress_count || 0),
-        done: Number(r.objective_is_complete ?? 0) === 1,
-        itemName: r.item_name || null,
-        have: Number(r.have_qty || 0),
-        targetName:
-          r.target_name ||
-          r.creature_name ||
-          r.location_name ||
-          r.interact_name ||
-          null,
+    if (!map.has(pqid)) {
+      map.set(pqid, {
+        playerQuestId: pqid,
+        status: String(r.status || "").toLowerCase(),
+        title: r.title,
+        description: r.description || "",
+        isComplete: true, // start true, AND down with each objective
+        objectives: [],
       });
     }
 
-    return Array.from(map.values());
+    const entry = map.get(pqid);
+    const obj = {
+      type: r.objectiveType,
+      required: Number(r.required_count || 1),
+      progress: Number(r.progress_count || 0),
+      done: Number(r.is_complete ?? 0) === 1,
+      itemName: r.item_name || null,
+      have: Number(r.have_qty || 0),
+      targetName: r.target_name || r.creature_name || r.location_name || r.interact_name || null,
+    };
+
+    entry.objectives.push(obj);
+
+    // For TURN_IN: check inventory quantity, not is_complete
+    // For all others: use is_complete flag
+    const objComplete = obj.type === "TURN_IN"
+      ? obj.have >= obj.required
+      : obj.done;
+
+    entry.isComplete = entry.isComplete && objComplete;
   }
+
+  return Array.from(map.values());
+}
 
   function objLine(o) {
     if (o.type === "TURN_IN") {
@@ -180,10 +186,11 @@ async function listenForRumors() {
   }
 
   function progressText(o) {
-    if (o.type === "TURN_IN") {
-      if (!o.itemName) return o.done ? "ready" : "0/1";
-      return Math.min(o.have, o.required) + "/" + o.required;
-    }
+  if (o.type === "TURN_IN") {
+    if (!o.itemName) return o.done ? "ready" : "0/1";
+    const have = Math.min(o.have, o.required);
+    return have + "/" + o.required; // already correct, no change needed
+  }
 
     if (o.type === "KILL") {
       return Math.min(o.progress, o.required) + "/" + o.required;

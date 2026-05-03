@@ -1,3 +1,4 @@
+//shop.routes.ts
 import express from "express";
 import { db } from "./db";
 import { addItemAtomic } from "./services/inventoryService";
@@ -393,7 +394,7 @@ router.get("/shop", async (req, res) => {
       return (arr || []).map(renderItemCard).join("") || `<div class="empty">No items.</div>`;
     }
 
-    res.send(`
+res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -403,10 +404,13 @@ router.get("/shop", async (req, res) => {
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/statpanel.css">
+  <script defer src="/statpanel.js"></script>
 
   <link rel="stylesheet" href="/ui/toast.css">
-  <script src="/ui/toast.js"></script>
+  <script defer src="/ui/toast.js"></script>
 
   <link rel="stylesheet" href="/ui/itemTooltip.css">
   <script defer src="/ui/itemTooltip.js"></script>
@@ -417,70 +421,144 @@ router.get("/shop", async (req, res) => {
 
 <body>
   <div id="statpanel-root"></div>
-  <link rel="stylesheet" href="/statpanel.css">
-  <script src="/statpanel.js"></script>
 
-  <div class="wrap">
-    <div class="panel market">
+  <main class="shop-page">
+    <div class="shop-shell">
 
-      <div class="marketHead">
-        <div class="marketTitle">
-          <h2>Market of ${escapeHtml(town.name)}</h2>
-          <div class="sub">Lanternlight, loud deals, and guarded coin</div>
+      <section class="shop-hero">
+        <div class="hero-title">
+          <div class="hero-icon">⚖️</div>
+          <div>
+            <div class="eyebrow">Market</div>
+            <h1>Market of ${escapeHtml(town.name)}</h1>
+            <p>Lanternlight, loud deals, guarded coin, and wares for the wilds.</p>
+          </div>
         </div>
-        <div class="marketMeta">
-          <div class="pill">🪙 ${goldFmt}</div>
-          <button class="btnGhost" type="button" onclick="location.href='/town'">Return</button>
+
+        <div class="hero-actions">
+          <span class="pill">Gold <strong>${goldFmt}</strong></span>
+          <button class="btn danger" type="button" onclick="location.href='/town'">Return to Town</button>
         </div>
-      </div>
+      </section>
 
-      <div class="marketTabs" role="tablist" aria-label="Market categories">
-        <button class="tab isActive" role="tab" aria-selected="true" data-tab="consumable">
-          🧪 Consumables
-        </button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="weapon">
-          ⚔ Weapons
-        </button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="armor">
-          🛡 Armor
-        </button>
-      </div>
+      <section class="shop-grid">
 
-      <div class="marketPanels">
-        <section class="marketPanel isActive" role="tabpanel" data-panel="consumable">
-          <div class="panelHead">
-            <div class="panelName">Apothecary Stall</div>
-            <div class="panelNote">Restock before you step outside the walls.</div>
+        <div class="card shop-card">
+          <div class="cardHeader">
+            <div class="cardTitle">
+              <h2>Market Stalls</h2>
+              <p>Choose a stall and browse available wares.</p>
+            </div>
+            <span class="badge good">Open</span>
           </div>
-          <div class="items">${renderCards(groups.consumable)}</div>
-        </section>
 
-        <section class="marketPanel" role="tabpanel" data-panel="weapon">
-          <div class="panelHead">
-            <div class="panelName">Steel & Edge</div>
-            <div class="panelNote">A few practical weapons and offhands suited to your class.</div>
+          <div class="cardBody">
+
+            <div class="marketTabs" role="tablist" aria-label="Market categories">
+              <button class="tab isActive" role="tab" aria-selected="true" data-tab="consumable">
+                🧪 Consumables
+              </button>
+              <button class="tab" role="tab" aria-selected="false" data-tab="weapon">
+                ⚔ Weapons
+              </button>
+              <button class="tab" role="tab" aria-selected="false" data-tab="armor">
+                🛡 Armor
+              </button>
+            </div>
+
+            <div class="marketPanels">
+              <section class="marketPanel isActive" role="tabpanel" data-panel="consumable">
+                <div class="panelHead">
+                  <div>
+                    <div class="panelName">Apothecary Stall</div>
+                    <div class="panelNote">Restock before you step outside the walls.</div>
+                  </div>
+                  <span class="badge">Potions</span>
+                </div>
+                <div class="items">${renderCards(groups.consumable)}</div>
+              </section>
+
+              <section class="marketPanel" role="tabpanel" data-panel="weapon">
+                <div class="panelHead">
+                  <div>
+                    <div class="panelName">Steel & Edge</div>
+                    <div class="panelNote">A few practical weapons and offhands suited to your class.</div>
+                  </div>
+                  <span class="badge">Weapons</span>
+                </div>
+                <div class="items">${renderCards(groups.weapon)}</div>
+              </section>
+
+              <section class="marketPanel" role="tabpanel" data-panel="armor">
+                <div class="panelHead">
+                  <div>
+                    <div class="panelName">Armorer’s Row</div>
+                    <div class="panelNote">Region-appropriate armor matched to your training.</div>
+                  </div>
+                  <span class="badge">Armor</span>
+                </div>
+                <div class="items">${renderCards(groups.armor)}</div>
+              </section>
+            </div>
+
           </div>
-          <div class="items">${renderCards(groups.weapon)}</div>
-        </section>
+        </div>
 
-        <section class="marketPanel" role="tabpanel" data-panel="armor">
-          <div class="panelHead">
-            <div class="panelName">Armorer’s Row</div>
-            <div class="panelNote">Region-appropriate armor matched to your training.</div>
+        <aside class="right-stack">
+
+          <div class="card">
+            <div class="cardHeader compact">
+              <div class="cardTitle">
+                <h2>Merchant Notice</h2>
+                <p>Supplies are meant to keep you alive.</p>
+              </div>
+            </div>
+
+            <div class="cardBody">
+              <div class="noticeBox">
+                <strong>Before you leave town</strong>
+                <p>Carry healing and spirit supplies before heading into dangerous regions. A cheap potion is better than a costly revival.</p>
+              </div>
+            </div>
           </div>
-          <div class="items">${renderCards(groups.armor)}</div>
-        </section>
-      </div>
 
-      <hr class="rule">
-      <button class="returnBtn" onclick="location.href='/town'">Return to Town</button>
+          <div class="card">
+            <div class="cardHeader compact">
+              <div class="cardTitle">
+                <h2>Coming Soon</h2>
+                <p>Future market systems planned for Guildforge.</p>
+              </div>
+              <span class="badge warn">Planned</span>
+            </div>
+
+            <div class="cardBody">
+              <div class="marketFutureList">
+                <div class="futureRow">
+                  <strong>Vendor Reputation</strong>
+                  <span>Discounts and rare wares from trusted merchants.</span>
+                </div>
+                <div class="futureRow">
+                  <strong>Rotating Stock</strong>
+                  <span>Limited-time items that refresh by town or region.</span>
+                </div>
+                <div class="futureRow">
+                  <strong>Player Trading</strong>
+                  <span>List materials, gear, and crafted goods for other players.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </aside>
+
+      </section>
     </div>
-  </div>
+  </main>
 
   <div class="toast-wrap" id="toastWrap"></div>
 </body>
 </html>
-    `);
+`);
   } catch (err) {
     console.error("GET /shop failed:", err);
     res.status(500).send("Shop failed to load.");

@@ -45,6 +45,7 @@ function loadStatPanel() {
       setText("player-name", p.name);
       setText("player-class", p.pclass);
       setText("player-level", p.level);
+      setText("player-gold", Number(p.gold || 0).toLocaleString());
 
       // =======================
       // PORTRAIT & GUILD

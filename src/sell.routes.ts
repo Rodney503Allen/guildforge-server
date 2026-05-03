@@ -209,7 +209,7 @@ router.get("/sell", async (req, res) => {
     `;
   }).join("");
 
-  res.send(`
+res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -219,7 +219,7 @@ router.get("/sell", async (req, res) => {
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="/statpanel.css">
   <script defer src="/statpanel.js"></script>
@@ -237,78 +237,114 @@ router.get("/sell", async (req, res) => {
 <body>
   <div id="statpanel-root"></div>
 
-  <div class="wrap">
+  <main class="sell-page">
+    <div class="sell-shell">
 
-    <div class="topbar">
-      <div class="brand">
-        <div class="title"><span class="sigil"></span> Collector</div>
-        <div class="sub">Trade off what you don’t need. Sell rate: ${Math.round(SELL_RATE * 100)}%</div>
-      </div>
-
-      <div class="nav">
-        <span class="pill">Gold: <strong>${goldFmt}g</strong></span>
-        <a class="btn danger" href="/town">Return to Town</a>
-      </div>
-    </div>
-
-    <div class="grid">
-
-      <section class="card">
-        <div class="cardHeader">
-          <div class="cardTitle">
-            <h2>Sellable Items</h2>
-            <p>Not equipped. Click an item to preview.</p>
+      <section class="sell-hero">
+        <div class="hero-title">
+          <div class="hero-icon">💰</div>
+          <div>
+            <div class="eyebrow">Collector</div>
+            <h1>Sell Items</h1>
+            <p>Trade off what you do not need. Sell rate: ${Math.round(SELL_RATE * 100)}%.</p>
           </div>
-          <span class="badge">Inventory</span>
         </div>
 
-        <div class="cardBody">
-          ${
-            cards
-              ? `<div class="items" id="items">${cards}</div>`
-              : `<div class="empty">No sellable items.</div>`
-          }
+        <div class="hero-actions">
+          <span class="pill">Gold <strong>${goldFmt}g</strong></span>
+          <a class="btn danger" href="/town">Return to Town</a>
         </div>
       </section>
 
-      <aside class="card">
-        <div class="cardHeader">
-          <div class="cardTitle">
-            <h2>Sell Panel</h2>
-            <p>Confirm the sale and choose quantity.</p>
+      <section class="sell-grid">
+
+        <section class="card">
+          <div class="cardHeader">
+            <div class="cardTitle">
+              <h2>Sellable Items</h2>
+              <p>Not equipped. Select an item to preview the sale.</p>
+            </div>
+            <span class="badge">Inventory</span>
           </div>
-          <span class="badge good">Safe</span>
-        </div>
 
-        <div class="cardBody">
-          <div class="sellbox" id="sellbox">
-            <div class="empty" id="emptyState">Select an item to begin.</div>
+          <div class="cardBody">
+            ${
+              cards
+                ? `<div class="items" id="items">${cards}</div>`
+                : `<div class="empty">No sellable items.</div>`
+            }
+          </div>
+        </section>
 
-            <div id="details" style="display:none">
-              <div class="line"><span class="k">Name</span><span class="v" id="dName">—</span></div>
-              <div class="line"><span class="k">Value</span><span class="v" id="dValue">0g</span></div>
-              <div class="line"><span class="k">Rate</span><span class="v">${Math.round(SELL_RATE * 100)}%</span></div>
-              <div class="line"><span class="k">Per Item</span><span class="v" id="dUnit">0g</span></div>
-              <div class="line"><span class="k">You Gain</span><span class="v" id="dTotal">0g</span></div>
+        <aside class="right-stack">
 
-              <div class="qty" id="qtyRow" style="display:none">
-                <button type="button" class="qtyBtn" id="minus">−</button>
-                <input id="qty" type="number" min="1" value="1" />
-                <button type="button" class="qtyBtn" id="plus">+</button>
+          <section class="card">
+            <div class="cardHeader compact">
+              <div class="cardTitle">
+                <h2>Sell Panel</h2>
+                <p>Confirm the sale and choose quantity.</p>
+              </div>
+              <span class="badge good">Safe</span>
+            </div>
+
+            <div class="cardBody">
+              <div class="sellbox" id="sellbox">
+                <div class="empty" id="emptyState">Select an item to begin.</div>
+
+                <div id="details" style="display:none">
+                  <div class="line"><span class="k">Name</span><span class="v" id="dName">—</span></div>
+                  <div class="line"><span class="k">Value</span><span class="v" id="dValue">0g</span></div>
+                  <div class="line"><span class="k">Rate</span><span class="v">${Math.round(SELL_RATE * 100)}%</span></div>
+                  <div class="line"><span class="k">Per Item</span><span class="v" id="dUnit">0g</span></div>
+                  <div class="line"><span class="k">You Gain</span><span class="v" id="dTotal">0g</span></div>
+
+                  <div class="qty" id="qtyRow" style="display:none">
+                    <button type="button" class="qtyBtn" id="minus">−</button>
+                    <input id="qty" type="number" min="1" value="1" />
+                    <button type="button" class="qtyBtn" id="plus">+</button>
+                  </div>
+
+                  <button class="btn primary full" id="sellBtn" disabled>Sell</button>
+                </div>
               </div>
 
-              <button class="btn primary full" id="sellBtn" disabled>Sell</button>
+              <div class="note">
+                Tip: hover an item for stats. Stacks can be sold partially.
+              </div>
             </div>
-          </div>
+          </section>
 
-          <div class="note">
-            Tip: Hover an item for stats. Stacks can be sold partially.
-          </div>
-        </div>
-      </aside>
+          <section class="card">
+            <div class="cardHeader compact">
+              <div class="cardTitle">
+                <h2>Collector Notes</h2>
+                <p>How selling works in Guildforge.</p>
+              </div>
+            </div>
 
+            <div class="cardBody">
+              <div class="collectorInfo">
+                <div class="infoRow">
+                  <strong>Sell Rate</strong>
+                  <span>Items sell for ${Math.round(SELL_RATE * 100)}% of their base value.</span>
+                </div>
+                <div class="infoRow">
+                  <strong>Equipped Gear</strong>
+                  <span>Equipped items are protected and cannot be sold here.</span>
+                </div>
+                <div class="infoRow">
+                  <strong>Future System</strong>
+                  <span>Collector reputation and bulk-selling filters can be added later.</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </aside>
+
+      </section>
     </div>
-  </div>
+  </main>
 
   <div class="toast-wrap" id="toastWrap"></div>
 </body>

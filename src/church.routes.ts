@@ -142,7 +142,6 @@ res.send(`
   <link rel="stylesheet" href="/ui/toast.css">
   <script defer src="/ui/toast.js"></script>
 
-  <!-- NEW: Church page assets -->
   <link rel="stylesheet" href="/church.css">
   <script defer src="/church.js"></script>
 </head>
@@ -158,187 +157,242 @@ res.send(`
     <source src="/music/sanctuary_dead.mp3" type="audio/mpeg">
   </audio>
 
-  <div class="wrap">
-    <div class="topbar">
-      <div class="brand">
-        <div class="title"><span class="sigil"></span> Sanctuary of Light</div>
-        <div class="sub">A quiet refuge from war and corruption.</div>
-      </div>
+  <main class="sanctuary-page">
+    <div class="sanctuary-shell">
 
-      <div class="nav">
-        <span class="pill">Gold: <strong>${fmt(base.gold)}g</strong></span>
-        <a class="btn danger" href="/town">Return to Town</a>
-      </div>
-    </div>
-
-    <div class="grid">
-
-      <!-- LEFT: CHURCH SERVICES -->
-      <section class="card">
-        <div class="cardHeader">
-          <div class="cardTitle">
-            <h2>Church Services</h2>
-            <p>Rest, recover, and seek sacred aid.</p>
+      <section class="sanctuary-hero">
+        <div class="hero-title">
+          <div class="hero-icon">⛪</div>
+          <div>
+            <h1>Sanctuary of Light</h1>
+            <p>A quiet refuge from war, corruption, and death.</p>
           </div>
-          <span class="badge good">Sanctuary</span>
         </div>
 
-        <div class="cardBody">
-
-          <div class="storyBox">
-            <p class="storyText">
-              <i>"Kneel, and let the ember-lanterns burn your wounds away. The Sanctuary asks only a coin... or your patience."</i>
-            </p>
-          </div>
-
-          <div class="divider"></div>
-
-          <div class="vitals">
-            <div class="v">
-              <div class="vk">❤️ Health</div>
-              <div class="vv">${hpoints} / ${stats.maxhp}</div>
-            </div>
-            <div class="v">
-              <div class="vk">✨ Spirit</div>
-              <div class="vv">${spoints} / ${stats.maxspoints}</div>
-            </div>
-            <div class="v">
-              <div class="vk">🧑 ${base.name}</div>
-              <div class="vv">Level ${base.level}</div>
-            </div>
-          </div>
-
-          <div class="divider"></div>
-
-          <div class="servicesGrid">
-
-            <!-- Heal HP -->
-            <div class="serviceTile">
-              <div class="serviceIcon">❤️</div>
-              <div class="serviceLabel">
-                <strong>Restore Health</strong>
-                <span>${healHint}</span>
-              </div>
-              <form method="POST" action="/church/heal">
-                <button class="btn ${healDisabled ? "disabled" : "primary"}" ${healDisabled ? "disabled" : ""}>
-                  Heal (${HEAL_COST}g)
-                </button>
-              </form>
-            </div>
-
-            <!-- Restore SP -->
-            <div class="serviceTile">
-              <div class="serviceIcon">✨</div>
-              <div class="serviceLabel">
-                <strong>Restore Spirit</strong>
-                <span>${restoreHint}</span>
-              </div>
-              <form method="POST" action="/church/restore">
-                <button class="btn ${restoreDisabled ? "disabled" : "primary"}" ${restoreDisabled ? "disabled" : ""}>
-                  Restore (${RESTORE_COST}g)
-                </button>
-              </form>
-            </div>
-
-            <!-- Coming Soon tiles -->
-            <div class="serviceTile isLocked">
-              <div class="serviceIcon">🕊️</div>
-              <div class="serviceLabel">
-                <strong>Blessings</strong>
-                <span>Temporary boons for your next venture.</span>
-              </div>
-              <button class="btn disabled" disabled>Coming Soon</button>
-            </div>
-
-            <div class="serviceTile isLocked">
-              <div class="serviceIcon">🧿</div>
-              <div class="serviceLabel">
-                <strong>Purification</strong>
-                <span>Cleanse curses and corruption.</span>
-              </div>
-              <button class="btn disabled" disabled>Coming Soon</button>
-            </div>
-
-            <div class="serviceTile isLocked">
-              <div class="serviceIcon">📿</div>
-              <div class="serviceLabel">
-                <strong>Donate</strong>
-                <span>Support the Sanctuary. Unlock favor later.</span>
-              </div>
-              <button class="btn disabled" disabled>Coming Soon</button>
-            </div>
-
-          </div>
-
-          <div class="note">
-            Services marked “Coming Soon” are placeholders for Sanctuary expansion (buffs, curse removal, favor, etc.).
-          </div>
-
+        <div class="hero-actions">
+          <a class="btn danger" href="/town">Return to Town</a>
         </div>
       </section>
 
-      <!-- RIGHT: REVIVE PANEL (ONLY ACTIVE WHEN DEAD) -->
-      <aside class="card ${isDead ? "isDanger" : "isMuted"}">
-        <div class="cardHeader">
-          <div class="cardTitle">
-            <h2>Revival</h2>
-            <p>${isDead ? "You walk between life and death." : "Only available when you fall in battle."}</p>
+      <section class="sanctuary-grid">
+
+        <div class="card">
+          <div class="cardHeader">
+            <div class="cardTitle">
+              <h2>Church Services</h2>
+              <p>Rest, recover, and seek sacred aid.</p>
+            </div>
+            <span class="badge good">Sanctuary</span>
           </div>
-          <span class="badge ${isDead ? "warn" : ""}">${isDead ? "Critical" : "Locked"}</span>
-        </div>
 
-        <div class="cardBody">
+          <div class="cardBody">
 
-          <div class="reviveBox">
-            <div class="reviveRow">
-              <div>
-                <div class="reviveTitle">🕯️ Revival Blessing</div>
-                <div class="reviveHint">${reviveHint}</div>
-              </div>
-
-              <form method="POST" action="/church/revive">
-                <button class="btn danger ${!isDead ? "disabled" : ""}" ${!isDead ? "disabled" : ""}>
-                  Revive (${REVIVE_COST}g)
-                </button>
-              </form>
+            <div class="storyBox">
+              <p class="storyText">
+                <i>"Kneel, and let the ember-lanterns burn your wounds away. The Sanctuary asks only a coin... or your patience."</i>
+              </p>
             </div>
 
             <div class="divider"></div>
 
-            ${
-              revive_at
-                ? `
-                  <div class="timerRow">
-                    <div class="timerLabel">Free resurrection in</div>
-                    <div class="timerPill">
-                      <span id="timer" data-seconds="${secondsLeft}">${secondsLeft}</span>s
-                    </div>
+            <div class="serviceList">
+
+              <div class="serviceTile">
+                <div class="serviceIcon">❤️</div>
+                <div class="serviceLabel">
+                  <strong>Restore Health</strong>
+                  <span>${healHint}</span>
+                </div>
+                <form method="POST" action="/church/heal">
+                  <button class="btn ${healDisabled ? "disabled" : "primary"}" ${healDisabled ? "disabled" : ""}>
+                    Heal (${HEAL_COST}g)
+                  </button>
+                </form>
+              </div>
+
+              <div class="serviceTile">
+                <div class="serviceIcon">✨</div>
+                <div class="serviceLabel">
+                  <strong>Restore Spirit</strong>
+                  <span>${restoreHint}</span>
+                </div>
+                <form method="POST" action="/church/restore">
+                  <button class="btn ${restoreDisabled ? "disabled" : "primary"}" ${restoreDisabled ? "disabled" : ""}>
+                    Restore (${RESTORE_COST}g)
+                  </button>
+                </form>
+              </div>
+
+              <div class="serviceTile isLocked">
+                <div class="serviceIcon">🕊️</div>
+                <div class="serviceLabel">
+                  <strong>Blessings</strong>
+                  <span>Temporary boons for your next venture.</span>
+                </div>
+                <button class="btn disabled" disabled>Coming Soon</button>
+              </div>
+
+              <div class="serviceTile isLocked">
+                <div class="serviceIcon">🧿</div>
+                <div class="serviceLabel">
+                  <strong>Purification</strong>
+                  <span>Cleanse curses and corruption.</span>
+                </div>
+                <button class="btn disabled" disabled>Coming Soon</button>
+              </div>
+
+              <div class="serviceTile isLocked">
+                <div class="serviceIcon">📿</div>
+                <div class="serviceLabel">
+                  <strong>Donate</strong>
+                  <span>Support the Sanctuary. Unlock favor later.</span>
+                </div>
+                <button class="btn disabled" disabled>Coming Soon</button>
+              </div>
+
+            </div>
+
+            <div class="note">
+              Future Sanctuary services can include buffs, curse removal, corruption cleansing, and favor rewards.
+            </div>
+
+          </div>
+        </div>
+
+        <aside class="right-stack">
+          <div class="card ${isDead ? "isDanger" : "isMuted"}">
+            <div class="cardHeader compact">
+              <div class="cardTitle">
+                <h2>Revival</h2>
+                <p>${isDead ? "You walk between life and death." : "Only available when you fall in battle."}</p>
+              </div>
+              <span class="badge ${isDead ? "warn" : ""}">${isDead ? "Critical" : "Locked"}</span>
+            </div>
+
+            <div class="cardBody">
+              <div class="reviveBox">
+                <div class="reviveRow">
+                  <div>
+                    <div class="reviveTitle">🕯️ Revival Blessing</div>
+                    <div class="reviveHint">${reviveHint}</div>
                   </div>
-                  <div class="timerNote">
-                    If you wait it out, you’ll be restored to full health and spirit automatically.
-                  </div>
-                `
-                : `
-                  <div class="timerRow">
-                    <div class="timerLabel">Free resurrection</div>
-                    <div class="timerNote">
-                      ${isDead ? "Timer will appear shortly if it hasn’t already." : "Not applicable while alive."}
-                    </div>
-                  </div>
-                `
-            }
+
+                  <form method="POST" action="/church/revive">
+                    <button class="btn danger ${!isDead ? "disabled" : ""}" ${!isDead ? "disabled" : ""}>
+                      Revive (${REVIVE_COST}g)
+                    </button>
+                  </form>
+                </div>
+
+                <div class="divider"></div>
+
+                ${
+                  revive_at
+                    ? `
+                      <div class="timerRow">
+                        <div class="timerLabel">Free resurrection in</div>
+                        <div class="timerPill">
+                          <span id="timer" data-seconds="${secondsLeft}">${secondsLeft}</span>s
+                        </div>
+                      </div>
+                      <div class="timerNote">
+                        Wait it out and you’ll be restored to full health and spirit automatically.
+                      </div>
+                    `
+                    : `
+                      <div class="timerRow">
+                        <div class="timerLabel">Free resurrection</div>
+                        <div class="timerNote">
+                          ${isDead ? "Timer will appear shortly if it hasn’t already." : "Not applicable while alive."}
+                        </div>
+                      </div>
+                    `
+                }
+              </div>
+            </div>
           </div>
 
-          <div class="divider"></div>
+                    <div class="card reputation-card">
+            <div class="cardHeader compact">
+              <div class="cardTitle">
+                <h2>Sanctuary Reputation</h2>
+                <p>Your devotion is remembered.</p>
+              </div>
+              <span class="badge warn">Coming Soon</span>
+            </div>
 
-          <a class="btn" href="/tavern">🍺 Tavern</a>
-          <a class="btn primary" href="/shop">🛒 Market</a>
+            <div class="cardBody">
+              <div class="repSummary">
+                <div class="repSeal">✝</div>
 
-        </div>
-      </aside>
+                <div class="repInfo">
+                  <div class="repLabel">Favor Level</div>
+                  <div class="repLevel">1</div>
 
+                  <div class="repBarWrap">
+                    <div class="repBarFill" style="width: 0%;"></div>
+                  </div>
+
+                  <div class="repProgress">0 / 1,000 Favor</div>
+                  <div class="repRank">Current Rank: <strong>Pilgrim</strong></div>
+                  <div class="repNext">Next Rank: <strong>Acolyte</strong></div>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="repRanks">
+                <div class="repRankRow active">
+                  <span>Pilgrim</span>
+                  <small>Entry rank. Sanctuary services unlocked.</small>
+                </div>
+
+                <div class="repRankRow">
+                  <span>Acolyte</span>
+                  <small>Minor healing discounts.</small>
+                </div>
+
+                <div class="repRankRow">
+                  <span>Disciple</span>
+                  <small>Basic blessings become available.</small>
+                </div>
+
+                <div class="repRankRow">
+                  <span>Devotee</span>
+                  <small>Improved discounts and stronger boons.</small>
+                </div>
+
+                <div class="repRankRow">
+                  <span>Oathbound</span>
+                  <small>Unlocks purification services.</small>
+                </div>
+
+                <div class="repRankRow">
+                  <span>Anointed</span>
+                  <small>Reduced revival cost.</small>
+                </div>
+
+                <div class="repRankRow">
+                  <span>Radiant</span>
+                  <small>Advanced Sanctuary blessings.</small>
+                </div>
+
+                <div class="repRankRow">
+                  <span>Ascendant</span>
+                  <small>Highest favor with the Sanctuary.</small>
+                </div>
+              </div>
+
+              <div class="repNote">
+                Reputation will be earned through donations, Sanctuary quests, purification tasks, and future faith-based services.
+              </div>
+            </div>
+          </div>
+        </aside>
+
+      </section>
     </div>
-  </div>
+  </main>
 
   <div class="toast-wrap" id="toastWrap"></div>
 </body>

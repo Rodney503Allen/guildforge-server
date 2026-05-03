@@ -279,7 +279,6 @@ router.get("/town", async (req, res) => {
                 <h2>📖 Town Ledger</h2>
                 <p>Notes, updates, and warnings.</p>
               </div>
-              <button class="journal-btn" id="btn-journal" type="button">📖 Journal</button>
             </div>
 
             <div class="ledger-card">

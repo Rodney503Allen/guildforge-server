@@ -204,17 +204,22 @@ router.post("/quests/:playerQuestId/turn-in", async (req, res) => {
     // Try TURN_IN (items) first
     try {
       const out = await turnInAllAtOnce(pid, playerQuestId);
+
+      // If the turn-in completed the quest, immediately claim rewards
+      if (out.completed) {
+        const claim = await claimQuestRewards(pid, playerQuestId);
+        return res.json({ ...claim, removed: out.removed });
+      }
+
       return res.json(out);
     } catch (err: any) {
       const msg = String(err?.message || "");
-
-      // ✅ If it’s not a TURN_IN quest OR it’s already completed, go to claim path
       if (msg !== "NO_TURNIN_OBJECTIVE" && msg !== "QUEST_NOT_ACTIVE") {
-        throw err; // real error (not enough items, expired, etc)
+        throw err;
       }
     }
 
-    // ✅ Claim rewards path (KILL quests + completed quests)
+    // Claim rewards path (KILL quests + already-completed quests)
     const out2 = await claimQuestRewards(pid, playerQuestId);
     return res.json(out2);
 
@@ -225,15 +230,12 @@ router.post("/quests/:playerQuestId/turn-in", async (req, res) => {
     if (msg === "NOT_ENOUGH_ITEMS") return res.status(400).json({ error: "not_enough" });
     if (msg === "PLAYER_QUEST_NOT_FOUND") return res.status(404).json({ error: "not_found" });
     if (msg === "QUEST_EXPIRED") return res.status(400).json({ error: "expired" });
-
     if (msg === "QUEST_NOT_COMPLETED") return res.status(400).json({ error: "not_completed" });
     if (msg === "ALREADY_CLAIMED") return res.status(400).json({ error: "already_claimed" });
 
     return res.status(500).json({ error: "server_error" });
   }
 });
-
-
 
 
 // POST set/clear tracked quest
