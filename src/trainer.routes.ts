@@ -89,35 +89,72 @@ function buildSpellMeta(s: any) {
 function buildSpellRows(s: any) {
   const rows: string[] = [];
 
-  rows.push(`<div class="detail-row"><span>Cost</span><strong>${Number(s.scost || 0)} SP</strong></div>`);
-  rows.push(`<div class="detail-row"><span>Cooldown</span><strong>${Number(s.cooldown || 0)}s</strong></div>`);
-  rows.push(`<div class="detail-row"><span>Training Price</span><strong>${Number(s.price || 0)}g</strong></div>`);
-  rows.push(`<div class="detail-row"><span>Required Level</span><strong>${Number(s.level || 1)}</strong></div>`);
+  const type = String(s.type || "");
+  const cost = Number(s.scost || 0);
+  const cooldown = Number(s.cooldown || 0);
+  const price = Number(s.price || 0);
+  const reqLevel = Number(s.level || 1);
 
-  if (s.damage != null && Number(s.damage) > 0) {
-    rows.push(`<div class="detail-row"><span>Damage</span><strong>${Number(s.damage)}</strong></div>`);
+  const damage = Number(s.damage || 0);
+  const heal = Number(s.heal || 0);
+  const dotDamage = Number(s.dot_damage || 0);
+  const dotDuration = Number(s.dot_duration || 0);
+  const dotTickRate = Number(s.dot_tick_rate || 1);
+
+  rows.push(`<div class="detail-row"><span>Type</span><strong>${esc(prettyType(type))}</strong></div>`);
+  rows.push(`<div class="detail-row"><span>SP Cost</span><strong>${cost} SP</strong></div>`);
+  rows.push(`<div class="detail-row"><span>Cooldown</span><strong>${cooldown}s</strong></div>`);
+  rows.push(`<div class="detail-row"><span>Training Price</span><strong>${price}g</strong></div>`);
+  rows.push(`<div class="detail-row"><span>Required Level</span><strong>${reqLevel}</strong></div>`);
+
+  if (damage > 0) {
+    rows.push(`<div class="detail-row"><span>Direct Damage</span><strong>${damage}</strong></div>`);
   }
 
-  if (s.heal != null && Number(s.heal) > 0) {
-    rows.push(`<div class="detail-row"><span>Heal</span><strong>${Number(s.heal)}</strong></div>`);
+  if (heal > 0) {
+    rows.push(`<div class="detail-row"><span>Healing</span><strong>${heal}</strong></div>`);
   }
 
-  if (s.dot_damage != null && Number(s.dot_damage) > 0) {
-    rows.push(`<div class="detail-row"><span>Damage Over Time</span><strong>${Number(s.dot_damage)} × ${Number(s.dot_duration || 1)}s</strong></div>`);
+  if (dotDamage > 0) {
+    const ticks = dotDuration > 0 && dotTickRate > 0
+      ? Math.floor(dotDuration / dotTickRate)
+      : 0;
+
+    const totalDot = ticks > 0 ? dotDamage * ticks : dotDamage;
+
+    rows.push(`<div class="detail-row"><span>DoT Damage</span><strong>${dotDamage} / tick</strong></div>`);
+
+    if (dotDuration > 0) {
+      rows.push(`<div class="detail-row"><span>DoT Duration</span><strong>${dotDuration}s</strong></div>`);
+    }
+
+    if (dotTickRate > 0) {
+      rows.push(`<div class="detail-row"><span>Tick Rate</span><strong>${dotTickRate}s</strong></div>`);
+    }
+
+    if (ticks > 0) {
+      rows.push(`<div class="detail-row"><span>Total DoT</span><strong>${totalDot}</strong></div>`);
+    }
   }
 
-  if (s.dot_tick_rate != null && Number(s.dot_tick_rate) > 0) {
-    rows.push(`<div class="detail-row"><span>Tick Rate</span><strong>${Number(s.dot_tick_rate)}s</strong></div>`);
+  if (s.buff_stat && Number(s.buff_value || 0) > 0) {
+    const duration = Number(s.buff_duration || 0);
+    rows.push(`<div class="detail-row"><span>Buff Stat</span><strong>${esc(s.buff_stat)}</strong></div>`);
+    rows.push(`<div class="detail-row"><span>Buff Value</span><strong>+${Number(s.buff_value)}</strong></div>`);
+
+    if (duration > 0) {
+      rows.push(`<div class="detail-row"><span>Buff Duration</span><strong>${duration}s</strong></div>`);
+    }
   }
 
-  if (s.buff_stat && s.buff_value) {
-    const duration = s.buff_duration ? ` (${Number(s.buff_duration)}s)` : "";
-    rows.push(`<div class="detail-row"><span>Buff</span><strong>+${Number(s.buff_value)} ${esc(s.buff_stat)}${duration}</strong></div>`);
-  }
+  if (s.debuff_stat && Number(s.debuff_value || 0) > 0) {
+    const duration = Number(s.debuff_duration || 0);
+    rows.push(`<div class="detail-row"><span>Debuff Stat</span><strong>${esc(s.debuff_stat)}</strong></div>`);
+    rows.push(`<div class="detail-row"><span>Debuff Value</span><strong>-${Number(s.debuff_value)}</strong></div>`);
 
-  if (s.debuff_stat && s.debuff_value) {
-    const duration = s.debuff_duration ? ` (${Number(s.debuff_duration)}s)` : "";
-    rows.push(`<div class="detail-row"><span>Debuff</span><strong>-${Number(s.debuff_value)} ${esc(s.debuff_stat)}${duration}</strong></div>`);
+    if (duration > 0) {
+      rows.push(`<div class="detail-row"><span>Debuff Duration</span><strong>${duration}s</strong></div>`);
+    }
   }
 
   return rows.join("");
@@ -127,7 +164,17 @@ router.get("/", requireLogin, async (req: any, res: any) => {
   const pid = req.session.playerId as number;
 
   const [[player]]: any = await db.query(
-    `SELECT pclass, gold, level FROM players WHERE id=? LIMIT 1`,
+    `
+    SELECT 
+      p.pclass,
+      p.gold,
+      p.level,
+      c.class_color
+    FROM players p
+    LEFT JOIN classes c ON c.name = p.pclass
+    WHERE p.id=?
+    LIMIT 1
+    `,
     [pid]
   );
 
@@ -136,6 +183,7 @@ router.get("/", requireLogin, async (req: any, res: any) => {
   const pclass = String(player.pclass || "Unknown");
   const playerGold = Number(player.gold || 0);
   const playerLevel = Number(player.level || 1);
+  const classColor = String(player.class_color || "#c8a34b");
 
   const [spells]: any = await db.query(
     `SELECT * FROM spells WHERE sclass = ? OR sclass = 'any' ORDER BY level ASC, name ASC`,
@@ -232,7 +280,7 @@ router.get("/", requireLogin, async (req: any, res: any) => {
   <script defer src="/statpanel.js"></script>
   <script defer src="/trainer.js"></script>
 </head>
-<body>
+<body style="--class-color:${esc(classColor)};">
   <div id="statpanel-root"></div>
 
   <main class="trainer-page">

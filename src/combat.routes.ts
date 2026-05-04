@@ -19,7 +19,7 @@ const router = Router();
 
 // ✅ POTION GLOBAL COOLDOWN (server authoritative)
 const potionCooldowns = new Map<number, { health: number; mana: number }>();
-const POTION_GCD_MS = 2000; // 2 seconds
+const POTION_GCD_MS = 20000; // 20 seconds
 
 function getPotionCd(pid: number) {
   const cur = potionCooldowns.get(pid);

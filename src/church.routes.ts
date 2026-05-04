@@ -7,11 +7,9 @@ import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
 
 const router = express.Router();
-
-const HEAL_COST = 10;
-const RESTORE_COST = 10;
-const REVIVE_COST = 50;
 const WAIT_TIME = 5 * 60 * 1000; // 5 minutes
+
+
 
 type BasePlayerRow = {
   id: number;
@@ -59,6 +57,17 @@ function fmt(n: number) {
   return new Intl.NumberFormat("en-US").format(Number(n || 0));
 }
 
+function getHealCost(level: number) {
+  return Math.max(10, Math.floor(level * 4));
+}
+
+function getRestoreCost(level: number) {
+  return Math.max(10, Math.floor(level * 4));
+}
+
+function getReviveCost(level: number) {
+  return Math.max(50, Math.floor(level * 18));
+}
 // =======================
 // SANCTUARY PAGE
 // =======================
@@ -101,6 +110,9 @@ router.get("/", requireLogin, async (req, res) => {
   }
 
   const isDead = hpoints <= 0;
+  const healCost = getHealCost(base.level);
+  const restoreCost = getRestoreCost(base.level);
+  const reviveCost = getReviveCost(base.level);
   const secondsLeft =
     revive_at ? Math.max(0, Math.ceil((revive_at - Date.now()) / 1000)) : 0;
 
@@ -114,15 +126,15 @@ router.get("/", requireLogin, async (req, res) => {
     ? "Unavailable while dead"
     : hpFull
       ? "Already at full health"
-      : `Cost: ${HEAL_COST}g`;
+      : `Cost: ${healCost}g`;
 
   const restoreHint = isDead
     ? "Unavailable while dead"
     : spFull
       ? "Already at full spirit"
-      : `Cost: ${RESTORE_COST}g`;
+      : `Cost: ${restoreCost}g`;
 
-  const reviveHint = !isDead ? "Only when dead" : `Cost: ${REVIVE_COST}g`;
+  const reviveHint = !isDead ? "Only when dead" : `Cost: ${reviveCost}g`;
 
 res.send(`
 <!doctype html>
@@ -165,7 +177,7 @@ res.send(`
           <div class="hero-icon">⛪</div>
           <div>
             <h1>Sanctuary of Light</h1>
-            <p>A quiet refuge from war, corruption, and death.</p>
+            <p>A place where the dying linger, and the faithful are restored.</p>
           </div>
         </div>
 
@@ -205,7 +217,7 @@ res.send(`
                 </div>
                 <form method="POST" action="/church/heal">
                   <button class="btn ${healDisabled ? "disabled" : "primary"}" ${healDisabled ? "disabled" : ""}>
-                    Heal (${HEAL_COST}g)
+                    Heal (${healCost}g)
                   </button>
                 </form>
               </div>
@@ -218,7 +230,7 @@ res.send(`
                 </div>
                 <form method="POST" action="/church/restore">
                   <button class="btn ${restoreDisabled ? "disabled" : "primary"}" ${restoreDisabled ? "disabled" : ""}>
-                    Restore (${RESTORE_COST}g)
+                    Restore (${restoreCost}g)
                   </button>
                 </form>
               </div>
@@ -253,7 +265,7 @@ res.send(`
             </div>
 
             <div class="note">
-              Future Sanctuary services can include buffs, curse removal, corruption cleansing, and favor rewards.
+              The Sanctuary keeps records of every offering. In time, devotion may open stronger blessings, cleansing rites, and deeper favor.
             </div>
 
           </div>
@@ -279,7 +291,7 @@ res.send(`
 
                   <form method="POST" action="/church/revive">
                     <button class="btn danger ${!isDead ? "disabled" : ""}" ${!isDead ? "disabled" : ""}>
-                      Revive (${REVIVE_COST}g)
+                      Revive (${reviveCost}g)
                     </button>
                   </form>
                 </div>
@@ -414,13 +426,14 @@ router.post("/heal", requireLogin, async (req, res) => {
 
   if (base.hpoints <= 0) return res.redirect("/church");
   if (base.hpoints >= stats.maxhp) return res.redirect("/church");
-  if (base.gold < HEAL_COST) return res.send("Not enough gold.");
+const cost = getHealCost(base.level);
 
-  await db.query(`UPDATE players SET hpoints=?, gold=gold-? WHERE id=?`, [
-    stats.maxhp,
-    HEAL_COST,
-    pid,
-  ]);
+const [r]: any = await db.query(
+  `UPDATE players SET hpoints=?, gold=gold-? WHERE id=? AND gold >= ?`,
+  [stats.maxhp, cost, pid, cost]
+);
+
+if (!r?.affectedRows) return res.send("Not enough gold.");
 
   res.redirect("/church");
 });
@@ -439,15 +452,16 @@ router.post("/restore", requireLogin, async (req, res) => {
 
   if (base.hpoints <= 0) return res.redirect("/church");
   if (base.spoints >= stats.maxspoints) return res.redirect("/church");
-  if (base.gold < RESTORE_COST) return res.send("Not enough gold.");
+  const cost = getRestoreCost(base.level);
 
-  await db.query(`UPDATE players SET spoints=?, gold=gold-? WHERE id=?`, [
-    stats.maxspoints,
-    RESTORE_COST,
-    pid,
-  ]);
+  const [r]: any = await db.query(
+    `UPDATE players SET spoints=?, gold=gold-? WHERE id=? AND gold >= ?`,
+    [stats.maxspoints, cost, pid, cost]
+  );
 
-  res.redirect("/church");
+  if (!r?.affectedRows) return res.send("Not enough gold.");
+
+res.redirect("/church");
 });
 
 // =======================
@@ -463,19 +477,21 @@ router.post("/revive", requireLogin, async (req, res) => {
   if (!stats) return res.redirect("/login.html");
 
   if (base.hpoints > 0) return res.redirect("/church");
-  if (base.gold < REVIVE_COST) return res.send("Not enough gold for revival.");
+  const cost = getReviveCost(base.level);
 
-  await db.query(
+  const [r]: any = await db.query(
     `
     UPDATE players
     SET hpoints=?,
         spoints=?,
         gold=gold-?,
         revive_at=NULL
-    WHERE id=?
+    WHERE id=? AND gold >= ?
     `,
-    [stats.maxhp, stats.maxspoints, REVIVE_COST, pid]
+    [stats.maxhp, stats.maxspoints, cost, pid, cost]
   );
+
+  if (!r?.affectedRows) return res.send("Not enough gold for revival.");
 
   res.redirect("/church");
 });

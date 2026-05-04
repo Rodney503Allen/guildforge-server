@@ -1,3 +1,4 @@
+//character.js
 async function addStat(stat) {
   const res = await fetch("/character/stat", {
     method:"POST",

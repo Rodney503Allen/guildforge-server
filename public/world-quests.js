@@ -1,4 +1,5 @@
-    // QUEST LOG + TRACKER (WORLD)
+  //world-quests.js
+  // QUEST LOG + TRACKER (WORLD)
   // Requires:
   // GET  /api/quests/log
   // GET  /api/quests/tracked
@@ -123,7 +124,9 @@
       .then(r => r.json())
       .catch(() => ({}));
 
-    const trackedId = tracked && tracked.trackedId ? Number(tracked.trackedId) : null;
+    const trackedIds = Array.isArray(tracked?.trackedIds)
+      ? tracked.trackedIds.map(Number)
+      : [];
 
     questList.innerHTML = "";
 
@@ -141,7 +144,7 @@
 
     for (const q of filtered) {
       const isActive = ["active","accepted","in_progress"].includes(String(q.status || "").toLowerCase());
-      const isTracked = trackedId && q.playerQuestId === trackedId;
+      const isTracked = trackedIds.includes(Number(q.playerQuestId));
 
       const objText = (q.objectives || []).map(function(o){
         return "• " + objectiveLine(o);
@@ -161,7 +164,7 @@
         '<div class="qrowBtns">' +
           '<span class="qtag ' + (isActive ? "active" : "") + '">' + escapeHtml(q.status) + '</span>' +
           '<button class="qbtn" ' + (!isActive ? "disabled" : "") + ' data-track="' + String(q.playerQuestId) + '">' +
-            (isTracked ? "Tracking" : "Track") +
+            (isTracked ? "Untrack" : "Track") +
           '</button>' +
         '</div>';
 
@@ -173,12 +176,14 @@
           await fetch("/api/quests/track", {
             method: "POST",
             headers: { "Content-Type":"application/json" },
-            body: JSON.stringify({ playerQuestId: q.playerQuestId })
+            body: JSON.stringify({
+              playerQuestId: q.playerQuestId,
+              mode: isTracked ? "untrack" : "track"
+            })
           });
 
           await refreshTrackedQuest();
           await refreshQuestLog();
-          closeQuestModal();
         });
       }
 
@@ -186,34 +191,45 @@
     }
   }
 
-  async function refreshTrackedQuest(){
-    const data = await fetch("/api/quests/tracked").then(r => r.json()).catch(() => null);
+async function refreshTrackedQuest(){
+  const data = await fetch("/api/quests/tracked")
+    .then(r => r.json())
+    .catch(() => null);
 
-    if (!data || !data.trackedId) {
-      questTracker.classList.add("hidden");
-      return;
-    }
+  const trackedIds = Array.isArray(data?.trackedIds)
+    ? data.trackedIds.map(Number)
+    : [];
 
-    const grouped = groupQuestLogRows(data.rows || []);
-    const q = grouped[0];
-
-    qtTitle.textContent = q && q.title ? ("Tracking: " + q.title) : "Tracking";
-
-    const lines = (q && q.objectives ? q.objectives : []).map(function(o){
-      const done = o.isComplete ? "✅" : "⬜";
-      const hint = o.region ? (" — Region: " + o.region) : "";
-      return done + " " + objectiveLine(o) + hint;
-    });
-
-    qtBody.textContent = lines.join("\n");
-    questTracker.classList.remove("hidden");
-    // ping on update
-    questTracker.classList.remove("ping");
-    void questTracker.offsetWidth; // restart animation
-    questTracker.classList.add("ping");
-
+  if (!data || !trackedIds.length || !Array.isArray(data.rows) || !data.rows.length) {
+    questTracker.classList.add("hidden");
+    return;
   }
 
+  const grouped = groupQuestLogRows(data.rows);
+
+  qtTitle.textContent = `Tracking ${grouped.length} Quest${grouped.length === 1 ? "" : "s"}`;
+
+  qtBody.innerHTML = grouped.map(q => {
+    const lines = (q.objectives || []).map(o => {
+      const done = o.isComplete ? "✅" : "⬜";
+      const hint = o.region ? ` <span class="qtHint">— ${escapeHtml(o.region)}</span>` : "";
+      return `<div class="qtObjective">${done} ${escapeHtml(objectiveLine(o))}${hint}</div>`;
+    }).join("");
+
+    return `
+      <div class="qtQuest">
+        <div class="qtQuestTitle">${escapeHtml(q.title || "Quest")}</div>
+        <div class="qtObjectives">${lines}</div>
+      </div>
+    `;
+  }).join("");
+
+  questTracker.classList.remove("hidden");
+
+  questTracker.classList.remove("ping");
+  void questTracker.offsetWidth;
+  questTracker.classList.add("ping");
+}
   // Initial load
   refreshTrackedQuest();
 

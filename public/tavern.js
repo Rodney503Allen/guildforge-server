@@ -14,12 +14,20 @@
 
   const turninList = qs("turninList");
 
+  const turninBox = qs("turninBox");
+  const turninToggle = qs("turninToggle");
+  const turninSummary = qs("turninSummary");
+
   let currentRumorQuestId = null;
 
   // townId from querystring (fallback 1)
   window.TOWN_ID = null;
 
-
+  if (turninToggle && turninBox) {
+    turninToggle.addEventListener("click", () => {
+      turninBox.classList.toggle("collapsed");
+    });
+  }
   // -------------------------
   // Simple nav
   // -------------------------
@@ -29,9 +37,78 @@
     });
   }
 
-  // -------------------------
-  // Rumors
-  // -------------------------
+// -------------------------
+// Rumors
+// -------------------------
+let availableRumors = [];
+
+function objectivePreviewText(q) {
+  const obj = q?.objectivePreview;
+  if (!obj) return "";
+
+  if (obj.type === "TURN_IN" && obj.item?.name) {
+    return `Objective: Bring ${obj.required} × ${obj.item.name}`;
+  }
+
+  if (obj.type === "KILL" && obj.creature?.name) {
+    return `Objective: Kill ${obj.required} × ${obj.creature.name}`;
+  }
+
+  return "";
+}
+
+function renderRumorStack(quests) {
+  if (!rumorText || !btnAccept) return;
+
+  currentRumorQuestId = null;
+  availableRumors = quests || [];
+
+  btnAccept.style.display = "none";
+  btnAccept.disabled = true;
+
+  if (!availableRumors.length) {
+    rumorHint.textContent = "Nothing new. The tavern’s quiet… for now.";
+    rumorText.innerHTML = `
+      <div class="rumor-empty">
+        No fresh rumors tonight. Check back after you’ve completed what’s available here.
+      </div>
+    `;
+    return;
+  }
+
+  rumorHint.textContent = `${availableRumors.length} rumor${availableRumors.length === 1 ? "" : "s"} overheard`;
+
+  rumorText.innerHTML = availableRumors.map((q) => {
+    const objective = objectivePreviewText(q);
+
+    const isMainStory = Number(q.chainId) === 1;
+
+    return `
+      <div class="rumor-card ${isMainStory ? "main-story" : ""}" data-rumor-id="${Number(q.questId)}">
+        <div class="rumor-card-head">
+          <strong>${q.title || "Untitled Rumor"}</strong>
+          <span>${q.chainId ? `Chain ${q.chainOrder || "?"}` : "Local Work"}</span>
+        </div>
+
+        <p>${q.dialogIntro || q.description || "A rumor passes through the crowd…"}</p>
+
+        ${objective ? `<div class="rumor-objective">${objective}</div>` : ""}
+
+        <button class="btn primary rumor-accept-btn" type="button" data-accept-rumor="${Number(q.questId)}">
+          Accept Quest
+        </button>
+      </div>
+    `;
+  }).join("");
+
+  rumorText.querySelectorAll("[data-accept-rumor]").forEach(button => {
+    button.addEventListener("click", () => {
+      const questId = Number(button.getAttribute("data-accept-rumor"));
+      acceptRumorQuest(questId, button);
+    });
+  });
+}
+
 async function listenForRumors() {
   if (!btnRumor) return;
 
@@ -48,73 +125,59 @@ async function listenForRumors() {
   try {
     const res = await fetch(`/api/tavern/${window.TOWN_ID}/rumor`, {
       credentials: "include",
-    });      const data = await res.json();
+    });
 
-      if (!res.ok) throw new Error(data?.error || "rumor_error");
+    const data = await res.json();
 
-      // API shape: { ok: true, quest: null } or { ok: true, quest: {...} }
-      const q = data?.quest ?? null;
+    if (!res.ok) throw new Error(data?.error || "rumor_error");
 
-      if (!q) {
-        currentRumorQuestId = null;
-        rumorHint.textContent = "Nothing new. The tavern’s quiet… for now.";
-        rumorText.textContent =
-          "No fresh rumors tonight. Check back after you’ve completed what’s available here.";
-        btnAccept.disabled = true;
-        return;
-      }
-
-      currentRumorQuestId = q.questId;
-
-      rumorHint.textContent = q.title || "Rumor";
-      rumorText.textContent =
-        (q.dialogIntro || q.description || "A rumor passes through the crowd…") +
-        (q.objectivePreview?.item?.name
-          ? `\n\nObjective: Bring ${q.objectivePreview.required} × ${q.objectivePreview.item.name}`
-          : "");
-
-      btnAccept.disabled = false;
-    } catch (e) {
-      console.error("listenForRumors failed:", e);
-      currentRumorQuestId = null;
-      rumorHint.textContent = "The noise drowns you out.";
-      rumorText.textContent = "Something went wrong while listening for rumors.";
-      btnAccept.disabled = true;
-    } finally {
-      btnRumor.disabled = false;
-      btnRumor.textContent = "Listen for Rumors";
-    }
-  }
-
-  async function acceptRumorQuest() {
-    if (!currentRumorQuestId) return;
-
+    renderRumorStack(data?.quests || []);
+  } catch (e) {
+    console.error("listenForRumors failed:", e);
+    currentRumorQuestId = null;
+    availableRumors = [];
+    rumorHint.textContent = "The noise drowns you out.";
+    rumorText.innerHTML = `<div class="rumor-empty">Something went wrong while listening for rumors.</div>`;
     btnAccept.disabled = true;
-    btnAccept.textContent = "Accepting…";
-
-    try {
-      const res = await fetch(`/api/quests/${currentRumorQuestId}/accept`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "accept_error");
-
-      rumorHint.textContent = "Quest accepted.";
-      rumorText.textContent = "It’s yours now. Check your Quest Log.";
-    } catch (e) {
-      console.error("acceptRumorQuest failed:", e);
-      rumorHint.textContent = "Couldn’t accept.";
-      rumorText.textContent = "That rumor slipped away. Try again.";
-    } finally {
-      btnAccept.textContent = "Accept Quest";
-      // keep disabled until another rumor is rolled
-    }
+  } finally {
+    btnRumor.disabled = false;
+    btnRumor.textContent = "Listen";
   }
+}
 
-  if (btnRumor) btnRumor.addEventListener("click", listenForRumors);
-  if (btnAccept) btnAccept.addEventListener("click", acceptRumorQuest);
+async function acceptRumorQuest(questId, button) {
+  if (!questId) return;
 
+  button.disabled = true;
+  button.textContent = "Accepting…";
+
+  try {
+    const res = await fetch(`/api/quests/${questId}/accept`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "accept_error");
+
+    button.textContent = "Accepted";
+    button.classList.remove("primary");
+    button.classList.add("disabled");
+
+    const card = button.closest(".rumor-card");
+    if (card) card.classList.add("accepted");
+
+    await loadTurnins();
+  } catch (e) {
+    console.error("acceptRumorQuest failed:", e);
+    button.disabled = false;
+    button.textContent = "Accept Quest";
+
+    rumorHint.textContent = "Couldn’t accept.";
+  }
+}
+
+if (btnRumor) btnRumor.addEventListener("click", listenForRumors);
   // -------------------------
   // Turn-ins
   // -------------------------
@@ -221,6 +284,17 @@ function group(rows) {
       .catch(() => []);
 
     const quests = group(rows);
+    const totalQuests = quests.length;
+    const readyQuests = quests.filter(q => q.isComplete).length;
+
+    if (turninSummary) {
+      if (totalQuests <= 0) {
+        turninSummary.textContent = "No quests available for turn-in here.";
+      } else {
+        turninSummary.textContent = `${totalQuests} quest${totalQuests === 1 ? "" : "s"} here • ${readyQuests} ready`;
+      }
+    }
+
 
     if (!quests.length) {
       turninList.innerHTML =

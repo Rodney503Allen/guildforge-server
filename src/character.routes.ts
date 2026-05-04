@@ -697,10 +697,16 @@ router.get("/character", requireLogin, async (req, res) => {
 // STAT SPEND API
 // =======================
 router.post("/character/stat", requireLogin, async (req, res) => {
-  const pid = req.session.playerId;
+  const pid = Number(req.session.playerId);
+
+  if (!Number.isFinite(pid)) {
+    return res.json({ error: "Not logged in" });
+  }
+
   const { stat } = req.body;
 
   const allowed = ["attack", "defense", "agility", "vitality", "intellect"];
+
   if (!allowed.includes(stat)) {
     return res.json({ error: "Invalid stat" });
   }
@@ -721,12 +727,16 @@ router.post("/character/stat", requireLogin, async (req, res) => {
     WHERE id=?
   `, [pid]);
 
-  const [[updated]]: any = await db.query(`
-    SELECT ${stat} AS value, stat_points
-    FROM players WHERE id=?
-  `, [pid]);
+  const finalStats = await getFinalPlayerStats(pid);
 
-  res.json(updated);
+  if (!finalStats) {
+    return res.json({ error: "Could not recalculate player stats" });
+  }
+
+  res.json({
+    value: (finalStats as any)[stat],
+    stat_points: finalStats.stat_points
+  });
 });
 
 // =======================

@@ -7,78 +7,66 @@
 
   const detailIcon = document.getElementById("detailIcon");
   const detailName = document.getElementById("detailName");
+  const detailSchool = document.getElementById("detailSchool");
   const detailMeta = document.getElementById("detailMeta");
   const detailDesc = document.getElementById("detailDesc");
-  const detailStats = document.getElementById("detailStats");
-  const detailState = document.getElementById("detailState");
+  const detailRows = document.getElementById("detailRows");
 
   if (!list) return;
 
   const cards = Array.from(list.querySelectorAll(".spell-card"));
 
-  function statRow(label, value) {
-    if (!value || value === "0") return "";
-    return `
-      <div class="detailStatRow">
-        <span>${label}</span>
-        <strong>${value}</strong>
-      </div>
-    `;
-  }
-
   function selectSpell(card) {
-    cards.forEach(c => c.classList.remove("selected"));
+    cards.forEach(c => {
+      c.classList.remove("selected");
+      c.classList.remove("is-selected");
+    });
+
     card.classList.add("selected");
+    card.classList.add("is-selected");
 
-    const name = card.dataset.name || "Unknown";
-    const type = card.dataset.type || "Spell";
-    const state = card.dataset.state || "unknown";
-    const icon = card.dataset.icon || "/icons/default.png";
-    const desc = card.dataset.desc || "No description.";
-
-    detailIcon.src = icon;
-    detailName.textContent = name;
-    detailMeta.textContent = `Level ${card.dataset.level || "?"} • ${type}`;
-    detailDesc.textContent = desc;
-
-    detailState.textContent = state;
-    detailState.className = `badge ${state === "learned" ? "good" : "warn"}`;
-
-    const stats = [
-      statRow("SP Cost", card.dataset.scost),
-      statRow("Cooldown", card.dataset.cooldown ? card.dataset.cooldown + "s" : ""),
-      statRow("Damage", card.dataset.damage),
-      statRow("Healing", card.dataset.heal),
-      statRow("DoT", card.dataset.dotdamage),
-      statRow("Duration", card.dataset.dotduration ? card.dataset.dotduration + "s" : ""),
-      card.dataset.buffstat
-        ? statRow("Buff", `+${card.dataset.buffvalue} ${card.dataset.buffstat}`)
-        : ""
-    ].join("");
-
-    detailStats.innerHTML = stats || `<div class="empty">No stats</div>`;
+    detailIcon.src = card.dataset.icon || "/icons/default.png";
+    detailName.textContent = card.dataset.name || "Unknown Spell";
+    detailSchool.textContent = card.dataset.school || "Spell";
+    detailDesc.textContent = card.dataset.desc || "No description.";
+    detailMeta.textContent = card.dataset.meta || "";
+    detailRows.innerHTML = card.dataset.rows || `<div class="empty">No spell stats available.</div>`;
   }
 
   function applySearch() {
     const q = (input?.value || "").toLowerCase();
     const f = (filter?.value || "all").toLowerCase();
 
-    cards.forEach(el => {
-      const name = (el.dataset.name || "").toLowerCase();
-      const state = (el.dataset.state || "").toLowerCase();
+    cards.forEach(card => {
+      const name = (card.dataset.name || "").toLowerCase();
+      const type = (card.dataset.type || "").toLowerCase();
 
       const show =
         (!q || name.includes(q)) &&
-        (f === "all" || state === f);
+        (f === "all" || type === f);
 
-      el.style.display = show ? "" : "none";
+      card.hidden = !show;
     });
+
+    const selected = cards.find(c => c.classList.contains("is-selected") && !c.hidden);
+    const firstVisible = cards.find(c => !c.hidden);
+
+    if (!selected && firstVisible) {
+      selectSpell(firstVisible);
+    }
   }
 
   cards.forEach(card => {
     card.addEventListener("click", e => {
-      if (e.target.closest("button")) return;
+      if (e.target.closest("a, button")) return;
       selectSpell(card);
+    });
+
+    card.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectSpell(card);
+      }
     });
   });
 
@@ -87,6 +75,6 @@
 
   applySearch();
 
-  const first = cards.find(c => c.style.display !== "none");
+  const first = cards.find(c => !c.hidden);
   if (first) selectSpell(first);
 })();

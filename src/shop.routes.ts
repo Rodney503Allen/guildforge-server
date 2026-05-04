@@ -129,7 +129,7 @@ router.get("/shop", async (req, res) => {
     const choiceCount = getTownShopChoiceCount(townLevel);
 
     const [shops]: any = await db.query(
-      `SELECT * FROM shops WHERE location_id=?`,
+      `SELECT id, type FROM shops WHERE location_id=?`,
       [town.id]
     );
 
@@ -359,13 +359,13 @@ router.get("/shop", async (req, res) => {
 
       if (i.sourceType === "base") {
         buyButton = `
-          <button ${canBuy ? "" : "disabled"} onclick="buyBase(${Number(i.id)}, '${escapeHtml(i.category)}')">
+          <button ${canBuy ? "" : "disabled"} onclick="buyBase(${Number(i.id)}, '${escapeHtml(i.category)}', this)">
             ${canBuy ? "Buy" : "Sold Out"}
           </button>
         `;
       } else {
         buyButton = `
-          <button ${canBuy ? "" : "disabled"} onclick="buy(${Number(i.shopItemId)})">
+          <button ${canBuy ? "" : "disabled"} onclick="buy(${Number(i.shopItemId)}, this)">
             ${canBuy ? "Buy" : "Sold Out"}
           </button>
         `;
@@ -385,13 +385,25 @@ router.get("/shop", async (req, res) => {
           data-desc="${escapeHtml(i.description || "")}"
         >
           <div class="thumb">${thumbHtml}</div>
+
+          <div class="item-info">
+            <strong>${escapeHtml(i.name)}</strong>
+            <span>${Number(i.price || 0).toLocaleString("en-US")} gold</span>
+          </div>
+
           ${buyButton}
         </div>
       `;
     }
 
-    function renderCards(arr: any[]) {
-      return (arr || []).map(renderItemCard).join("") || `<div class="empty">No items.</div>`;
+    function renderCards(arr: any[], label = "items") {
+      return (arr || []).map(renderItemCard).join("") || `
+        <div class="empty-market">
+          <div class="empty-icon">⛺</div>
+          <strong>No ${escapeHtml(label)} available</strong>
+          <span>This stall has nothing suitable for you right now. Check another stall or return later.</span>
+        </div>
+      `;
     }
 
 res.send(`
@@ -400,7 +412,7 @@ res.send(`
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Guildforge | Shop</title>
+  <title>Guildforge | Market</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -525,25 +537,25 @@ res.send(`
           <div class="card">
             <div class="cardHeader compact">
               <div class="cardTitle">
-                <h2>Coming Soon</h2>
-                <p>Future market systems planned for Guildforge.</p>
+                <h2>Market Rumors</h2>
+                <p>Talk around the stalls.</p>
               </div>
-              <span class="badge warn">Planned</span>
+              <span class="badge warn">Coming Soon</span>
             </div>
 
             <div class="cardBody">
               <div class="marketFutureList">
                 <div class="futureRow">
-                  <strong>Vendor Reputation</strong>
-                  <span>Discounts and rare wares from trusted merchants.</span>
+                  <strong>Trusted Buyers</strong>
+                  <span>Some merchants favor repeat customers with better rates.</span>
                 </div>
                 <div class="futureRow">
                   <strong>Rotating Stock</strong>
-                  <span>Limited-time items that refresh by town or region.</span>
+                  <span>Caravans bring different wares depending on the region.</span>
                 </div>
                 <div class="futureRow">
-                  <strong>Player Trading</strong>
-                  <span>List materials, gear, and crafted goods for other players.</span>
+                  <strong>Trade Contracts</strong>
+                <span>Guilds may soon broker supplies and rare materials.</span>
                 </div>
               </div>
             </div>
@@ -619,7 +631,15 @@ router.post("/api/shop/buy", async (req, res) => {
 
     await addItemAtomic(Number(pid), Number(row.item_id), 1);
 
-    res.json({ success: true });
+    const [[updatedPlayer]]: any = await db.query(
+      `SELECT gold FROM players WHERE id=? LIMIT 1`,
+      [pid]
+    );
+
+    res.json({
+      success: true,
+      gold: Number(updatedPlayer?.gold ?? 0)
+    });
   } catch (err) {
     console.error("POST /api/shop/buy failed:", err);
     res.json({ error: "Purchase failed" });

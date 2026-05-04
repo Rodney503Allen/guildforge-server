@@ -67,7 +67,7 @@ router.get("/journal/quests", async (req, res) => {
   }
 });
 
-// GET tracked quest
+// GET tracked quests
 router.get("/quests/tracked", async (req, res) => {
   try {
     const pid = (req.session as any)?.playerId;
@@ -75,60 +75,51 @@ router.get("/quests/tracked", async (req, res) => {
 
     await syncTurnInObjectivesFromInventory(pid);
 
-    const [[p]]: any = await db.query(
-      `SELECT tracked_player_quest_id AS trackedId FROM players WHERE id=? LIMIT 1`,
+    const [rows]: any = await db.query(
+      `
+      SELECT
+        pq.id AS playerQuestId,
+        pq.status,
+        q.title,
+        q.description,
+        o.type AS objectiveType,
+        o.required_count,
+        o.region_name,
+        o.target_item_id,
+        o.target_creature_id,
+        pqo.progress_count,
+        pqo.is_complete,
+
+        i.name AS item_name,
+        i.icon AS item_icon,
+
+        c.name AS creature_name,
+        c.creatureimage AS creature_icon
+
+      FROM player_tracked_quests ptq
+      JOIN player_quests pq
+        ON pq.id = ptq.player_quest_id
+       AND pq.player_id = ptq.player_id
+
+      JOIN quests q ON q.id = pq.quest_id
+      JOIN player_quest_objectives pqo ON pqo.player_quest_id = pq.id
+      JOIN quest_objectives o ON o.id = pqo.objective_id
+
+      LEFT JOIN items i ON i.id = o.target_item_id
+      LEFT JOIN creatures c ON c.id = o.target_creature_id
+
+      WHERE ptq.player_id=?
+        AND pq.status IN ('active','accepted','in_progress','completed')
+
+      ORDER BY ptq.created_at ASC, pq.id ASC, o.id ASC
+      `,
       [pid]
     );
 
-    const trackedId = p?.trackedId ? Number(p.trackedId) : null;
-    if (!trackedId) return res.json({ trackedId: null });
-
-const [rows]: any = await db.query(
-  `
-  SELECT
-    pq.id AS playerQuestId,
-    pq.status,
-    q.title,
-    q.description,
-    o.type AS objectiveType,
-    o.required_count,
-    o.region_name,
-    o.target_item_id,
-    o.target_creature_id,
-    pqo.progress_count,
-    pqo.is_complete,
-
-    i.name AS item_name,
-    i.icon AS item_icon,
-
-    c.name AS creature_name,
-    c.creatureimage AS creature_icon
-
-  FROM player_quests pq
-  JOIN quests q ON q.id = pq.quest_id
-  JOIN player_quest_objectives pqo ON pqo.player_quest_id = pq.id
-  JOIN quest_objectives o ON o.id = pqo.objective_id
-
-  LEFT JOIN items i ON i.id = o.target_item_id
-  LEFT JOIN creatures c ON c.id = o.target_creature_id   -- ✅ ADD THIS
-
-  WHERE pq.player_id=?
-    AND pq.id=?
-    AND pq.status IN ('active','completed')
-  ORDER BY o.id ASC
-  `,
-  [pid, trackedId]
-);
-
-
-
-    // If tracked quest no longer exists, clear it
-    if (!rows || rows.length === 0) {
-      await db.query(`UPDATE players SET tracked_player_quest_id=NULL WHERE id=?`, [pid]);
-      return res.json({ trackedId: null });
-    }
-
-    res.json({ trackedId, rows });
+    res.json({
+      trackedIds: [...new Set((rows || []).map((r: any) => Number(r.playerQuestId)))],
+      rows: rows || []
+    });
   } catch (err) {
     console.error("🔥 GET /quests/tracked ERROR:", err);
     res.status(500).json({ error: "server_error" });
@@ -237,19 +228,19 @@ router.post("/quests/:playerQuestId/turn-in", async (req, res) => {
   }
 });
 
-
-// POST set/clear tracked quest
+// POST toggle/clear tracked quests
 router.post("/quests/track", async (req, res) => {
   try {
     const pid = (req.session as any)?.playerId;
     if (!pid) return res.status(401).json({ error: "Not logged in" });
 
     const raw = req.body?.playerQuestId;
+    const mode = String(req.body?.mode || "toggle");
 
-    // clear
+    // clear all
     if (raw === null || raw === undefined || raw === "") {
-      await db.query(`UPDATE players SET tracked_player_quest_id=NULL WHERE id=?`, [pid]);
-      return res.json({ success: true, trackedId: null });
+      await db.query(`DELETE FROM player_tracked_quests WHERE player_id=?`, [pid]);
+      return res.json({ success: true, trackedIds: [] });
     }
 
     const playerQuestId = Number(raw);
@@ -261,6 +252,7 @@ router.post("/quests/track", async (req, res) => {
       `SELECT id, status FROM player_quests WHERE id=? AND player_id=? LIMIT 1`,
       [playerQuestId, pid]
     );
+
     if (!pq) return res.status(404).json({ error: "Quest not found" });
 
     const status = String(pq.status || "").toLowerCase();
@@ -268,12 +260,30 @@ router.post("/quests/track", async (req, res) => {
       return res.status(400).json({ error: "Quest not trackable" });
     }
 
-    await db.query(
-      `UPDATE players SET tracked_player_quest_id=? WHERE id=?`,
-      [playerQuestId, pid]
+    if (mode === "untrack") {
+      await db.query(
+        `DELETE FROM player_tracked_quests WHERE player_id=? AND player_quest_id=?`,
+        [pid, playerQuestId]
+      );
+    } else {
+      await db.query(
+        `
+        INSERT IGNORE INTO player_tracked_quests (player_id, player_quest_id)
+        VALUES (?, ?)
+        `,
+        [pid, playerQuestId]
+      );
+    }
+
+    const [tracked]: any = await db.query(
+      `SELECT player_quest_id FROM player_tracked_quests WHERE player_id=? ORDER BY created_at ASC`,
+      [pid]
     );
 
-    res.json({ success: true, trackedId: playerQuestId });
+    res.json({
+      success: true,
+      trackedIds: (tracked || []).map((r: any) => Number(r.player_quest_id))
+    });
   } catch (err) {
     console.error("🔥 POST /quests/track ERROR:", err);
     res.status(500).json({ error: "server_error" });

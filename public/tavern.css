@@ -318,9 +318,9 @@ body::before{
 
 .chatLine{
   display:grid;
-  grid-template-columns:48px max-content 1fr;
-  gap:10px;
-  align-items:baseline;
+  grid-template-columns:48px 1fr;
+  gap:4px 10px;
+  align-items:start;
   padding:9px 8px;
   border-radius:10px;
   border:1px solid transparent;
@@ -330,7 +330,12 @@ body::before{
   background:rgba(255,255,255,.025);
   border-color:rgba(255,255,255,.055);
 }
-
+.chatTime{
+  grid-column:1;
+  grid-row:1 / span 2;
+  color:rgba(154,163,175,.78);
+  font-size:12px;
+}
 .chatTime,
 .chatMeta{
   color:rgba(154,163,175,.78);
@@ -338,10 +343,13 @@ body::before{
 }
 
 .chatName{
+  grid-column:2;
+  grid-row:1;
   color:var(--bone);
   font-weight:900;
   font-size:13px;
-  white-space:nowrap;
+  white-space:normal;
+  overflow-wrap:anywhere;
 }
 
 .chatName.barkeep{ color:#ff7b5b; }
@@ -349,9 +357,12 @@ body::before{
 .chatName.archivist{ color:#8cc8ff; }
 
 .chatMsg{
+  grid-column:2;
+  grid-row:2;
   color:rgba(215,219,226,.90);
   font-size:14px;
   line-height:1.35;
+  overflow-wrap:anywhere;
 }
 
 .chatInputRow{
@@ -413,13 +424,95 @@ body::before{
 .rumorText{
   margin:0;
   min-height:82px;
-  display:flex;
-  align-items:center;
+  display:block;
   color:rgba(235,231,220,.92);
   font-size:14px;
   line-height:1.55;
-  white-space:pre-wrap;
+  white-space:normal;
 }
+
+.rumor-card{
+  padding:12px;
+  border-radius:14px;
+  border:1px solid rgba(201,184,154,.14);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.22)),
+    rgba(0,0,0,.22);
+  margin-bottom:12px;
+}
+
+.rumor-card:last-child{
+  margin-bottom:0;
+}
+
+.rumor-card-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+}
+
+.rumor-card-head strong{
+  color:var(--bone);
+  font-family:Cinzel, ui-serif, Georgia, "Times New Roman", serif;
+  font-size:14px;
+  letter-spacing:.5px;
+  text-transform:uppercase;
+}
+
+.rumor-card-head span{
+  color:var(--gold);
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.rumor-card p{
+  margin:0;
+  color:rgba(235,231,220,.88);
+  font-size:13px;
+  line-height:1.45;
+  white-space:normal;
+}
+
+.rumor-objective{
+  margin-top:10px;
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid rgba(200,163,75,.14);
+  background:rgba(0,0,0,.20);
+  color:var(--muted);
+  font-size:12px;
+}
+
+.rumor-accept-btn{
+  width:100%;
+  margin-top:12px;
+}
+
+.rumor-card.accepted{
+  opacity:.58;
+  filter:grayscale(.25);
+}
+
+.rumor-card.accepted .rumor-card-head::after{
+  content:"Accepted";
+  color:var(--good);
+  font-size:11px;
+  font-weight:900;
+  text-transform:uppercase;
+}
+
+.rumor-empty{
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.45;
+  padding:8px 2px;
+}
+
+
 
 .actionBtns{
   display:flex;
@@ -498,6 +591,39 @@ body::before{
   cursor:not-allowed;
   filter:grayscale(.15);
 }
+
+.collapsibleHeader{
+  width:100%;
+  appearance:none;
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+  text-align:left;
+  font-family:inherit;
+}
+
+.collapsibleHeader:hover{
+  background:rgba(255,255,255,.025);
+}
+
+.collapseIcon{
+  color:var(--gold);
+  font-size:18px;
+  transition:transform .15s ease;
+}
+
+.card.collapsed .collapseIcon{
+  transform:rotate(-90deg);
+}
+
+.collapsibleBody{
+  display:block;
+}
+
+.card.collapsed .collapsibleBody{
+  display:none;
+}
+
 
 /* SOCIAL SYSTEMS */
 
@@ -579,6 +705,50 @@ body::before{
   color:rgba(215,219,226,.86);
   font-size:15px;
   line-height:1.5;
+}
+
+
+/* =======================
+   MAIN STORY QUESTS
+======================= */
+
+.rumor-card.main-story{
+  border:1px solid rgba(200,163,75,.45);
+  background:
+    radial-gradient(300px 140px at 10% 0%, rgba(200,163,75,.18), transparent 70%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.25)),
+    rgba(0,0,0,.25);
+
+  box-shadow:
+    0 0 28px rgba(200,163,75,.18),
+    inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+/* Title emphasis */
+.rumor-card.main-story .rumor-card-head strong{
+  color:var(--gold);
+  text-shadow:0 0 10px rgba(200,163,75,.35);
+}
+
+/* Add "Main Story" tag */
+.rumor-card.main-story .rumor-card-head::after{
+  content:"Main Story";
+  color:#0b0f14;
+  background:linear-gradient(90deg, var(--gold), #e6c873);
+  padding:2px 8px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.4px;
+}
+
+/* Slight hover boost */
+.rumor-card.main-story:hover{
+  border-color:rgba(200,163,75,.65);
+  box-shadow:
+    0 0 36px rgba(200,163,75,.28),
+    inset 0 1px 0 rgba(255,255,255,.05);
 }
 
 /* RESPONSIVE */

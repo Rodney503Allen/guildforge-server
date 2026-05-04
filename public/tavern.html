@@ -1,3 +1,4 @@
+<!--tavern.html-->
 <!doctype html>
 <html lang="en">
 <head>
@@ -103,15 +104,19 @@
             </div>
           </section>
 
-          <section class="card" id="turninBox">
-            <div class="cardHeader compact">
+          <section class="card collapsed" id="turninBox">
+            <button class="cardHeader compact collapsibleHeader" id="turninToggle" type="button">
               <div class="cardTitle">
                 <h2>Turn In Quests</h2>
-                <p>Claim rewards from completed work.</p>
+                <p>
+                  <span id="turninSummary">Checking quests...</span>
+                </p>
               </div>
-            </div>
 
-            <div class="cardBody">
+              <span class="collapseIcon" id="turninChevron">▾</span>
+            </button>
+
+            <div class="cardBody collapsibleBody" id="turninBody">
               <div id="turninList"></div>
             </div>
           </section>
@@ -163,7 +168,7 @@
               </div>
 
               <div class="note">
-                Buttons marked <span class="badge soon">Soon</span> are intentionally disabled until these systems are wired.
+                Some tables remain closed while the tavern gathers enough hands, coin, and trust.
               </div>
             </div>
           </section>

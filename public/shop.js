@@ -1,56 +1,39 @@
 // public/shop.js
 
-const TOAST_VISIBLE_MS = 3800;
+const TOAST_VISIBLE_MS = 2200;
+
+function updateGoldDisplay(gold) {
+  const goldEl = document.querySelector(".pill strong");
+  if (!goldEl || gold == null) return;
+
+  goldEl.textContent = Number(gold).toLocaleString("en-US");
+}
+
+function setBuyingState(button, isBuying) {
+  if (!button) return;
+
+  button.disabled = isBuying;
+  button.textContent = isBuying ? "Buying..." : "Buy";
+}
 
 // ========================
 // BUY CONSUMABLE
 // ========================
-async function buy(id) {
-  const res = await fetch("/api/shop/buy", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ shopItemId: id })
-  });
-
-  const data = await res.json();
-
-  if (data.error) {
-    if (window.GFToast?.show) {
-      GFToast.show("Purchase Failed", data.error, {
-        type: "error",
-        durationMs: TOAST_VISIBLE_MS
-      });
-    }
-    return;
-  }
-
-  if (window.GFToast?.show) {
-    GFToast.show("Purchased", "Item added to your inventory.", {
-      type: "success",
-      durationMs: TOAST_VISIBLE_MS
-    });
-  }
-
-  setTimeout(() => location.reload(), TOAST_VISIBLE_MS + 250);
-}
-
-// expose for inline onclick="buy(...)"
-window.buy = buy;
-
-// ========================
-// BUY BASE ITEM
-// ========================
-async function buyBase(baseItemId, category) {
+async function buy(id, button) {
   try {
-    const res = await fetch("/api/shop/buy-base", {
+    setBuyingState(button, true);
+
+    const res = await fetch("/api/shop/buy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ baseItemId, category })
+      body: JSON.stringify({ shopItemId: id })
     });
 
     const data = await res.json();
 
     if (data.error) {
+      setBuyingState(button, false);
+
       if (window.GFToast?.show) {
         GFToast.show("Purchase Failed", data.error, {
           type: "error",
@@ -60,16 +43,18 @@ async function buyBase(baseItemId, category) {
       return;
     }
 
+    updateGoldDisplay(data.gold);
+    setBuyingState(button, false);
+
     if (window.GFToast?.show) {
-      GFToast.show("Purchased", "Item added to your equipment inventory.", {
+      GFToast.show("Purchased", "Item added to your inventory.", {
         type: "success",
         durationMs: TOAST_VISIBLE_MS
       });
     }
-
-    setTimeout(() => location.reload(), TOAST_VISIBLE_MS + 250);
   } catch (err) {
-    console.error("buyBase failed:", err);
+    console.error("buy failed:", err);
+    setBuyingState(button, false);
 
     if (window.GFToast?.show) {
       GFToast.show("Purchase Failed", "Something went wrong.", {
@@ -80,7 +65,57 @@ async function buyBase(baseItemId, category) {
   }
 }
 
-// expose for inline onclick="buyBase(...)"
+window.buy = buy;
+
+// ========================
+// BUY BASE ITEM
+// ========================
+async function buyBase(baseItemId, category, button) {
+  try {
+    setBuyingState(button, true);
+
+    const res = await fetch("/api/shop/buy-base", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ baseItemId, category })
+    });
+
+    const data = await res.json();
+
+    if (data.error) {
+      setBuyingState(button, false);
+
+      if (window.GFToast?.show) {
+        GFToast.show("Purchase Failed", data.error, {
+          type: "error",
+          durationMs: TOAST_VISIBLE_MS
+        });
+      }
+      return;
+    }
+
+    updateGoldDisplay(data.gold);
+    setBuyingState(button, false);
+
+    if (window.GFToast?.show) {
+      GFToast.show("Purchased", "Item added to your equipment inventory.", {
+        type: "success",
+        durationMs: TOAST_VISIBLE_MS
+      });
+    }
+  } catch (err) {
+    console.error("buyBase failed:", err);
+    setBuyingState(button, false);
+
+    if (window.GFToast?.show) {
+      GFToast.show("Purchase Failed", "Something went wrong.", {
+        type: "error",
+        durationMs: TOAST_VISIBLE_MS
+      });
+    }
+  }
+}
+
 window.buyBase = buyBase;
 
 // ========================
@@ -108,8 +143,7 @@ window.buyBase = buyBase;
     history.replaceState({}, "", url);
   }
 
-  const initial =
-    new URLSearchParams(location.search).get("tab") || "consumable";
+  const initial = new URLSearchParams(location.search).get("tab") || "consumable";
 
   if (["consumable", "weapon", "armor"].includes(initial)) {
     setActive(initial);

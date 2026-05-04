@@ -5,6 +5,13 @@
 
 let currentEnemy = null;
 const spellCooldowns = {};
+const savedSpellCds = JSON.parse(localStorage.getItem("gf_spell_cooldowns") || "{}");
+Object.assign(spellCooldowns, savedSpellCds);
+
+function saveSpellCooldowns() {
+  localStorage.setItem("gf_spell_cooldowns", JSON.stringify(spellCooldowns));
+}
+let lastCombatLogCount = 0;
 // { spellId: timestamp_when_ready }
 
 // ✅ NEW: post-combat state flag (so we can enable close + reload on manual close)
@@ -114,12 +121,20 @@ function setCombatUIEnabled(enabled) {
 // =======================
 // POTION COOLDOWNS (PER SLOT)
 // =======================
-const POTION_CD_MS = 2000; // 2s cooldown PER potion slot
+const POTION_CD_MS = 20000; // 20s cooldown PER potion slot
 
 const potionCdEnd = {
   health: 0,
   mana: 0
 };
+
+const savedPotionCds = JSON.parse(localStorage.getItem("gf_potion_cooldowns") || "{}");
+potionCdEnd.health = Number(savedPotionCds.health || 0);
+potionCdEnd.mana = Number(savedPotionCds.mana || 0);
+
+function savePotionCooldowns() {
+  localStorage.setItem("gf_potion_cooldowns", JSON.stringify(potionCdEnd));
+}
 
 const potionCdTimer = {
   health: null,
@@ -161,6 +176,7 @@ function hidePotionCooldown(slot) {
 
 function startPotionCooldown(slot, seconds = 2) {
   potionCdEnd[slot] = Date.now() + seconds * 1000;
+  savePotionCooldowns();
 
   setPotionDimmed(slot, true);
   showPotionCooldown(slot, seconds);
@@ -174,6 +190,7 @@ function startPotionCooldown(slot, seconds = 2) {
       clearInterval(potionCdTimer[slot]);
       potionCdTimer[slot] = null;
       potionCdEnd[slot] = 0;
+      savePotionCooldowns();
 
       hidePotionCooldown(slot);
       setPotionDimmed(slot, false);
@@ -186,6 +203,7 @@ function startPotionCooldown(slot, seconds = 2) {
 
 function cancelPotionCooldown(slot) {
   potionCdEnd[slot] = 0;
+  savePotionCooldowns();
   if (potionCdTimer[slot]) {
     clearInterval(potionCdTimer[slot]);
     potionCdTimer[slot] = null;
@@ -193,12 +211,6 @@ function cancelPotionCooldown(slot) {
   hidePotionCooldown(slot);
   setPotionDimmed(slot, false);
 }
-
-function cancelAllPotionCooldowns() {
-  cancelPotionCooldown("health");
-  cancelPotionCooldown("mana");
-}
-
 
 // ✅ NEW: put modal into "post-combat" mode instead of auto-closing
 function enterPostCombatState() {
@@ -303,6 +315,7 @@ function syncCombatSnapshot(snapshot) {
   if (attackBtn && !combatOver) {
     attackBtn.disabled = !player?.ready;
   }
+  syncServerCombatLog(snapshot);
 }
 /* ===============================
    COMBAT MODAL CONTROL
@@ -310,7 +323,16 @@ function syncCombatSnapshot(snapshot) {
 
 window.openCombatModal = async function (enemy) {
   await waitForEl("combatModal");
-  cancelAllPotionCooldowns();
+  ["health", "mana"].forEach(slot => {
+  const remaining = Math.ceil((potionCdEnd[slot] - Date.now()) / 1000);
+
+  if (remaining > 0) {
+    startPotionCooldown(slot, remaining);
+  } else {
+    potionCdEnd[slot] = 0;
+    savePotionCooldowns();
+  }
+});
 // ✅ NEW: always populate the hotbar ASAP
 loadHotbarSpells();
 
@@ -341,8 +363,8 @@ if (enemyImg) {
   setCombatUIEnabled(true);
 
   // ✅ Reset log immediately
+  lastCombatLogCount = 0;
   clearCombatLog();
-  logCombat(`⚠ ${enemy?.name ?? "Enemy"} engages you!`);
 
   // ✅ Build a safe enemy object NOW (no NaN)
   const hp = Number(enemy?.hp);
@@ -479,21 +501,6 @@ async function combatAttack() {
     return;
   }
 
-  if (data.log) logCombat(data.log);
-
-  if (data.damage !== undefined) {
-    if (data.dodged) {
-      logCombat("⚔ Your attack missed!");
-    } else {
-      logCombat(`⚔ You hit for ${data.damage}${data.crit ? " (CRITICAL!)" : ""}`);
-    }
-  }
-
-  if (data.lifestealHeal) {
-    logCombat(`🩸 You restore ${data.lifestealHeal} HP.`);
-    await refreshPlayerCaps();
-  }
-
   if (data.enemyHP !== undefined) {
     updateEnemyHP(data.enemyHP);
   }
@@ -617,14 +624,14 @@ function renderHotbarSpells(spells) {
     btn.type = "button";
     btn.className = "hotbar-tile hotbar-spell"; // <- marker class so we can remove later
 
-    if (!s) {
-      btn.classList.add("empty");
-      btn.title = "Empty Slot";
-      btn.innerHTML = `
-        <img src="/icons/default.png" alt="">
-        <span class="hotbar-key">${key}</span>
-      `;
-    } else {
+  if (!s) {
+    btn.classList.add("empty");
+    btn.title = "Empty Slot";
+    btn.innerHTML = `
+      <span class="hotbar-empty-mark">✦</span>
+      <span class="hotbar-key">${key}</span>
+    `;
+  } else {
       const name = (s.name ?? "Spell").toString();
       const icon = (s.icon ?? "default.png").toString();
 
@@ -696,6 +703,8 @@ function startHotbarCooldown(spellId, seconds) {
     if (remaining <= 0) {
       cdEl.classList.add("hidden");
       cdEl.textContent = "";
+      delete spellCooldowns[spellId];
+      saveSpellCooldowns();
       return;
     }
     cdEl.textContent = remaining;
@@ -733,12 +742,9 @@ async function castSpell(spellId) {
     return;
   }
 
-  if (data.log) {
-    logCombat(data.log);
-  }
-
   if (data.cooldown && data.cooldown > 0) {
     spellCooldowns[spellId] = Date.now() + data.cooldown * 1000;
+    saveSpellCooldowns();
     startHotbarCooldown(spellId, data.cooldown);
   }
 
@@ -837,6 +843,17 @@ function applyPotion(slot, potion) {
   if (!potion) {
     btn.disabled = true;
 
+    // 🔥 remove image so it doesn’t show broken icon
+    img.style.display = "none";
+
+    // add empty visual marker (like spells)
+    if (!btn.querySelector(".hotbar-empty-mark")) {
+      const empty = document.createElement("div");
+      empty.className = "hotbar-empty-mark";
+      empty.textContent = "✦";
+      btn.appendChild(empty);
+    }
+
     qtyEl.classList.add("hidden");
     qtyEl.textContent = "";
 
@@ -850,6 +867,12 @@ function applyPotion(slot, potion) {
   }
 
   // ---- Potion equipped ----
+  img.style.display = "block";
+
+  // remove empty marker if it exists
+  const empty = btn.querySelector(".hotbar-empty-mark");
+  if (empty) empty.remove();
+
   btn.disabled = false;
 
   // Icon
@@ -994,4 +1017,23 @@ function updatePlayerHP(currentHP) {
 function updatePlayerSP(currentSP) {
   setText("playerSP", currentSP);
   updateBar("playerSPBar", currentSP, window.playerMaxSP);
+}
+
+function syncServerCombatLog(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.log)) return;
+
+  const incoming = snapshot.log.map(String);
+
+  // If the server log was reset or trimmed, reset our cursor safely.
+  if (lastCombatLogCount > incoming.length) {
+    lastCombatLogCount = 0;
+  }
+
+  const newLines = incoming.slice(lastCombatLogCount);
+
+  for (const line of newLines) {
+    logCombat(line);
+  }
+
+  lastCombatLogCount = incoming.length;
 }

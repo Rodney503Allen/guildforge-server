@@ -964,6 +964,39 @@ body::before{
 .qbtn:disabled{ opacity:.55; cursor:not-allowed; transform:none; }
 .qbtn.ghost{ opacity:.88; }
 
+.qtQuest{
+  padding:10px 0;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
+
+.qtQuest:last-child{
+  border-bottom:0;
+}
+
+.qtQuestTitle{
+  color:var(--gold, #c8a34b);
+  font-weight:900;
+  font-size:13px;
+  margin-bottom:8px;
+}
+
+.qtObjectives{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.qtObjective{
+  font-size:12px;
+  line-height:1.35;
+  color:rgba(215,219,226,.9);
+  margin:0;
+}
+
+.qtHint{
+  color:rgba(154,163,175,.85);
+}
+
 /* Make the close button feel like an icon button */
 #btnQuestClose.qbtn{
   width: 40px;
@@ -1065,8 +1098,10 @@ body::before{
   padding: 10px 12px 12px;
   color: rgba(215,219,226,.92);
   font-size: 12px;
-  line-height: 1.45;
-  white-space: pre-wrap;
+  line-height: 1.35;
+  white-space: normal;
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 /* Minimized mode */

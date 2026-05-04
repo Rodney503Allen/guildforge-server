@@ -1,7 +1,7 @@
 // src/town.routes.ts
 import express from "express";
 import { db } from "./db";
-import { getJournalQuests } from "./services/questService";
+import { getAvailableRumorQuests } from "./services/tavernService";
 
 const router = express.Router();
 
@@ -107,35 +107,34 @@ router.get("/api/town/:townId/gossip", async (req, res) => {
   if (!pid) return res.status(401).json({ error: "not_logged_in" });
 
   const townId = Number(req.params.townId);
+  if (!Number.isFinite(townId)) {
+    return res.status(400).json({ error: "invalid_town" });
+  }
 
   try {
-    const payload = await getJournalQuests(pid);
+    const quests = await getAvailableRumorQuests(pid, townId);
 
-    const rumors = (payload?.rumors || []).filter((r: any) => {
-      const hint = String(r?.rumor_hint || "").trim();
-      if (!hint) return false;
-
-      const rTown = r?.town_id != null ? Number(r.town_id) : null;
-      return rTown === townId || rTown === null;
+    const gossipPool = quests.filter((q: any) => {
+      return String(q.rumorHint || "").trim();
     });
 
-    if (!rumors.length) {
+    if (!gossipPool.length) {
       return res.json({
         hasGossip: false,
         text: "The ledger is quiet. No fresh whispers tonight."
       });
     }
 
-    const pick = rumors[Math.floor(Math.random() * rumors.length)];
+    const pick = gossipPool[Math.floor(Math.random() * gossipPool.length)];
 
     return res.json({
       hasGossip: true,
       questId: Number(pick.questId),
       title: pick.title,
-      text: pick.rumor_hint
+      text: pick.rumorHint
     });
   } catch (err: any) {
-    console.error("gossip failed:", err?.message);
+    console.error("town gossip failed:", err?.message);
     res.status(500).json({ error: "server_error" });
   }
 });
@@ -237,7 +236,6 @@ router.get("/town", async (req, res) => {
 
               <div class="town-hero__actions">
                 <span class="safe-chip">🛡 Safe Zone</span>
-                <a class="danger-chip" href="/world">⚔ Step Into the Wilderness</a>
               </div>
             </div>
           </section>
@@ -252,7 +250,7 @@ router.get("/town", async (req, res) => {
 
             <div class="services-grid">
               ${services.map((s: any) => `
-                <a class="service-tile service-${serviceClass(s)} ${String(s.route || "").toLowerCase() === "/shop" ? "featured" : ""}"
+                <a class="service-tile service-${serviceClass(s)}"
                    href="${escapeHtml(s.route || "#")}"
                    tabindex="0">
                   <div class="service-icon">${renderServiceIcon(s.icon)}</div>
@@ -292,14 +290,10 @@ router.get("/town", async (req, res) => {
 
             <div class="ledger-card">
               <div class="ledger-card__top">
-                <h3>Latest Updates</h3>
-                <span>What’s New</span>
+                <h3>Haven Reports</h3>
+                <span>World Activity</span>
               </div>
-              <ul class="updates-list">
-                <li>Loot drops now appear as a chest you open after combat.</li>
-                <li>Rumor quests can be found in the tavern and accepted.</li>
-                <li>Quest turn-ins can be claimed when objectives are complete.</li>
-              </ul>
+              <textarea id="world-feed" class="world-feed-box" readonly></textarea>
             </div>
 
             <div class="venture-card">

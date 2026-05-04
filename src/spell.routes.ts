@@ -1,3 +1,4 @@
+//spell.routes.ts
 import express from "express";
 import { db } from "./db";
 import { applyBuff } from "./services/buffService";

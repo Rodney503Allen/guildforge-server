@@ -323,7 +323,15 @@ body::before{
 }
 
 .serviceTile.isLocked{
-  opacity:.72;
+  opacity:.55;
+  filter:grayscale(.35);
+}
+
+.serviceTile.isLocked:hover{
+  transform:none;
+  border-color:rgba(255,255,255,.075);
+  filter:grayscale(.35);
+  box-shadow:none;
 }
 
 .serviceIcon{
@@ -470,16 +478,16 @@ body::before{
   display:grid;
   place-items:center;
 
-  color:#d99cff;
+  color:#f3dfab;
   font-size:42px;
   font-family:Cinzel, ui-serif, Georgia, "Times New Roman", serif;
 
   background:
-    radial-gradient(circle at 50% 35%, rgba(177,92,255,.28), transparent 58%),
-    linear-gradient(180deg, rgba(200,163,75,.18), rgba(0,0,0,.30));
-  border:1px solid rgba(200,163,75,.32);
+    radial-gradient(circle at 50% 35%, rgba(200,163,75,.30), transparent 58%),
+    linear-gradient(180deg, rgba(243,223,171,.14), rgba(0,0,0,.32));
+  border:1px solid rgba(200,163,75,.38);
   box-shadow:
-    0 0 34px rgba(177,92,255,.18),
+    0 0 34px rgba(200,163,75,.18),
     inset 0 0 22px rgba(0,0,0,.72);
 }
 
@@ -498,11 +506,11 @@ body::before{
 
 .repLevel{
   margin-top:2px;
-  color:#b982ff;
+  color:#f3dfab;
   font-size:34px;
   font-weight:900;
   line-height:1;
-  text-shadow:0 0 18px rgba(177,92,255,.28);
+  text-shadow:0 0 18px rgba(200,163,75,.22);
 }
 
 .repBarWrap{
@@ -518,8 +526,8 @@ body::before{
 .repBarFill{
   height:100%;
   border-radius:999px;
-  background:linear-gradient(90deg, rgba(126,68,190,.95), rgba(215,137,255,.88));
-  box-shadow:0 0 18px rgba(177,92,255,.25);
+  background:linear-gradient(90deg, rgba(160,117,43,.95), rgba(243,223,171,.88));
+  box-shadow:0 0 18px rgba(200,163,75,.25);
 }
 
 .repProgress,
@@ -537,7 +545,7 @@ body::before{
 
 .repRank strong,
 .repNext strong{
-  color:#d99cff;
+  color:#f3dfab;
   font-family:Cinzel, ui-serif, Georgia, "Times New Roman", serif;
   letter-spacing:.5px;
 }
@@ -576,14 +584,14 @@ body::before{
 }
 
 .repRankRow.active{
-  border-color:rgba(177,92,255,.42);
+  border-color:rgba(200,163,75,.42);
   background:
-    linear-gradient(90deg, rgba(177,92,255,.12), transparent 70%),
+    linear-gradient(90deg, rgba(200,163,75,.12), transparent 70%),
     rgba(0,0,0,.20);
 }
 
 .repRankRow.active span{
-  color:#d99cff;
+  color:#f3dfab;
 }
 
 .repNote{
