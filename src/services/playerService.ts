@@ -311,15 +311,6 @@ export async function getFinalPlayerStats(
     `,
     [playerId]
   );
-console.log("[PLAYER STATS]", {
-  playerId,
-  dodgeChance: computed.dodgeChance,
-  critDamageMult: computed.critDamageMult,
-  damageReduction: computed.damageReduction,
-  lifesteal: computed.lifesteal,
-  maxhp: computed.maxhp,
-  maxspoints: computed.maxspoints
-});
   return {
     ...(computed as any),
 

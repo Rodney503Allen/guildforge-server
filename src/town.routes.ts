@@ -121,7 +121,7 @@ router.get("/api/town/:townId/gossip", async (req, res) => {
     if (!gossipPool.length) {
       return res.json({
         hasGossip: false,
-        text: "The ledger is quiet. No fresh whispers tonight."
+        text: "An uneasy silence hangs over the town. Nothing draws your attention."
       });
     }
 
@@ -281,7 +281,7 @@ router.get("/town", async (req, res) => {
 
             <div class="ledger-card">
               <div class="ledger-card__top">
-                <h3>Gossip</h3>
+                <h3>Town Encounters</h3>
                 <span>Whispers</span>
               </div>
               <p id="town-gossip">Listening for whispers…</p>

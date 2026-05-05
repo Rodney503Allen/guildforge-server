@@ -30,7 +30,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    el.textContent = `"${data.text}"`;
+    el.textContent = data.text; 
     if (meta) meta.textContent = data.title ? `— About: ${data.title}` : "";
   } catch (e) {
     el.textContent = "The whispers fade. Try again.";
