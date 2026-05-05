@@ -62,7 +62,13 @@ body{
 
   padding: var(--sp-pad-y) var(--sp-pad-x);
 }
-
+.gold-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  margin-right: 6px;
+  vertical-align: middle;
+}
 /* Subtle inner frame */
 #statpanel::before{
   content:"";
@@ -181,11 +187,6 @@ body{
   font-size: 13px;
   font-weight: 900;
   color: #f3d26b;
-}
-
-.gold-icon{
-  font-size: 16px;
-  filter: drop-shadow(0 0 4px rgba(243,210,107,.4));
 }
 
 /* LOGOUT PRIMARY (keep #logout-btn but match your new UI) */
@@ -525,10 +526,19 @@ body{
   transform: translateY(-1px);
 }
 
-.nav-action-icon{
-  font-size: 19px;
-  line-height: 1;
-  filter: drop-shadow(0 0 5px rgba(201,184,154,.25));
+.nav-action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+}
+.nav-action-icon img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  display: block;
+  margin-bottom: 2px; /* slight spacing above text */
+  filter: none; /* no glow unless you want it */
 }
 /* -------------------------
    RESPONSIVE BEHAVIOR
