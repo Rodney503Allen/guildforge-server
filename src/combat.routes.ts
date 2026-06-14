@@ -181,12 +181,32 @@ async function refreshPlayerActor(session: any) {
   return player;
 }
 
+function buildAffixBoostText(enemyRow: any) {
+  if (!enemyRow.affix_name) return "";
+
+  const boosts: string[] = [];
+
+  if (Number(enemyRow.hp_mult ?? 1) > 1) boosts.push(`HP x${Number(enemyRow.hp_mult).toFixed(2)}`);
+  if (Number(enemyRow.attack_mult ?? 1) > 1) boosts.push(`Attack x${Number(enemyRow.attack_mult).toFixed(2)}`);
+  if (Number(enemyRow.defense_mult ?? 1) > 1) boosts.push(`Defense x${Number(enemyRow.defense_mult).toFixed(2)}`);
+  if (Number(enemyRow.speed_mult ?? 1) > 1) boosts.push(`Speed x${Number(enemyRow.speed_mult).toFixed(2)}`);
+  if (Number(enemyRow.xp_mult ?? 1) > 1) boosts.push(`EXP x${Number(enemyRow.xp_mult).toFixed(2)}`);
+  if (Number(enemyRow.gold_mult ?? 1) > 1) boosts.push(`Gold x${Number(enemyRow.gold_mult).toFixed(2)}`);
+  if (Number(enemyRow.loot_mult ?? 1) > 1) boosts.push(`Loot x${Number(enemyRow.loot_mult).toFixed(2)}`);
+
+  return boosts.length ? boosts.join(", ") : "Unknown effects";
+}
+
+
+
 async function refreshEnemyActor(session: any) {
 const [[enemyRow]]: any = await db.query(
   `
   SELECT
     pc.id,
     pc.hp,
+    pc.affix_id,
+
     c.name,
     c.level,
     c.description,
@@ -194,9 +214,22 @@ const [[enemyRow]]: any = await db.query(
     c.defense,
     c.agility,
     c.crit,
-    c.maxhp
+    c.maxhp,
+
+    ca.name AS affix_name,
+    ca.description AS affix_description,
+    ca.rarity AS affix_rarity,
+    ca.hp_mult,
+    ca.attack_mult,
+    ca.defense_mult,
+    ca.speed_mult,
+    ca.xp_mult,
+    ca.gold_mult,
+    ca.loot_mult
+
   FROM player_creatures pc
   JOIN creatures c ON c.id = pc.creature_id
+  LEFT JOIN creature_affixes ca ON ca.id = pc.affix_id
   WHERE pc.id = ?
     AND pc.player_id = ?
   LIMIT 1
@@ -208,18 +241,35 @@ const [[enemyRow]]: any = await db.query(
 
   const debuffs = await getCreatureDebuffTotals(enemyRow.id);
 
+const hpMult = Number(enemyRow.hp_mult ?? 1);
+const attackMult = Number(enemyRow.attack_mult ?? 1);
+const defenseMult = Number(enemyRow.defense_mult ?? 1);
+const speedMult = Number(enemyRow.speed_mult ?? 1);
+
+const modifiedMaxHp = Math.floor(Number(enemyRow.maxhp ?? 1) * hpMult);
+
 const enemyStats = {
   level: Number(enemyRow.level ?? 1),
-  attack: Number(enemyRow.attack ?? 0) + Number(debuffs.attack || 0),
-  defense: Number(enemyRow.defense ?? 0) + Number(debuffs.defense || 0),
-  agility: Number(enemyRow.agility ?? 0) + Number(debuffs.agility || 0),
+
+  attack:
+    Math.floor(Number(enemyRow.attack ?? 0) * attackMult) +
+    Number(debuffs.attack || 0),
+
+  defense:
+    Math.floor(Number(enemyRow.defense ?? 0) * defenseMult) +
+    Number(debuffs.defense || 0),
+
+  agility:
+    Math.floor(Number(enemyRow.agility ?? 0) * speedMult) +
+    Number(debuffs.agility || 0),
+
   vitality: Number(debuffs.vitality || 0),
   intellect: Number(debuffs.intellect || 0),
   crit: Number(enemyRow.crit ?? 0) + Number(debuffs.crit || 0),
 
   hpoints: Number(enemyRow.hp ?? 0),
   spoints: 0,
-  maxhp: Number(enemyRow.maxhp ?? 1),
+  maxhp: modifiedMaxHp,
   maxspoints: 0,
 
   dodgeChance: 0,
@@ -229,12 +279,38 @@ const enemyStats = {
   lifesteal: 0
 };
 
-  session.enemy.name = String(enemyRow.name ?? "Enemy");
+  
+  const enemyDisplayName = enemyRow.affix_name
+  ? `${enemyRow.affix_name} ${enemyRow.name}`
+  : String(enemyRow.name ?? "Enemy");
+
+  const baseDescription = String(enemyRow.description ?? "");
+  const affixDescription = String(enemyRow.affix_description ?? "");
+  const affixBoostText = buildAffixBoostText(enemyRow);
+
+  session.enemy.name = enemyDisplayName;
   session.enemy.level = Number(enemyRow.level ?? 1);
-  session.enemy.description = String(enemyRow.description ?? "");
+
+  session.enemy.description = enemyRow.affix_name
+    ? `${baseDescription}\n\n${affixDescription}`
+    : baseDescription;
+
   session.enemy.hp = Number(enemyRow.hp ?? 0);
-  session.enemy.maxHp = Number(enemyRow.maxhp ?? 1);
+  session.enemy.maxHp = modifiedMaxHp;
   session.enemy.stats = enemyStats as any;
+
+  // Show affix intro once per combat session
+  if (enemyRow.affix_name && !session.enemy.affixIntroShown) {
+    session.log.push(
+      `✨ ${enemyDisplayName} appears with the ${enemyRow.affix_name} affix!`
+    );
+
+    session.log.push(
+      `📈 Boosted stats: ${affixBoostText}.`
+    );
+
+    session.enemy.affixIntroShown = true;
+  }
 
   return { row: enemyRow, stats: enemyStats };
 }

@@ -91,6 +91,8 @@ async function refreshSessionEnemy(session: CombatSession) {
     SELECT
       pc.id,
       pc.hp,
+      pc.affix_id,
+
       c.name,
       c.attack,
       c.defense,
@@ -98,9 +100,17 @@ async function refreshSessionEnemy(session: CombatSession) {
       c.crit,
       c.maxhp,
       c.level,
-      c.description
+      c.description,
+
+      ca.name AS affix_name,
+      ca.description AS affix_description,
+      ca.hp_mult,
+      ca.attack_mult,
+      ca.defense_mult,
+      ca.speed_mult
     FROM player_creatures pc
     JOIN creatures c ON c.id = pc.creature_id
+    LEFT JOIN creature_affixes ca ON ca.id = pc.affix_id
     WHERE pc.id = ?
       AND pc.player_id = ?
     LIMIT 1
@@ -112,17 +122,31 @@ async function refreshSessionEnemy(session: CombatSession) {
 
   const debuffs = await getCreatureDebuffTotals(enemyRow.id);
 
+  const hpMult = Number(enemyRow.hp_mult ?? 1);
+  const attackMult = Number(enemyRow.attack_mult ?? 1);
+  const defenseMult = Number(enemyRow.defense_mult ?? 1);
+  const speedMult = Number(enemyRow.speed_mult ?? 1);
+
+  const modifiedMaxHp = Math.floor(Number(enemyRow.maxhp ?? 1) * hpMult);
+
+  const enemyDisplayName = enemyRow.affix_name
+    ? `${enemyRow.affix_name} ${enemyRow.name}`
+    : String(enemyRow.name ?? "Enemy");
+
+  const baseDescription = String(enemyRow.description ?? "");
+  const affixDescription = String(enemyRow.affix_description ?? "");
+
   const enemyStats: DerivedStats = {
-    level: 1,
-    attack: Number(enemyRow.attack ?? 0) + Number(debuffs.attack || 0),
-    defense: Number(enemyRow.defense ?? 0) + Number(debuffs.defense || 0),
-    agility: Number(enemyRow.agility ?? 0) + Number(debuffs.agility || 0),
+    level: Number(enemyRow.level ?? 1),
+    attack: Math.floor(Number(enemyRow.attack ?? 0) * attackMult) + Number(debuffs.attack || 0),
+    defense: Math.floor(Number(enemyRow.defense ?? 0) * defenseMult) + Number(debuffs.defense || 0),
+    agility: Math.floor(Number(enemyRow.agility ?? 0) * speedMult) + Number(debuffs.agility || 0),
     vitality: Number(debuffs.vitality || 0),
     intellect: Number(debuffs.intellect || 0),
     crit: Number(enemyRow.crit ?? 0) + Number(debuffs.crit || 0),
     hpoints: Number(enemyRow.hp ?? 0),
     spoints: 0,
-    maxhp: Number(enemyRow.maxhp ?? 1),
+    maxhp: modifiedMaxHp,
     maxspoints: 0,
     spellPower: 1,
     dodgeChance: 0,
@@ -131,12 +155,14 @@ async function refreshSessionEnemy(session: CombatSession) {
     lifesteal: 0
   };
 
-  session.enemy.name = String(enemyRow.name ?? "Enemy");
-  session.enemy.hp = Number(enemyRow.hp ?? 0);
-  session.enemy.maxHp = Number(enemyRow.maxhp ?? 1);
-  session.enemy.stats = enemyStats;
-  session.enemy.level = Number(enemyRow.level ?? 1);
-  session.enemy.description = String(enemyRow.description ?? "");
+session.enemy.name = enemyDisplayName;
+session.enemy.hp = Number(enemyRow.hp ?? 0);
+session.enemy.maxHp = modifiedMaxHp;
+session.enemy.stats = enemyStats;
+session.enemy.level = Number(enemyRow.level ?? 1);
+session.enemy.description = enemyRow.affix_name
+  ? `${baseDescription}\n\n${affixDescription}`
+  : baseDescription;
 
   return enemyStats;
 }

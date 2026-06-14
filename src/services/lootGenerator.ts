@@ -183,11 +183,15 @@ function getAdjustedAffixRange(
 
 export async function generateLootForCreature(
   creature: Creature,
-  player: Player
+  player: Player,
+  lootMult: number = 1
 ): Promise<SavedItem[]> {
   const results: SavedItem[] = [];
 
-  const gearDropChance = getGearDropChance(creature);
+  const gearDropChance = Math.min(
+  1,
+  getGearDropChance(creature) * lootMult
+);
   if (!rollChance(gearDropChance)) {
     return results;
   }

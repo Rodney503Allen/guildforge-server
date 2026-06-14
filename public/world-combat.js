@@ -417,6 +417,8 @@ if (enemyImg) {
     const snap = state?.snapshot;
 
     if (state?.inCombat && snap?.enemy) {
+      syncCombatSnapshot(snap);
+
       const ehp = Number(snap.enemy.hp);
       const emax = Number(snap.enemy.maxHp ?? snap.enemy.maxHP ?? snap.enemy.maxhp);
 
@@ -816,9 +818,6 @@ async function loadEquippedPotions() {
   try {
     const r = await fetch("/combat/potions-equipped", { credentials: "include" });
     const data = await r.json();
-console.log("🧪 potions-equipped payload:", data);
-console.log("🧪 health potion object:", data?.health);
-console.log("🧪 mana potion object:", data?.mana);
     applyPotion("health", data?.health || null);
     applyPotion("mana", data?.mana || null);
   } catch (e) {

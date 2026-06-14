@@ -81,37 +81,93 @@ const [candidates]: any = await db.query(
     if (!chosen) chosen = candidates[candidates.length - 1];
   }
 
-  // 7) Spawn it
+  // 7) Roll affix
+  let affix: any = null;
+
+  const affixSpawnChance = 0.12; // 12% chance for now
+
+  if (Math.random() < affixSpawnChance) {
+    const [affixes]: any = await db.query(
+      `
+      SELECT *
+      FROM creature_affixes
+      ORDER BY RAND() * spawn_weight DESC
+      LIMIT 1
+      `
+    );
+
+    affix = affixes?.[0] || null;
+  }
+
+  const hpMult = affix ? Number(affix.hp_mult || 1) : 1;
+  const spawnedHp = Math.floor(Number(chosen.maxhp) * hpMult);
+
+const finalAttack = Math.floor(
+  Number(chosen.attack) * (affix ? Number(affix.attack_mult || 1) : 1)
+);
+
+const finalDefense = Math.floor(
+  Number(chosen.defense) * (affix ? Number(affix.defense_mult || 1) : 1)
+);
+
+const finalAgility = Math.floor(
+  Number(chosen.agility) * (affix ? Number(affix.speed_mult || 1) : 1)
+);
+
+  // 8) Spawn it
   await db.query(
     `
-    INSERT INTO player_creatures (player_id, creature_id, hp, map_x, map_y)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO player_creatures 
+      (player_id, creature_id, affix_id, hp, map_x, map_y)
+    VALUES (?, ?, ?, ?, ?, ?)
     `,
-    [playerId, chosen.id, chosen.maxhp, mapX, mapY]
+    [playerId, chosen.id, affix?.id || null, spawnedHp, mapX, mapY]
   );
 
+  const displayName = affix ? `${affix.name} ${chosen.name}` : chosen.name;
+
   return {
-  id: chosen.id,
-  name: chosen.name,
+    id: chosen.id,
+    name: displayName,
+    baseName: chosen.name,
 
-  level: chosen.level,
-  description: chosen.description,
+    affix: affix
+      ? {
+          id: affix.id,
+          name: affix.name,
+          rarity: affix.rarity,
+          description: affix.description,
 
-  hp: chosen.maxhp,
-  maxHP: chosen.maxhp,
-  maxhp: chosen.maxhp,
+          hpMult: Number(affix.hp_mult || 1),
+          attackMult: Number(affix.attack_mult || 1),
+          defenseMult: Number(affix.defense_mult || 1),
+          speedMult: Number(affix.speed_mult || 1),
+          xpMult: Number(affix.xp_mult || 1),
+          goldMult: Number(affix.gold_mult || 1),
+          lootMult: Number(affix.loot_mult || 1)
+        }
+      : null,
 
-  img: chosen.img || chosen.creatureimage || chosen.image || "images/default_creature.png",
+    level: chosen.level,
+    description: chosen.description,
 
-  attack: chosen.attack,
-  defense: chosen.defense,
-  agility: chosen.agility,
-  crit: chosen.crit,
+    hp: spawnedHp,
+    maxHP: spawnedHp,
+    maxhp: spawnedHp,
 
-  creatureId: chosen.id,
-  zoneLevel,
-  zoneMin,
-  zoneMax
-};
+    img: chosen.img || chosen.creatureimage || chosen.image || "images/default_creature.png",
+
+    attack: Math.floor(Number(chosen.attack) * (affix ? Number(affix.attack_mult || 1) : 1)),
+    defense: Math.floor(Number(chosen.defense) * (affix ? Number(affix.defense_mult || 1) : 1)),
+    agility: Math.floor(Number(chosen.agility) * (affix ? Number(affix.speed_mult || 1) : 1)),
+    crit: chosen.crit,
+
+    creatureId: chosen.id,
+    affixId: affix?.id || null,
+
+    zoneLevel,
+    zoneMin,
+    zoneMax
+  };
 }
 

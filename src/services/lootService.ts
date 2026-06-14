@@ -23,7 +23,11 @@ function randInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-export async function rollCreatureLoot(playerId: number, creatureId: number): Promise<LootDrop[]> {
+export async function rollCreatureLoot(
+  playerId: number,
+  creatureId: number,
+  lootMult: number = 1
+): Promise<LootDrop[]> {
   const [rows]: any = await db.query(
     `
     SELECT item_id, drop_chance, min_qty, max_qty
@@ -36,7 +40,10 @@ export async function rollCreatureLoot(playerId: number, creatureId: number): Pr
   const drops: LootDrop[] = [];
 
   for (const r of rows || []) {
-    const chance = Math.max(0, Math.min(1, Number(r.drop_chance) || 0));
+    const chance = Math.max(
+  0,
+  Math.min(1, (Number(r.drop_chance) || 0) * lootMult)
+);
     if (chance <= 0) continue;
 
     if (Math.random() <= chance) {

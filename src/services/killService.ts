@@ -72,14 +72,25 @@ export async function handleCreatureKill(
 const [[row]]: any = await db.query(`
   SELECT
     pc.creature_id,
+    pc.affix_id,
+
     c.name,
     c.exper,
     c.level,
     c.rarity,
+
+    ca.name AS affix_name,
+    ca.rarity AS affix_rarity,
+    ca.xp_mult,
+    ca.gold_mult,
+    ca.loot_mult,
+
     COALESCE(wm.region_name, r.name) AS region_name
   FROM player_creatures pc
   JOIN creatures c
     ON c.id = pc.creature_id
+  LEFT JOIN creature_affixes ca
+    ON ca.id = pc.affix_id
   JOIN players p
     ON p.id = pc.player_id
   LEFT JOIN world_map wm
@@ -99,6 +110,10 @@ const creatureName = String(row.name || "Creature");
 const creatureLevel = Number(row.level) || 1;
 const creatureRarity = String(row.rarity || "common");
 const baseExp = Number(row.exper) || 0;
+const affixName = row.affix_name ? String(row.affix_name) : null;
+const affixXpMult = Number(row.xp_mult ?? 1);
+const affixGoldMult = Number(row.gold_mult ?? 1);
+const affixLootMult = Number(row.loot_mult ?? 1);
 const regionName = row.region_name ? String(row.region_name).trim() : null;
   // BASE RANGE
   const base = 2 + (creatureLevel * 3);
@@ -122,8 +137,15 @@ const regionName = row.region_name ? String(row.region_name).trim() : null;
   // Apply guild EXP/GOLD multipliers
   const mults = await getGuildRewardMultipliers(playerId);
 
-  const expGained = Math.max(0, Math.floor(baseExp * (mults.expMult || 1)));
-  const goldGained = Math.max(0, Math.floor(rolledGold * (mults.goldMult || 1)));
+  const expGained = Math.max(
+  0,
+  Math.floor(baseExp * affixXpMult * (mults.expMult || 1))
+);
+
+const goldGained = Math.max(
+  0,
+  Math.floor(rolledGold * affixGoldMult * (mults.goldMult || 1))
+);
 
   const { levelUp } = await grantExperience(playerId, expGained);
 
@@ -136,7 +158,7 @@ const regionName = row.region_name ? String(row.region_name).trim() : null;
     );
   }
 
-  const drops = await rollCreatureLoot(playerId, creatureId);
+  const drops = await rollCreatureLoot(playerId, creatureId, affixLootMult);
 
   const rolledGear = await generateLootForCreature(
     {
@@ -147,7 +169,8 @@ const regionName = row.region_name ? String(row.region_name).trim() : null;
     },
     {
       id: playerId
-    }
+    },
+    affixLootMult
   );
 
   const killProg = await applyKillProgress(playerId, creatureId, regionName);
@@ -188,6 +211,15 @@ await db.query(
     goldGained,
     levelUp,
     enemyDead: true,
+    affix: affixName
+      ? {
+          id: Number(row.affix_id),
+          name: affixName,
+          xpMult: affixXpMult,
+          goldMult: affixGoldMult,
+          lootMult: affixLootMult
+        }
+      : null,
     chest: chest ? { id: chest.chestId } : null,
     quest: {
       ...(killProg ?? { updatedObjectives: [], completedPlayerQuestIds: [] }),
