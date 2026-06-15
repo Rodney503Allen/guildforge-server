@@ -24,6 +24,7 @@ import chestRoutes from "./chests.routes";
 import adminRoutes from "./admin.routes";
 import journalRoutes from "./journal.routes";
 import interactablesRoutes from "./interactables.routes";
+import codexRoutes from "./codex.routes";
 
 const app = express();
 
@@ -124,6 +125,7 @@ app.use(chestRoutes);
 app.use(adminRoutes);
 app.use(journalRoutes);
 app.use("/api", interactablesRoutes);
+app.use(codexRoutes);
 
 // =======================
 // MAIN PAGE

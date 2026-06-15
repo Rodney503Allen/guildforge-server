@@ -5,6 +5,7 @@ import { rollCreatureLoot } from "./lootService";
 import { createChestFromDrops } from "./chestService";
 import { applyKillProgress } from "./questService";
 import { generateLootForCreature } from "./lootGenerator";
+import { recordCreatureKill } from "./bestiaryService";
 
 async function getGuildRewardMultipliers(playerId: number) {
   const [rows]: any = await db.query(`
@@ -115,6 +116,7 @@ const affixXpMult = Number(row.xp_mult ?? 1);
 const affixGoldMult = Number(row.gold_mult ?? 1);
 const affixLootMult = Number(row.loot_mult ?? 1);
 const regionName = row.region_name ? String(row.region_name).trim() : null;
+await recordCreatureKill(playerId, creatureId, Number(row.affix_id) || null);
   // BASE RANGE
   const base = 2 + (creatureLevel * 3);
   const min = Math.floor(base * 0.85);

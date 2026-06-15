@@ -1,6 +1,7 @@
 //services/spawnService.ts
 
 import { db } from "../db";
+import { recordCreatureSeen } from "./bestiaryService";
 
 function randInt(min: number, max: number) {
   const a = Math.ceil(min);
@@ -123,6 +124,8 @@ const finalAgility = Math.floor(
     `,
     [playerId, chosen.id, affix?.id || null, spawnedHp, mapX, mapY]
   );
+
+  await recordCreatureSeen(playerId, chosen.id, affix?.id || null);
 
   const displayName = affix ? `${affix.name} ${chosen.name}` : chosen.name;
 
