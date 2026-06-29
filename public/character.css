@@ -446,7 +446,22 @@
     text-shadow: 0 2px 6px rgba(0,0,0,.9);
     pointer-events:none;
   }
+.inventory-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 
+.inventory-space {
+  font-size: 0.85rem;
+  color: #c7ae6a;
+  border: 1px solid rgba(199, 174, 106, 0.35);
+  background: rgba(20, 16, 10, 0.45);
+  padding: 4px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
   /* =========================
      TOOLTIP (shared)
      ========================= */

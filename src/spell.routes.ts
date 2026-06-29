@@ -6,6 +6,7 @@ import { getFinalPlayerStats } from "./services/playerService";
 import { handleCreatureKill } from "./services/killService";
 import { applyCreatureDebuff } from "./services/creatureBuffService";
 import { ARCHETYPE_SCALING } from "./services/archetypeScaling";
+import { resolveSpellDamage } from "./services/combatEngine";
 import {
   ensureCombatSession,
   createCombatSession,
@@ -18,7 +19,6 @@ import {
 } from "./services/combatSessionService";
 
 const router = express.Router();
-let reward: any = null;
 async function getOrCreateSession(pid: number) {
   let session = ensureCombatSession(pid);
   if (!session) {
@@ -123,7 +123,11 @@ router.post("/spells/cast", async (req, res) => {
     // 3️⃣ Load current enemy (if any)
     const [[enemy]]: any = await db.query(
       `
-      SELECT pc.id, pc.hp, c.maxhp
+      SELECT
+        pc.id,
+        pc.hp,
+        c.maxhp,
+        c.defense
       FROM player_creatures pc
       JOIN creatures c ON c.id = pc.creature_id
       WHERE pc.player_id = ?
@@ -160,69 +164,120 @@ router.post("/spells/cast", async (req, res) => {
       [newSP, pid]
     );
 
-    // =========================
-    // DOT SPELL
-    // =========================
-    if (spell.type === "dot" || spell.type === "damage_dot") {
-      const dotDamage = Number(spell.dot_damage) || 0;
-      const dotDuration = Number(spell.dot_duration) || 0;
-      const tickRate = Number(spell.dot_tick_rate) || 1;
+// =========================
+// DOT SPELL
+// =========================
+if (spell.type === "dot" || spell.type === "damage_dot") {
+  const dotBaseDamage = Number(spell.dot_damage) || 0;
+  const dotDuration = Number(spell.dot_duration) || 0;
+  const tickRate = Number(spell.dot_tick_rate) || 1;
 
-      if (dotDamage <= 0 || dotDuration <= 0) {
-        return res.status(500).json({ error: "Invalid DOT spell config" });
-      }
+  if (dotBaseDamage <= 0 || dotDuration <= 0 || tickRate <= 0) {
+    return res.status(500).json({ error: "Invalid DOT spell config" });
+  }
 
-      await db.query(
-        `
-        INSERT INTO player_creature_dots
-          (player_creature_id, damage, tick_interval, next_tick_at, expires_at, source)
-        VALUES
-          (?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?)
-        `,
-        [
-          enemy.id,
-          dotDamage,
-          tickRate,
-          dotDuration,
-          `spell:${spell.id}`
-        ]
-      );
+  const scalingStat = ARCHETYPE_SCALING[player.archetype];
 
-      log = `☠ ${spell.name} afflicts the enemy!`;
+  let statValue = 0;
+  switch (scalingStat) {
+    case "attack":
+      statValue = player.attack;
+      break;
+    case "agility":
+      statValue = player.agility;
+      break;
+    case "intellect":
+      statValue = player.intellect;
+      break;
+  }
 
-      // optional direct hit part for damage_dot
-      if (spell.type === "damage_dot" && baseDamage > 0) {
-        const scalingStat = ARCHETYPE_SCALING[player.archetype];
+  const spellPower = Number(player.spellPower || 1);
 
-        let statValue = 0;
-        switch (scalingStat) {
-          case "attack":
-            statValue = player.attack;
-            break;
-          case "agility":
-            statValue = player.agility;
-            break;
-          case "intellect":
-            statValue = player.intellect;
-            break;
-        }
+  const scaledDotDamage = Math.max(
+    1,
+    Math.floor(dotBaseDamage + statValue * 0.5 * spellPower)
+  );
 
-        const spellPower = Number(player.spellPower || 1);
-        const directDmg = Math.max(
-          0,
-          Math.floor(baseDamage + statValue * 0.5 * spellPower)
-        );
+  const dotResult = resolveSpellDamage(
+    player,
+    {
+      ...player,
+      attack: 0,
+      defense: Number(enemy.defense || 0),
+      damageReduction: 0,
+      dodgeChance: 0,
+      crit: 0,
+      critDamageMult: 1,
+      spellPower: 1
+    },
+    scaledDotDamage
+  );
 
-        enemyHP = Math.max(0, Number(enemy.hp) - directDmg);
+  const totalDotDamage = Math.max(1, dotResult.damage);
+  const totalTicks = Math.max(1, Math.floor(dotDuration / tickRate));
+  const damagePerTick = Math.max(1, Math.floor(totalDotDamage / totalTicks));
 
-        await db.query(
-          "UPDATE player_creatures SET hp = ? WHERE id = ?",
-          [enemyHP, enemy.id]
-        );
+  await db.query(
+    `
+    INSERT INTO player_creature_dots
+      (player_creature_id, damage, tick_interval, next_tick_at, expires_at, source)
+    VALUES
+      (?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?)
+    `,
+    [
+      enemy.id,
+      damagePerTick,
+      tickRate,
+      dotDuration,
+      `spell:${spell.id}`
+    ]
+  );
 
-        log = `✨ You cast ${spell.name} for ${directDmg} damage and afflict the enemy!`;
-      }
+  log = dotResult.crit
+    ? `☠ Critical! ${spell.name} afflicts the enemy for ${totalDotDamage} damage over ${dotDuration}s!`
+    : `☠ ${spell.name} afflicts the enemy for ${totalDotDamage} damage over ${dotDuration}s!`;
+
+  // optional direct hit part for damage_dot
+  if (spell.type === "damage_dot" && baseDamage > 0) {
+    const scaledDirectDamage = Math.max(
+      1,
+      Math.floor(baseDamage + statValue * 0.5 * spellPower)
+    );
+
+    const directResult = resolveSpellDamage(
+      player,
+      {
+        ...player,
+        attack: 0,
+        defense: Number(enemy.defense || 0),
+        damageReduction: 0,
+        dodgeChance: 0,
+        crit: 0,
+        critDamageMult: 1,
+        spellPower: 1
+      },
+      scaledDirectDamage
+    );
+
+    const directDmg = directResult.damage;
+    const directCrit = directResult.crit;
+
+    enemyHP = Math.max(0, Number(enemy.hp) - directDmg);
+
+    await db.query(
+      "UPDATE player_creatures SET hp = ? WHERE id = ?",
+      [enemyHP, enemy.id]
+    );
+
+    log = directCrit
+      ? `✨ Critical! ${spell.name} hits for ${directDmg} damage and afflicts the enemy for ${totalDotDamage} damage over ${dotDuration}s!`
+      : `✨ You cast ${spell.name} for ${directDmg} damage and afflict the enemy for ${totalDotDamage} damage over ${dotDuration}s!`;
+
+    if (enemyHP <= 0) {
+      reward = await handleCreatureKill(pid, enemy.id);
     }
+  }
+}
 
     // =========================
     // DAMAGE SPELL
@@ -245,10 +300,28 @@ router.post("/spells/cast", async (req, res) => {
 
       const spellPower = Number(player.spellPower || 1);
 
-      const dmg = Math.max(
-        0,
+      const scaledDamage = Math.max(
+        1,
         Math.floor(baseDamage + statValue * 0.5 * spellPower)
       );
+
+      const result = resolveSpellDamage(
+        player,
+        {
+          ...player,
+          attack: 0,
+          defense: Number(enemy.defense || 0),
+          damageReduction: 0,
+          dodgeChance: 0,
+          crit: 0,
+          critDamageMult: 1,
+          spellPower: 1
+        },
+        scaledDamage
+      );
+
+      const dmg = result.damage;
+      const isCrit = result.crit;
 
       enemyHP = Math.max(0, Number(enemy.hp) - dmg);
 
@@ -257,7 +330,9 @@ router.post("/spells/cast", async (req, res) => {
         [enemyHP, enemy.id]
       );
 
-      log = `✨ You cast ${spell.name} for ${dmg} damage!`;
+      log = isCrit
+        ? `✨ Critical! ${spell.name} hits for ${dmg} damage!`
+        : `✨ You cast ${spell.name} for ${dmg} damage!`;
 
       const dStat = String(spell.debuff_stat || "").trim();
       const dVal = Number(spell.debuff_value) || 0;

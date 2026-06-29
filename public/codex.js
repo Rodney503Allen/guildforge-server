@@ -161,7 +161,7 @@ function creatureRowTemplate(creature) {
 
   const thumb = isUnknown
     ? `<div class="gf-creature-thumb locked"><span>?</span></div>`
-    : `<div class="gf-creature-thumb"><img src="${escapeHtml(img)}" alt="" onerror="this.src='/images/default_creature.png'"></div>`;
+    : `<div class="gf-creature-thumb"><img src="${escapeHtml(img)}" alt="" onerror="this.src='/images/defaults/creature.webp'"></div>`;
 
   return `
     <button
@@ -219,7 +219,41 @@ function renderEmptyDetail() {
     </div>
   `;
 }
+async function claimCodexReward(creatureId, milestoneKey) {
+  try {
+    const res = await fetch("/api/codex/claim", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ creatureId, milestoneKey })
+    });
 
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      throw new Error(data.error || "Failed to claim reward");
+    }
+
+    if (window.GFToast?.show) {
+      GFToast.show("Bestiary Reward", `Claimed ${data.rewardExp} EXP!`, {
+        type: "success",
+        durationMs: 2200
+      });
+    }
+
+    await initCodex();
+    selectCreature(creatureId);
+  } catch (err) {
+    if (window.GFToast?.show) {
+      GFToast.show("Claim Failed", err.message, {
+        type: "error",
+        durationMs: 2200
+      });
+    } else {
+      console.error(err);
+    }
+  }
+}
 function renderCreatureDetail(creature) {
   const detail = document.getElementById("codex-detail");
   if (!detail) return;
@@ -227,7 +261,7 @@ function renderCreatureDetail(creature) {
   const state = creature.state || "unknown";
   const isUnknown = state === "unknown";
   const hasStats = !!creature.stats;
-  const image = creature.image || "/images/default_creature.png";
+  const image = creature.image || "/images/defaults/creature.webp";
   const family = creature.archetype?.name || "Unknown";
   const kills = creature.progress?.killCount ?? 0;
   const seen = creature.progress?.seenCount ?? 0;
@@ -249,7 +283,7 @@ function renderCreatureDetail(creature) {
               ? `<div class="gf-codex-portrait locked"><span>?</span></div>`
               : `
                 <div class="gf-codex-portrait ${escapeHtml(state)}">
-                  <img src="${escapeHtml(image)}" alt="" onerror="this.src='/images/default_creature.png'">
+                  <img src="${escapeHtml(image)}" alt="" onerror="this.src='/images/defaults/creature.webp'">
                 </div>
               `
           }
@@ -311,6 +345,16 @@ function renderCreatureDetail(creature) {
       </div>
     </article>
   `;
+    detail.querySelectorAll(".gf-claim-btn").forEach((btn) => {
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+
+    await claimCodexReward(
+      Number(btn.dataset.creatureId),
+      btn.dataset.milestoneKey
+    );
+  });
+});
 }
 
 function renderStats(stats) {
@@ -352,7 +396,22 @@ function renderMilestones(milestones) {
           <strong>${escapeHtml(m.label)}</strong>
           <span>${escapeHtml(m.reward || "")}</span>
         </div>
-        <span>${current} / ${required}</span>
+
+        <div class="gf-milestone__right">
+          <span>${current} / ${required}</span>
+
+          ${
+            m.claimable
+              ? `<button class="gf-btn gf-claim-btn" type="button"
+                    data-creature-id="${selectedCreatureId}"
+                    data-milestone-key="${escapeHtml(m.key)}">
+                    Claim
+                </button>`
+              : m.claimed
+                ? `<span class="gf-claimed">Claimed</span>`
+                : ``
+          }
+        </div>
       </div>
     `;
   }).join("");

@@ -11,7 +11,6 @@ Object.assign(spellCooldowns, savedSpellCds);
 function saveSpellCooldowns() {
   localStorage.setItem("gf_spell_cooldowns", JSON.stringify(spellCooldowns));
 }
-let lastCombatLogCount = 0;
 // { spellId: timestamp_when_ready }
 
 // ✅ NEW: post-combat state flag (so we can enable close + reload on manual close)
@@ -52,14 +51,9 @@ function startCombatStatePolling() {
 
       if (!data.inCombat && !combatOver) {
         if (data.snapshot?.state === "victory") {
-          logCombat("🏆 Enemy defeated!");
-
           const rewards = data.snapshot.rewards;
-          if (rewards) {
-            if (rewards.exp) logCombat(`✨ You gained ${rewards.exp} EXP!`);
-            if (rewards.gold) logCombat(`💰 You gained ${rewards.gold} gold!`);
-            if (rewards.levelUp) logCombat("⬆ LEVEL UP!");
 
+          if (rewards) {
             maybeShowLootChest({
               chest: rewards.chest ?? null,
               quest: rewards.quest ?? null
@@ -363,7 +357,7 @@ if (enemyImg) {
   setCombatUIEnabled(true);
 
   // ✅ Reset log immediately
-  lastCombatLogCount = 0;
+  lastCombatLogText = "";
   clearCombatLog();
 
   // ✅ Build a safe enemy object NOW (no NaN)
@@ -1018,21 +1012,24 @@ function updatePlayerSP(currentSP) {
   updateBar("playerSPBar", currentSP, window.playerMaxSP);
 }
 
+let lastCombatLogText = "";
+
 function syncServerCombatLog(snapshot) {
   if (!snapshot || !Array.isArray(snapshot.log)) return;
 
   const incoming = snapshot.log.map(String);
+  const joined = incoming.join("\n");
 
-  // If the server log was reset or trimmed, reset our cursor safely.
-  if (lastCombatLogCount > incoming.length) {
-    lastCombatLogCount = 0;
-  }
+  if (joined === lastCombatLogText) return;
 
-  const newLines = incoming.slice(lastCombatLogCount);
+  lastCombatLogText = joined;
 
-  for (const line of newLines) {
-    logCombat(line);
-  }
+  const log = document.getElementById("combatLog");
+  if (!log) return;
 
-  lastCombatLogCount = incoming.length;
+  log.innerHTML = incoming
+    .map(line => `<div>${escapeHtml(line)}</div>`)
+    .join("");
+
+  log.scrollTop = log.scrollHeight;
 }

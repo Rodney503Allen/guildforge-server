@@ -6,7 +6,7 @@ async function addStat(stat) {
     body:JSON.stringify({ stat })
   });
   const data = await res.json();
-  if (data.error) return alert(data.error);
+  if (data.error) return showErrorToast(data.error);
 
   const el = document.getElementById(stat);
   if (el) el.childNodes[0].nodeValue = data.value; // keep tooltip intact
@@ -21,8 +21,14 @@ function goBack() {
   history.length > 1 ? history.back() : location.href="/town";
 }
 
+const TOAST_VISIBLE_MS = 2200;
 
-
+function showErrorToast(message, title = "Action Failed") {
+  window.GFToast.show(title, message, {
+    type: "error",
+    durationMs: TOAST_VISIBLE_MS
+  });
+}
 
 let draggedId = null;
 
@@ -39,7 +45,7 @@ async function equipItem(id) {
   });
 
   const data = await res.json();
-  if (data.error) return alert(data.error);
+  if (data.error) return showErrorToast(data.error);
 
   location.reload();
 }
@@ -52,7 +58,7 @@ async function unequipItem(id) {
   });
 
   const data = await res.json();
-  if (data.error) return alert(data.error);
+  if (data.error) return showErrorToast(data.error);
 
   location.reload();
 }
@@ -64,7 +70,7 @@ async function equipPotion(inventoryId, slot) {
   });
 
   const data = await res.json();
-  if (data.error) return alert(data.error);
+  if (data.error) return showErrorToast(data.error);
 
   location.reload();
 }
@@ -77,7 +83,11 @@ async function unequipPotion(slot) {
   });
 
   const data = await res.json();
-  if (data.error) return alert(data.error);
+
+if (data.error) {
+  showErrorToast(data.error, "Inventory Full");
+  return;
+}
 
   location.reload();
 }
@@ -89,10 +99,19 @@ function dropEquip(e, expectedSlot) {
   fetch("/api/inventory/slot-check/" + draggedId)
     .then(res => res.json())
     .then(data => {
-      if (data.slot !== expectedSlot) {
-        alert("That item does not belong in this slot.");
+      if (data.error) {
+        showErrorToast(data.error);
         return;
       }
+
+      const actualSlot = String(data.slot || "").toLowerCase();
+      const targetSlot = String(expectedSlot || "").toLowerCase();
+
+      if (actualSlot !== targetSlot) {
+        showErrorToast("That item does not belong in this slot.");
+        return;
+      }
+
       equipItem(draggedId);
     });
 }

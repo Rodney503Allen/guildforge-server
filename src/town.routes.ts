@@ -197,6 +197,30 @@ router.get("/town", async (req, res) => {
     "A guarded haven where travelers trade stories, mend wounds, and prepare for the wilds."
   );
 
+  const [[spellAlertRow]]: any = await db.query(
+    `
+    SELECT COUNT(*) AS availableCount
+    FROM spells s
+    WHERE s.sclass = (
+      SELECT pclass FROM players WHERE id = ? LIMIT 1
+    )
+      AND s.level <= (
+        SELECT level FROM players WHERE id = ? LIMIT 1
+      )
+      AND s.is_combat = 1
+      AND NOT EXISTS (
+        SELECT 1
+        FROM player_spells ps
+        WHERE ps.player_id = ?
+          AND ps.spell_id = s.id
+      )
+    `,
+    [pid, pid, pid]
+  );
+
+  const hasLearnableSpells = Number(spellAlertRow?.availableCount || 0) > 0;
+
+
   res.send(`
 <!doctype html>
 <html lang="en">
@@ -250,7 +274,11 @@ router.get("/town", async (req, res) => {
 
             <div class="services-grid">
               ${services.map((s: any) => `
-                <a class="service-tile service-${serviceClass(s)}"
+                <a class="service-tile service-${serviceClass(s)} ${
+                    String(s.route || "").toLowerCase() === "/trainer" && hasLearnableSpells
+                      ? "has-spell-alert"
+                      : ""
+                  }"
                    href="${escapeHtml(s.route || "#")}"
                    tabindex="0">
                   <div class="service-icon">${renderServiceIcon(s.icon)}</div>

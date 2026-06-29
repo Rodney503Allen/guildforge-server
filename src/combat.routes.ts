@@ -378,42 +378,45 @@ router.get("/combat/spells", async (req, res) => {
 
     if (!player) return res.json([]);
 
-    const [spells]: any = await db.query(
+        const [spells]: any = await db.query(
       `
       SELECT
-        id,
-        name,
-        description,
-        icon,
-        type,
-        scost,
-        cooldown,
+        s.id,
+        s.name,
+        s.description,
+        s.icon,
+        s.type,
+        s.scost,
+        s.cooldown,
 
         -- direct effects
-        damage,
-        heal,
+        s.damage,
+        s.heal,
 
         -- DOT system
-        dot_damage,
-        dot_duration,
-        dot_tick_rate,
+        s.dot_damage,
+        s.dot_duration,
+        s.dot_tick_rate,
 
         -- buffs
-        buff_stat,
-        buff_value,
-        buff_duration,
+        s.buff_stat,
+        s.buff_value,
+        s.buff_duration,
 
         -- debuffs (NON-DOT ONLY)
-        debuff_stat,
-        debuff_value,
-        debuff_duration
-      FROM spells
-      WHERE sclass = ?
-        AND level <= ?
-        AND is_combat = 1
-      ORDER BY level ASC
+        s.debuff_stat,
+        s.debuff_value,
+        s.debuff_duration
+      FROM player_spells ps
+      JOIN spells s
+        ON s.id = ps.spell_id
+      WHERE ps.player_id = ?
+        AND s.sclass = ?
+        AND s.level <= ?
+        AND s.is_combat = 1
+      ORDER BY s.level ASC, s.id ASC
       `,
-      [player.pclass, player.level]
+      [pid, player.pclass, player.level]
     );
 
     res.json(spells ?? []);

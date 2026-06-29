@@ -2,6 +2,11 @@
 import { Router } from "express";
 import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
+import {
+  getInventoryCapacity,
+  getUsedInventorySlots,
+  hasInventorySpace
+} from "./services/inventoryCapacityService";
 
 const router = Router();
 
@@ -423,7 +428,8 @@ router.get("/character", requireLogin, async (req, res) => {
     LEFT JOIN item_bases ib
       ON ib.id = pi.item_base_id
     WHERE inv.player_id = ?
-    ORDER BY inv.equipped DESC, COALESCE(pi.name, i.name, ib.name) ASC
+      AND inv.equipped = 0
+    ORDER BY COALESCE(pi.name, i.name, ib.name) ASC
   `, [pid]);
 
   const normalizedInv = (inv || []).map((g: any) => {
@@ -496,7 +502,9 @@ router.get("/character", requireLogin, async (req, res) => {
       </div>
     `;
   };
-
+const inventoryUsed = await getUsedInventorySlots(pid);
+const inventoryCapacity = await getInventoryCapacity(pid);
+const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
   res.send(`
 <!DOCTYPE html>
 <html>
@@ -504,11 +512,14 @@ router.get("/character", requireLogin, async (req, res) => {
   <title>Guildforge | ${p.name} — Character</title>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/statpanel.css">
+  <link rel="stylesheet" href="/ui/toast.css">
   <link rel="stylesheet" href="/ui/itemTooltip.css">
   <link rel="stylesheet" href="/character.css">
+
+  <script src="/ui/toast.js"></script>
   <script defer src="/ui/itemTooltip.js"></script>
   <script defer src="/statpanel.js"></script>
-  <script defer src="/character.js"></script>
+  <script defer src="/character.js?v=2"></script>
 </head>
 
 <body>
@@ -638,8 +649,11 @@ router.get("/character", requireLogin, async (req, res) => {
 
   <div class="right-panel">
     <div class="char-box">
-      <div class="inv-panel-head">
-        <h3 style="margin:0">Inventory</h3>
+      <div class="inventory-header">
+        <h3>Inventory</h3>
+        <span class="inventory-space">
+          ${inventoryUsed} / ${inventoryCapacity}
+        </span>
       </div>
 
       <input id="invSearch" class="inv-search" placeholder="Search items..." autocomplete="off" />
@@ -870,50 +884,129 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
     slot === "mana" ? "sp" :
     null;
 
-  if (!expectedTarget || !Number.isFinite(inventoryId)) {
+  const col =
+    slot === "health" ? "equip_potion_hp_inventory_id" :
+    slot === "mana" ? "equip_potion_sp_inventory_id" :
+    null;
+
+  if (!expectedTarget || !col || !Number.isFinite(inventoryId)) {
     return res.json({ error: "Invalid slot or inventoryId" });
   }
 
-  const [[row]]: any = await db.query(
-    `
-    SELECT
-      inv.inventory_id,
-      inv.player_id,
-      inv.quantity,
-      inv.equipped,
-      i.type,
-      i.effect_target,
-      i.is_combat
-    FROM inventory inv
-    JOIN items i ON i.id = inv.item_id
-    WHERE inv.inventory_id = ?
-      AND inv.player_id = ?
-    LIMIT 1
-    `,
-    [inventoryId, pid]
-  );
+  const conn = await db.getConnection();
 
-  if (!row) return res.json({ error: "Potion not found" });
-  if (Number(row.quantity) <= 0) return res.json({ error: "No quantity remaining" });
-  if (String(row.type) !== "potion") return res.json({ error: "Item is not a potion" });
-  if (Number(row.is_combat) !== 1) return res.json({ error: "Potion is not usable in combat" });
-  if (String(row.effect_target || "").toLowerCase() !== expectedTarget) {
-    return res.json({ error: "Potion doesn't match that slot" });
-  }
+  try {
+    await conn.beginTransaction();
 
-  if (slot === "health") {
-    await db.query(
-      `UPDATE players SET equip_potion_hp_inventory_id=? WHERE id=?`,
+    const [[player]]: any = await conn.query(
+      `
+      SELECT
+        equip_potion_hp_inventory_id,
+        equip_potion_sp_inventory_id
+      FROM players
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [pid]
+    );
+
+    if (!player) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Player not found" });
+    }
+
+    const oldInventoryId = Number(player[col] || 0);
+
+    const [[row]]: any = await conn.query(
+      `
+      SELECT
+        inv.inventory_id,
+        inv.player_id,
+        inv.quantity,
+        inv.equipped,
+        i.type,
+        i.effect_target,
+        i.is_combat
+      FROM inventory inv
+      JOIN items i ON i.id = inv.item_id
+      WHERE inv.inventory_id = ?
+        AND inv.player_id = ?
+      LIMIT 1
+      `,
       [inventoryId, pid]
     );
-  } else {
-    await db.query(
-      `UPDATE players SET equip_potion_sp_inventory_id=? WHERE id=?`,
+
+    if (!row) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Potion not found" });
+    }
+
+    if (Number(row.quantity) <= 0) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "No quantity remaining" });
+    }
+
+    if (String(row.type) !== "potion") {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Item is not a potion" });
+    }
+
+    if (Number(row.is_combat) !== 1) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Potion is not usable in combat" });
+    }
+
+    if (String(row.effect_target || "").toLowerCase() !== expectedTarget) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Potion doesn't match that slot" });
+    }
+
+    // Return old potion in this slot to backpack
+    if (oldInventoryId && oldInventoryId !== inventoryId) {
+      await conn.query(
+        `
+        UPDATE inventory
+        SET equipped = 0
+        WHERE inventory_id = ?
+          AND player_id = ?
+        `,
+        [oldInventoryId, pid]
+      );
+    }
+
+    // Remove new potion from backpack
+    await conn.query(
+      `
+      UPDATE inventory
+      SET equipped = 1
+      WHERE inventory_id = ?
+        AND player_id = ?
+      `,
       [inventoryId, pid]
     );
-  }
 
-  res.json({ success: true });
+    // Save potion slot on player
+    await conn.query(
+      `UPDATE players SET ${col} = ? WHERE id = ?`,
+      [inventoryId, pid]
+    );
+
+    await conn.commit();
+    conn.release();
+
+    res.json({ success: true });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    conn.release();
+    console.error("equip potion failed:", err);
+    res.json({ error: "Failed to equip potion" });
+  }
 });
 
 router.post("/character/unequip-potion", requireLogin, async (req, res) => {
@@ -927,16 +1020,62 @@ router.post("/character/unequip-potion", requireLogin, async (req, res) => {
 
   if (!col) return res.json({ error: "Invalid slot" });
 
-  await db.query(`UPDATE players SET ${col} = NULL WHERE id=?`, [pid]);
-  res.json({ success: true });
+  const space = await hasInventorySpace(pid, 1);
+
+  if (!space.hasSpace) {
+    return res.json({
+      error: `Inventory full (${space.used}/${space.capacity}). Sell, use, or equip something first.`
+    });
+  }
+
+  const conn = await db.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [[player]]: any = await conn.query(
+      `SELECT ${col} AS inventoryId FROM players WHERE id = ? LIMIT 1`,
+      [pid]
+    );
+
+    const oldInventoryId = Number(player?.inventoryId || 0);
+
+    if (oldInventoryId) {
+      await conn.query(
+        `
+        UPDATE inventory
+        SET equipped = 0
+        WHERE inventory_id = ?
+          AND player_id = ?
+        `,
+        [oldInventoryId, pid]
+      );
+    }
+
+    await conn.query(
+      `UPDATE players SET ${col} = NULL WHERE id = ?`,
+      [pid]
+    );
+
+    await conn.commit();
+    conn.release();
+
+    res.json({ success: true });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    conn.release();
+    console.error("unequip potion failed:", err);
+    res.json({ error: "Failed to unequip potion" });
+  }
 });
 
 // =======================
 // UNEQUIP ITEMS
 // =======================
 router.post("/character/unequip", requireLogin, async (req, res) => {
-  const pid = req.session.playerId;
+  const pid = req.session.playerId as number;
   const { inventoryId } = req.body;
+
   if (!inventoryId) return res.json({ error: "Missing inventoryId" });
 
   const [[row]]: any = await db.query(`
@@ -946,6 +1085,14 @@ router.post("/character/unequip", requireLogin, async (req, res) => {
   `, [inventoryId, pid]);
 
   if (!row) return res.json({ error: "Item not found or not equipped" });
+
+  const space = await hasInventorySpace(pid, 1);
+
+  if (!space.hasSpace) {
+    return res.json({
+      error: `Inventory full (${space.used}/${space.capacity}). Sell, use, or equip something first.`
+    });
+  }
 
   if (row.player_item_id) {
     await db.query(

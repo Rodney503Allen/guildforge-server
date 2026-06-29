@@ -2,8 +2,8 @@ const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
 
-const inputDir = "./public/icons/weapons/shield";   // change if needed
-const outputDir = "./public/icons/weapon/shield";
+const inputDir = "./public/icons/player_portraits";   // change if needed
+const outputDir = "./public/icons/player_portraits";
 
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });

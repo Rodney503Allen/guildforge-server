@@ -1,5 +1,7 @@
+//src/codex.routes.ts
 import express from "express";
 import { db } from "./db";
+import { grantExperience } from "./services/experienceService";
 
 const router = express.Router();
 
@@ -31,6 +33,7 @@ router.get("/api/codex", requireLoginApi, async (req, res) => {
         c.name AS creatureName,
         c.description AS creatureDescription,
         c.level,
+        c.exper,
         c.min_level,
         c.terrain,
         c.rarity,
@@ -136,9 +139,11 @@ router.get("/api/codex", requireLoginApi, async (req, res) => {
         .split(",")
         .filter(Boolean);
 
+      const creatureExp = Number(r.exper || 0);
+
       function milestoneReward(key: string) {
-        if (key === "studied") return creatureLevel * 25;
-        if (key === "mastered") return creatureLevel * 100;
+        if (key === "studied") return creatureExp * 25;
+        if (key === "mastered") return creatureExp * 100;
         return 0;
       }
 
@@ -210,7 +215,7 @@ router.get("/api/codex", requireLoginApi, async (req, res) => {
 
         image: isUnknown
           ? null
-          : r.archetypeImg || "/images/default_creature.png",
+          : r.archetypeImg || "/images/defaults/creature.webp",
 
         progress: {
           seenCount,
@@ -243,14 +248,14 @@ router.get("/api/codex", requireLoginApi, async (req, res) => {
             "Studied",
             25,
             killCount,
-            `${creatureLevel * 25} EXP`
+            `${creatureExp * 25} EXP`
           ),
           buildMilestone(
             "mastered",
             "Mastered",
             100,
             killCount,
-            `${creatureLevel * 100} EXP`
+            `${creatureExp * 100} EXP`
           )
         ]
       };
@@ -266,6 +271,99 @@ router.get("/api/codex", requireLoginApi, async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+router.post("/api/codex/claim", requireLoginApi, async (req, res) => {
+  const pid = Number((req.session as any).playerId);
+  const creatureId = Number(req.body?.creatureId);
+  const milestoneKey = String(req.body?.milestoneKey || "").trim();
+
+  const milestoneRequired: Record<string, number> = {
+    studied: 25,
+    mastered: 100
+  };
+
+  const requiredKills = milestoneRequired[milestoneKey];
+
+  if (!Number.isFinite(creatureId) || !requiredKills) {
+    return res.status(400).json({ error: "invalid_claim" });
+  }
+
+  try {
+    const [[row]]: any = await db.query(
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.exper,
+        COALESCE(pbc.kill_count, 0) AS killCount,
+        pbmc.id AS claimId
+      FROM creatures c
+      LEFT JOIN player_bestiary_creatures pbc
+        ON pbc.creature_id = c.id
+       AND pbc.player_id = ?
+      LEFT JOIN player_bestiary_milestone_claims pbmc
+        ON pbmc.creature_id = c.id
+       AND pbmc.player_id = ?
+       AND pbmc.milestone_key = ?
+      WHERE c.id = ?
+      LIMIT 1
+      `,
+      [pid, pid, milestoneKey, creatureId]
+    );
+
+    if (!row) return res.status(404).json({ error: "creature_not_found" });
+
+    const killCount = Number(row.killCount || 0);
+    if (killCount < requiredKills) {
+      return res.status(400).json({ error: "milestone_not_complete" });
+    }
+
+    if (row.claimId) {
+      return res.status(400).json({ error: "reward_already_claimed" });
+    }
+
+    const rewardExp = Math.max(0, Number(row.exper || 0) * requiredKills);
+
+    const { levelUp } = await grantExperience(pid, rewardExp);
+
+    await db.query(
+      `
+      INSERT INTO player_bestiary_milestone_claims (
+        player_id,
+        creature_id,
+        milestone_key,
+        reward_type,
+        reward_amount
+      )
+      VALUES (?, ?, ?, ?, ?)
+      `,
+      [
+        pid,
+        creatureId,
+        milestoneKey,
+        "xp",
+        rewardExp
+      ]
+    );
+    
+    res.json({
+      success: true,
+      creatureId,
+      milestoneKey,
+      rewardExp,
+      levelUp
+    });
+  } catch (err) {
+    console.error("codex claim failed:", err);
+    res.status(500).json({ error: "server_error" });
+  }
+});
+
 // =======================
 // CODEX PAGE
 // =======================
@@ -277,7 +375,10 @@ router.get("/codex", requireLogin, async (req, res) => {
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Guildforge | Codex</title>
   <link rel="stylesheet" href="/statpanel.css" />
+  <script src="/ui/toast.js"></script>
   <link rel="stylesheet" href="/codex.css" />
+  <link rel="stylesheet" href="/ui/toast.css" />
+
 </head>
 
 <body>

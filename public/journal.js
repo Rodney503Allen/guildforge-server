@@ -345,6 +345,14 @@
     </section>
   ` : ""}
 
+  ${status === "active" ? `
+  <section class="gf-section">
+      <button id="trackQuestBtn" class="gf-btn">
+          Track Quest
+      </button>
+  </section>
+  ` : ""}
+
   ${status === "claimed" ? `
     <section class="gf-section">
       <h4 class="gf-section__title">Result</h4>
@@ -357,7 +365,35 @@
 </div>
       </article>
     `;
+    const trackBtn = document.getElementById("trackQuestBtn");
 
+    if (trackBtn) {
+      trackBtn.addEventListener("click", async () => {
+        await fetch("/api/quests/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            playerQuestId: selected.playerQuestId,
+            mode: "track"
+          })
+        });
+
+        if (window.GFToast?.show) {
+          GFToast.show(
+            "Quest Tracked",
+            `"${selected.title}" is now being tracked.`,
+            {
+              type: "success",
+              durationMs: 2200
+            }
+          );
+        }
+
+        await load();
+        renderList();
+        renderDetail();
+      });
+    }
   }
 
   function setStatus(msg) {

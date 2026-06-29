@@ -1,3 +1,4 @@
+//src/inventory.routes.ts
 import express from "express";
 import { db } from "./db";
 
@@ -24,7 +25,8 @@ router.get("/api/inventory", async (req, res) => {
     FROM inventory inv
     JOIN items i ON i.id = inv.item_id
     WHERE inv.player_id = ?
-    ORDER BY inv.equipped DESC, i.name ASC
+      AND inv.equipped = 0
+    ORDER BY i.name ASC
   `, [pid]);
 
   res.json(items);
@@ -36,18 +38,35 @@ router.get("/api/inventory", async (req, res) => {
 
 router.get("/api/inventory/slot-check/:id", async (req, res) => {
   const pid = (req.session as any).playerId;
-  const invId = req.params.id;
+  const invId = Number(req.params.id);
 
-  const [[row]]: any = await db.execute(`
-    SELECT i.slot
+  if (!pid) return res.json({ error: "Not logged in" });
+  if (!Number.isFinite(invId)) return res.json({ error: "Invalid item" });
+
+  const [[row]]: any = await db.execute(
+    `
+    SELECT
+      inv.inventory_id,
+      COALESCE(ib.slot, i.slot) AS slot
     FROM inventory inv
-    JOIN items i ON i.id = inv.item_id
-    WHERE inv.inventory_id = ? AND inv.player_id = ?
-  `,[invId,pid]);
+    LEFT JOIN items i
+      ON i.id = inv.item_id
+    LEFT JOIN player_items pi
+      ON pi.id = inv.player_item_id
+    LEFT JOIN item_bases ib
+      ON ib.id = pi.item_base_id
+    WHERE inv.inventory_id = ?
+      AND inv.player_id = ?
+    LIMIT 1
+    `,
+    [invId, pid]
+  );
 
-  if (!row) return res.json({ error: true });
+  if (!row) return res.json({ error: "Item not found" });
 
-  res.json({ slot: row.slot });
+  res.json({
+    slot: String(row.slot || "")
+  });
 });
 // ===========================
 // USE ITEM (STACK SAFE)

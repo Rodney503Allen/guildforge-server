@@ -552,6 +552,150 @@ button:active{
   line-height: 1.35;
 }
 
+.community-card{
+  padding: 16px;
+}
+
+.community-box{
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(43,52,64,.85);
+  background: rgba(0,0,0,.18);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+.discord-icon{
+  width: 70px;
+  height: 70px;
+  flex: 0 0 70px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.discord-icon img{
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  display:block;
+
+  /* Optional: makes the logo pop against the dark background */
+  filter: drop-shadow(0 3px 10px rgba(0,0,0,.45));
+}
+
+.community-copy{
+  text-align:left;
+}
+
+.community-title{
+  color: var(--bone);
+  font-weight: 900;
+  font-size: 14px;
+  letter-spacing: .4px;
+}
+
+.community-body{
+  margin-top: 6px;
+  color: rgba(215,219,226,.9);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.discord-button{
+  position: relative;
+  z-index: 1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  text-decoration:none;
+
+  background: linear-gradient(180deg, #5865f2, #3842a8);
+  border: 1px solid rgba(132,143,255,.55);
+  color: #fff;
+
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-weight: 900;
+  font-size: 13px;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+
+  box-shadow: 0 14px 28px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.14);
+  transition: .12s ease;
+}
+
+.discord-button:hover{
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.community-section-title{
+  position: relative;
+  z-index: 1;
+  margin: 16px 0 10px;
+  color: var(--bone);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+
+.community-features{
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.community-feature{
+  padding: 10px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(43,52,64,.85);
+  background: rgba(0,0,0,.16);
+  text-align: center;
+}
+
+.feature-icon{
+  color: var(--ember);
+  font-size: 20px;
+  margin-bottom: 6px;
+}
+
+.feature-title{
+  color: var(--ink);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.feature-text{
+  margin-top: 5px;
+  color: var(--muted);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+@media (max-width: 420px){
+  .community-features{
+    grid-template-columns: 1fr;
+  }
+
+  .community-box{
+    align-items:flex-start;
+  }
+}
+
 </style>
 
 
@@ -595,90 +739,53 @@ button:active{
     </div>
   </div>
 
-  <!-- NEWS CARD -->
-<aside class="news-card" aria-label="Latest News">
+<!-- COMMUNITY CARD -->
+<aside class="news-card community-card" aria-label="Join the Guildforge Community">
   <div class="news-head">
-    <h3>Latest Updates</h3>
-    <div class="news-sub">What’s new in Guildforge</div>
+    <h3>Join the Community</h3>
+    <div class="news-sub">Follow Guildforge development</div>
   </div>
 
-<div class="news-list" id="newsList">
+  <div class="community-box">
+    <div class="discord-icon">
+      <img src="/images/discord.webp" alt="Discord">
+    </div>
 
-  <div class="news-item">
-    <div class="news-date">Mar 12, 2026</div>
-    <div class="news-title">Quest System Now Live</div>
-    <div class="news-body">
-      Guildforge now features its first full quest system. Players can discover
-      adventures through tavern rumors, accept objectives, and complete tasks
-      for rewards across the world.
+    <div class="community-copy">
+      <div class="community-title">Join our growing Discord</div>
+      <div class="community-body">
+        Follow updates, preview upcoming features, report bugs, share ideas,
+        and help shape Guildforge as it grows.
+      </div>
     </div>
   </div>
 
-  <div class="news-item">
-    <div class="news-date">Mar 12, 2026</div>
-    <div class="news-title">Tavern Rumors Added</div>
-    <div class="news-body">
-      Havens now offer rumor-based quests through their taverns. These rumors
-      help guide players toward nearby dangers, objectives, and new opportunities.
+  <a class="discord-button" href="https://discord.gg/kT4W7v7DEd" target="_blank" rel="noopener">
+    Join Discord ↗
+  </a>
+
+  <div class="community-section-title">What you'll find</div>
+
+  <div class="community-features">
+    <div class="community-feature">
+      <div class="feature-icon">⚒</div>
+      <div class="feature-title">Dev Updates</div>
+      <div class="feature-text">See what’s coming next.</div>
+    </div>
+
+    <div class="community-feature">
+      <div class="feature-icon">✦</div>
+      <div class="feature-title">Feature Previews</div>
+      <div class="feature-text">Early looks at new systems.</div>
+    </div>
+
+    <div class="community-feature">
+      <div class="feature-icon">✉</div>
+      <div class="feature-title">Feedback</div>
+      <div class="feature-text">Suggest ideas and report bugs.</div>
     </div>
   </div>
-
-  <div class="news-item">
-    <div class="news-date">Mar 12, 2026</div>
-    <div class="news-title">Quest Journal & Tracking</div>
-    <div class="news-body">
-      A new quest journal and tracker HUD have been added, allowing players to
-      view active quests, monitor progress, and keep their current objective
-      visible while exploring.
-    </div>
-  </div>
-
-  <div class="news-item">
-    <div class="news-date">Mar 12, 2026</div>
-    <div class="news-title">Kill & Turn-In Objectives</div>
-    <div class="news-body">
-      Quests now support both creature kill objectives and item turn-ins.
-      Progress updates automatically as you play, making questing smoother and
-      more intuitive.
-    </div>
-  </div>
-
-  <div class="news-item">
-    <div class="news-date">Feb 13, 2026</div>
-    <div class="news-title">Treasure Chest Loot Flow</div>
-    <div class="news-body">
-      Defeated enemies can now drop treasure chests.
-      Loot is revealed via an interactive open mechanic instead of auto-collect.
-    </div>
-  </div>
-
-  <div class="news-item">
-    <div class="news-date">Feb 3, 2026</div>
-    <div class="news-title">Combat Items in Battle</div>
-    <div class="news-body">
-      Potions now work properly in combat and respect HP/SP targets.
-    </div>
-  </div>
-
-  <div class="news-item">
-    <div class="news-date">Feb 2, 2026</div>
-    <div class="news-title">Toast Notifications</div>
-    <div class="news-body">
-      Shop + sell pages now use the same themed toast system.
-    </div>
-  </div>
-
-  <div class="news-item">
-    <div class="news-date">Jan 26, 2026</div>
-    <div class="news-title">World Combat UI</div>
-    <div class="news-body">
-      Combat modal close behavior improved and post-combat state added.
-    </div>
-  </div>
-
-</div>
 </aside>
-
 
 </div>
 

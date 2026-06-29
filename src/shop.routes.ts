@@ -2,6 +2,8 @@
 import express from "express";
 import { db } from "./db";
 import { addItemAtomic } from "./services/inventoryService";
+import { generateLootFromBaseItem } from "./services/lootGenerator";
+import { hasInventorySpace } from "./services/inventoryCapacityService";
 
 const router = express.Router();
 
@@ -53,6 +55,38 @@ const CLASS_LOADOUTS: Record<string, ClassShopLoadout> = {
     offhandSlots: ["offhand"]
   }
 };
+
+const SHOP_ROTATION_HOURS = [0, 6, 12, 18];
+
+function getPacificParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+
+  const get = (type: string) =>
+    Number(parts.find(p => p.type === type)?.value);
+
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour")
+  };
+}
+
+function getShopRotationKey(date = new Date()) {
+  const p = getPacificParts(date);
+  const rotationHour = Math.floor(p.hour / 6) * 6;
+
+  return Number(
+    `${p.year}${String(p.month).padStart(2, "0")}${String(p.day).padStart(2, "0")}${String(rotationHour).padStart(2, "0")}`
+  );
+}
 
 function escapeHtml(input: any) {
   return String(input ?? "")
@@ -192,6 +226,13 @@ router.get("/shop", async (req, res) => {
       });
     }
 
+
+
+
+    const rotationKey = getShopRotationKey();
+
+    const weaponShop = shops.find((s: any) => String(s.type) === "weapon");
+    const armorShop = shops.find((s: any) => String(s.type) === "armor");
     // =========================================================================
     // WEAPONS / OFFHANDS FROM item_bases
     // =========================================================================
@@ -227,7 +268,15 @@ router.get("/shop", async (req, res) => {
           )
           AND ib.required_level <= ?
           AND ib.required_level >= GREATEST(1, ? - 5)
-        ORDER BY ABS(ib.required_level - ?) ASC, RAND()
+        ORDER BY
+          ABS(ib.required_level - ?) ASC,
+          MOD(
+            (ib.id * 7919)
+            + (? * 193)
+            + (? * 389)
+            + (? * 997),
+            100000
+          )
         LIMIT ?
         `,
         [
@@ -236,6 +285,9 @@ router.get("/shop", async (req, res) => {
           townLevel,
           townLevel,
           townLevel,
+          rotationKey,
+          Number(town.id),
+          Number(weaponShop?.id ?? 0),
           choiceCount
         ]
       );
@@ -288,7 +340,15 @@ router.get("/shop", async (req, res) => {
           AND ib.armor_weight IN (?)
           AND ib.required_level <= ?
           AND ib.required_level >= GREATEST(1, ? - 5)
-        ORDER BY ABS(ib.required_level - ?) ASC, RAND()
+        ORDER BY
+          ABS(ib.required_level - ?) ASC,
+          MOD(
+            (ib.id * 7919)
+            + (? * 193)
+            + (? * 389)
+            + (? * 997),
+            100000
+          )
         LIMIT ?
         `,
         [
@@ -296,6 +356,9 @@ router.get("/shop", async (req, res) => {
           townLevel,
           townLevel,
           townLevel,
+          rotationKey,
+          Number(town.id),
+          Number(armorShop?.id ?? 0),
           choiceCount
         ]
       );
@@ -768,6 +831,19 @@ router.post("/api/shop/buy-base", async (req, res) => {
 
     await conn.beginTransaction();
 
+
+
+const inventory = await hasInventorySpace(pid);
+
+if (!inventory.hasSpace) {
+  await conn.rollback();
+  conn.release();
+
+  return res.json({
+    error: `Your inventory is full (${inventory.used}/${inventory.capacity}).`
+  });
+}
+
     const [goldUpdate]: any = await conn.query(
       `
       UPDATE players
@@ -784,32 +860,22 @@ router.post("/api/shop/buy-base", async (req, res) => {
       return res.json({ error: "Not enough gold" });
     }
 
-    const [playerItemInsert]: any = await conn.query(
-      `
-      INSERT INTO player_items (
-        player_id,
-        item_base_id,
-        name,
-        item_level,
-        rarity,
-        is_equipped,
-        is_claimed,
-        roll_json,
-        source_type,
-        source_id
-      )
-      VALUES (?, ?, ?, ?, 'base', 0, 1, NULL, 'shop', ?)
-      `,
-      [
-        Number(pid),
-        Number(base.id),
-        String(base.name),
-        Number(base.required_level ?? 1),
-        Number(town.id)
-      ]
-    );
+const generatedItem = await generateLootFromBaseItem({
+  playerId: Number(pid),
+  baseItemId: Number(base.id),
+  itemLevel: Number(base.required_level ?? townLevel),
+  sourceType: "shop",
+  sourceId: Number(town.id),
+  isClaimed: true
+});
 
-    const playerItemId = Number(playerItemInsert.insertId);
+if (!generatedItem) {
+  await conn.rollback();
+  conn.release();
+  return res.json({ error: "Could not generate item" });
+}
+
+const playerItemId = Number(generatedItem.playerItemId);
 
     await conn.query(
       `
@@ -830,7 +896,22 @@ router.post("/api/shop/buy-base", async (req, res) => {
     await conn.commit();
     conn.release();
 
-    res.json({ success: true });
+    const [[freshPlayer]]: any = await db.query(
+  `SELECT gold FROM players WHERE id = ? LIMIT 1`,
+  [pid]
+);
+
+res.json({
+  success: true,
+  gold: freshPlayer?.gold ?? null,
+  item: {
+    id: generatedItem.playerItemId,
+    name: generatedItem.name,
+    rarity: generatedItem.rarity,
+    itemLevel: generatedItem.itemLevel,
+    affixes: generatedItem.affixes
+  }
+});
   } catch (err) {
     try { await conn.rollback(); } catch {}
     conn.release();

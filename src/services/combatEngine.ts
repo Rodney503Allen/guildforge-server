@@ -55,7 +55,30 @@ export function resolveAttack(
 // =========================
 export function resolveSpellDamage(
   caster: DerivedStats,
+  defender: DerivedStats,
   baseValue: number
-): number {
-  return Math.floor(baseValue * caster.spellPower);
+): CombatResult {
+  const rawPower = Math.max(1, Math.floor(baseValue));
+
+  const defense = Math.max(0, defender.defense);
+  const mitigation = defense / (defense + rawPower * 2);
+
+  let damage = rawPower * (1 - mitigation);
+
+  const variance = 0.9 + Math.random() * 0.2;
+  damage *= variance;
+
+  let crit = false;
+  if (Math.random() < caster.crit) {
+    damage *= caster.critDamageMult;
+    crit = true;
+  }
+
+  damage *= 1 - defender.damageReduction;
+
+  return {
+    damage: Math.max(1, Math.floor(damage)),
+    crit,
+    dodged: false
+  };
 }

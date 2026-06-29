@@ -799,3 +799,24 @@ body{
   border-color: rgba(215,219,226,.18);
   color: rgba(215,219,226,.92);
 }
+
+.gf-milestone__right{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-shrink:0;
+}
+
+.gf-claim-btn{
+  padding:5px 9px;
+  font-size:11px;
+  border-color:rgba(200,163,75,.55);
+}
+
+.gf-claimed{
+  color:rgba(120,220,150,.95) !important;
+  font-size:11px !important;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}

@@ -1223,19 +1223,59 @@ body::before{
   background: rgba(0,0,0,.22);
 }
 
-#lootClaimBtn{
-  width: 100%;
-  padding: 12px 14px;
-  border-radius: 14px;
-  cursor: pointer;
+/* =========================
+   Loot Action Buttons
+   ========================= */
 
+.loot-actions{
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.loot-btn{
+  width: 170px;
+  height: 44px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 800;
+  letter-spacing: .4px;
+  transition: background .15s ease, border-color .15s ease, transform .12s ease, box-shadow .15s ease;
+}
+
+.loot-btn.primary{
   border: 1px solid rgba(200,163,75,.35);
   background: linear-gradient(180deg, rgba(200,163,75,.22), rgba(0,0,0,.28));
   color: #d7dbe2;
-
-  font-weight: 800;
-  letter-spacing: .5px;
 }
+
+.loot-btn.primary:hover{
+  border-color: rgba(212,175,55,.60);
+  background: linear-gradient(180deg, rgba(212,175,55,.30), rgba(0,0,0,.32));
+  box-shadow: 0 0 14px rgba(212,175,55,.18);
+}
+
+.loot-btn.secondary{
+  border: 1px solid rgba(180,190,205,.22);
+  background: linear-gradient(180deg, rgba(120,130,145,.16), rgba(0,0,0,.30));
+  color: rgba(215,219,226,.78);
+}
+
+.loot-btn.secondary:hover{
+  border-color: rgba(180,190,205,.42);
+  background: linear-gradient(180deg, rgba(140,150,165,.24), rgba(0,0,0,.32));
+  color: #d7dbe2;
+}
+
+.loot-btn:hover{
+  transform: translateY(-1px);
+}
+
+.loot-btn:active{
+  transform: translateY(0);
+}
+
 
 /* =========================
    PENDING CHEST BUTTON (FIX)
@@ -2056,6 +2096,29 @@ body::before{
 .world-sidebar .nav-name{
   white-space: normal;
   line-height: 1.25;
+}
+
+.qtQuestTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.qtUntrackBtn {
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.22);
+  color: rgba(215,219,226,.86);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.qtUntrackBtn:hover{
+  border-color: rgba(200,163,75,.38);
+  color: #fff;
 }
 
 /* Slightly better map sizing on common laptop heights */

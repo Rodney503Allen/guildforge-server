@@ -2,6 +2,7 @@
 import { db } from "../db";
 import { addItemWithConn } from "./inventoryService";
 import { syncTurnInObjectivesFromInventory } from "./questService";
+import { getInventoryCapacity } from "./inventoryCapacityService";
 
 /**
  * Drop type expected from loot rolls.
@@ -258,8 +259,59 @@ export async function openChest(playerId: number, chestId: number) {
   };
 }
 
+async function getUsedInventorySlotsWithConn(conn: any, playerId: number) {
+  const [[row]]: any = await conn.query(
+    `
+    SELECT COUNT(*) AS usedSlots
+    FROM inventory
+    WHERE player_id = ?
+      AND equipped = 0
+      AND quantity > 0
+    `,
+    [playerId]
+  );
+
+  return Number(row?.usedSlots || 0);
+}
+
+async function getChestSlotsNeeded(conn: any, playerId: number, items: any[]) {
+  let slotsNeeded = 0;
+
+  const rolledItems = (items || []).filter((it: any) => it.player_item_id != null);
+  slotsNeeded += rolledItems.length;
+
+  const staticItemIds = [
+    ...new Set(
+      (items || [])
+        .filter((it: any) => it.item_id != null)
+        .map((it: any) => Number(it.item_id))
+    )
+  ];
+
+  for (const itemId of staticItemIds) {
+    const [[existingStack]]: any = await conn.query(
+      `
+      SELECT inventory_id
+      FROM inventory
+      WHERE player_id = ?
+        AND item_id = ?
+        AND equipped = 0
+      LIMIT 1
+      `,
+      [playerId, itemId]
+    );
+
+    if (!existingStack) {
+      slotsNeeded += 1;
+    }
+  }
+
+  return slotsNeeded;
+}
+
 export async function claimChest(playerId: number, chestId: number) {
   const conn = await db.getConnection();
+
   try {
     await conn.beginTransaction();
 
@@ -267,6 +319,7 @@ export async function claimChest(playerId: number, chestId: number) {
       `SELECT * FROM player_chests WHERE id=? AND player_id=? FOR UPDATE`,
       [chestId, playerId]
     );
+
     if (!chest) throw new Error("CHEST_NOT_FOUND");
     if (chest.state === "claimed") throw new Error("CHEST_ALREADY_CLAIMED");
 
@@ -274,6 +327,20 @@ export async function claimChest(playerId: number, chestId: number) {
       `SELECT item_id, player_item_id, qty FROM player_chest_items WHERE chest_id=?`,
       [chestId]
     );
+
+    const usedSlots = await getUsedInventorySlotsWithConn(conn, playerId);
+    const capacity = await getInventoryCapacity(playerId);
+    const slotsNeeded = await getChestSlotsNeeded(conn, playerId, items || []);
+
+    if (usedSlots + slotsNeeded > capacity) {
+      await conn.rollback();
+
+      return {
+        ok: false,
+        error: `Inventory full (${usedSlots}/${capacity}). Need ${slotsNeeded} open slot${slotsNeeded === 1 ? "" : "s"} to claim this chest.`
+      };
+    }
+
     for (const it of items ?? []) {
       if (it.item_id != null) {
         await addItemWithConn(conn, playerId, Number(it.item_id), Number(it.qty));
@@ -317,7 +384,6 @@ export async function claimChest(playerId: number, chestId: number) {
 
     await syncTurnInObjectivesFromInventory(playerId);
 
-    await conn.commit();
     return { ok: true };
   } catch (err: any) {
     try { await conn.rollback(); } catch {}

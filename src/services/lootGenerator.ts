@@ -213,6 +213,7 @@ export async function generateLootForCreature(
   );
   const rarity = rollRarity(creature);
 
+
   const base = await pickItemBase({
     itemLevel,
     category,
@@ -341,6 +342,16 @@ function rollRarity(creature: Creature): LootRarity {
   }
 
   return rollWeighted(weights);
+}
+
+function rollShopRarity(): LootRarity {
+  return rollWeighted([
+    { key: "base", weight: 55 },
+    { key: "dormant", weight: 28 },
+    { key: "awakened", weight: 12 },
+    { key: "empowered", weight: 4 },
+    { key: "transcendent", weight: 1 },
+  ]);
 }
 
 async function pickItemBase(args: {
@@ -635,3 +646,76 @@ function rollWeighted<T>(entries: readonly { key: T; weight: number }[]): T {
 
   return entries[entries.length - 1].key;
 }
+
+export async function generateLootFromBaseItem(args: {
+  playerId: number;
+  baseItemId: number;
+  itemLevel: number;
+  sourceType?: string;
+  sourceId?: number | null;
+  isClaimed?: boolean;
+}): Promise<SavedItem | null> {
+  const { playerId, baseItemId, itemLevel } = args;
+
+  const [rows]: any = await db.query(
+    `
+    SELECT
+      id,
+      name,
+      slot,
+      item_type,
+      armor_weight,
+      weapon_class,
+      required_level,
+      max_level,
+      COALESCE(base_attack, 0) AS base_attack,
+      COALESCE(base_defense, 0) AS base_defense,
+      icon,
+      COALESCE(sell_value, 0) AS sell_value
+    FROM item_bases
+    WHERE id = ?
+      AND is_active = 1
+      AND required_level <= ?
+      AND max_level >= ?
+    LIMIT 1
+    `,
+    [baseItemId, itemLevel, itemLevel]
+  );
+
+  const base = rows?.[0] as ItemBaseRow | undefined;
+  if (!base) return null;
+
+  const rarity = rollShopRarity();
+
+  const affixPool = await getEligibleAffixes({
+    base,
+    itemLevel,
+    rarity,
+  });
+
+  const affixes = rollAffixes(affixPool, rarity, base.armor_weight);
+
+  const item = buildFinalItem({
+    base,
+    itemLevel,
+    rarity,
+    affixes,
+  });
+
+  const saved = await saveItemInstance(
+    playerId,
+    item,
+    args.sourceType ?? "shop",
+    args.sourceId ?? null
+  );
+
+  if (args.isClaimed) {
+    await db.query(
+      `UPDATE player_items SET is_claimed = 1 WHERE id = ?`,
+      [saved.playerItemId]
+    );
+  }
+
+  return saved;
+}
+

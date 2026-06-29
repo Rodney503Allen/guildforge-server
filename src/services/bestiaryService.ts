@@ -1,3 +1,4 @@
+//src/services/bestiaryService.ts
 import { db } from "../db";
 
 async function getCreatureArchetypeId(

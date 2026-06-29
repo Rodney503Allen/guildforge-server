@@ -213,10 +213,6 @@ res.send(`
                 onclick="enterTown()">
           Enter Town
         </button>
-
-        <button id="btnQuestLog" class="world-action-btn world-action-btn-secondary">
-          Quest Log
-        </button>
       </div>
     </div>
   </div>
@@ -356,12 +352,16 @@ res.send(`
       <p>Click the chest to open</p>
     </div>
 
-    <div id="lootChestOpened" class="loot-opened hidden">
-      <h3>Loot</h3>
-      <div id="lootItems"></div>
-      <button id="lootClaimBtn">Collect</button>
-    </div>
+<div id="lootChestOpened" class="loot-opened hidden">
+  <h3>Loot</h3>
+
+  <div id="lootItems"></div>
+
+  <div class="loot-actions">
+    <button id="lootClaimBtn" class="loot-btn primary">Collect</button>
+    <button id="lootCloseBtn" class="loot-btn secondary">Close</button>
   </div>
+</div>  </div>
 </div>
 
 <div id="loreModal" class="lore-modal hidden">
@@ -389,6 +389,8 @@ res.send(`
   <script src="/ui/itemTooltip.js"></script>
   <script src="/lootChest.js"></script>
   <link rel="stylesheet" href="/statpanel.css">
+  <link rel="stylesheet" href="/ui/toast.css">
+  <script src="/ui/toast.js"></script>
   <script src="/statpanel.js"></script>
   <script src="/world.page.js" defer></script>
 
@@ -403,29 +405,6 @@ res.send(`
   <div class="qtrackerBody" id="qtBody">—</div>
 </div>
 
-
-<!-- QUEST MODAL -->
-<div id="questModal" class="qmodal hidden">
-  <div class="qmodalBackdrop"></div>
-  <div class="qmodalCard">
-    <div class="qmodalHeader">
-      <div>
-        <div class="qmodalTitle">Quest Log</div>
-        <div class="qmodalSub">Select a quest to track on the map.</div>
-      </div>
-      <button id="btnQuestClose" class="qbtn">✕</button>
-    </div>
-
-    <div class="qmodalBody">
-      <div id="questList" class="qlist"></div>
-    </div>
-
-    <div class="qmodalFooter">
-      <button id="btnQuestClearTrack" class="qbtn ghost">Clear Tracking</button>
-      <button id="btnQuestRefresh" class="qbtn">Refresh</button>
-    </div>
-  </div>
-</div>
   <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>

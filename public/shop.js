@@ -98,7 +98,7 @@ async function buyBase(baseItemId, category, button) {
     setBuyingState(button, false);
 
     if (window.GFToast?.show) {
-      GFToast.show("Purchased", "Item added to your equipment inventory.", {
+      GFToast.show("Purchased", `You received ${data.item?.name || "an item"}!`, {
         type: "success",
         durationMs: TOAST_VISIBLE_MS
       });

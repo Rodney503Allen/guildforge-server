@@ -44,6 +44,7 @@ router.get("/journal", requireLogin, async (req, res) => {
     <link rel="stylesheet" href="/statpanel.css" />
     <link rel="stylesheet" href="/journal.css" />
   <link rel="stylesheet" href="/journal.css" />
+  <link rel="stylesheet" href="/ui/toast.css" />
 
 </head>
 
@@ -59,6 +60,7 @@ router.get("/journal", requireLogin, async (req, res) => {
         <div class="gf-title__kicker">Codex</div>
         <h1 class="gf-title__h1">The Journal</h1>
         <div class="gf-title__sub">A record of contracts, triumphs, and whispers.</div>
+
       </div>
     </header>
 
@@ -99,6 +101,7 @@ router.get("/journal", requireLogin, async (req, res) => {
   </section>
 
   <script src="/statpanel.js" defer></script>
+  <script src="/ui/toast.js"></script>
   <script src="/journal.js" defer></script>
 </main>
 </body>

@@ -61,6 +61,11 @@ export type CombatSession = {
 
 const combatSessions = new Map<number, CombatSession>();
 
+const BASE_ATB_SECONDS = 6.0;
+const MIN_ATB_SECONDS = 3.0;
+const MAX_AGILITY = 500;
+const AGILITY_EXPONENT = 0.6;
+
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
@@ -279,11 +284,17 @@ async function processEnemyAction(session: CombatSession) {
 
 
 
+export function getATBTimeSeconds(agility: number) {
+  const agi = Math.max(0, Math.min(MAX_AGILITY, Number(agility || 0)));
 
+  const progress = Math.pow(agi / MAX_AGILITY, AGILITY_EXPONENT);
 
+  return BASE_ATB_SECONDS -
+    progress * (BASE_ATB_SECONDS - MIN_ATB_SECONDS);
+}
 
 export function getATBFillRate(agility: number) {
-  return 14 + Math.sqrt(Math.max(0, agility)) * 2.4;
+  return 100 / getATBTimeSeconds(agility);
 }
 
 export function getCombatSession(playerId: number) {
@@ -494,7 +505,7 @@ export function buildCombatSnapshot(session: CombatSession) {
       ready: session.enemy.ready,
       recoveryMs: Math.max(0, session.enemy.recoveryUntil - now)
     },
-    log: session.log.slice(-12),
+    log: session.log,
     rewards: session.rewards ?? null
   };
 }

@@ -10,7 +10,9 @@ const LootChestModal = (() => {
   const icon = document.getElementById("lootChestIcon");
   const itemsDiv = document.getElementById("lootItems");
   const claimBtn = document.getElementById("lootClaimBtn");
+  const closeBtn = document.getElementById("lootCloseBtn");
   const pendingBtn = document.getElementById("pendingChestBtn");
+  
 
   const chestOpenSound = new Audio("/sounds/chestOpening.mp3");
   chestOpenSound.preload = "auto";
@@ -19,6 +21,20 @@ const LootChestModal = (() => {
   const lootClaimSound = new Audio("/sounds/itemCollect.mp3");
   lootClaimSound.preload = "auto";
   lootClaimSound.volume = 0.5;
+
+  const TOAST_VISIBLE_MS = 2200;
+
+function showLootToast(title, message, type = "error") {
+  if (window.GFToast?.show) {
+    window.GFToast.show(title, message, {
+      type,
+      durationMs: TOAST_VISIBLE_MS
+    });
+    return;
+  }
+
+  console.warn(title, message);
+}
 
   const CHEST_RARITY_CLASSES = [
     "chest-rarity-base",
@@ -74,7 +90,9 @@ const LootChestModal = (() => {
       credentials: "include"
     });
     const data = await res.json();
-    if (!data.ok) return alert(data.error || "Failed to open");
+    if (!data.ok) {
+      return showLootToast("Chest Error", data.error || "Failed to open");
+    }
 
     // if backend returns chest rarity here too, keep it synced
     if (data.chest?.rarity) {
@@ -100,7 +118,9 @@ const LootChestModal = (() => {
       credentials: "include"
     });
     const data = await res.json();
-    if (!data.ok) return alert(data.error || "Failed to claim");
+    if (!data.ok) {
+      return showLootToast("Inventory Full", data.error || "Failed to claim");
+    }
 
     try {
       lootClaimSound.currentTime = 0;
@@ -251,6 +271,7 @@ function close() {
 
   icon.addEventListener("click", open);
   claimBtn.addEventListener("click", claim);
+  closeBtn.addEventListener("click", close);
   setTimeout(refreshPendingChest, 250);
 
   return {
