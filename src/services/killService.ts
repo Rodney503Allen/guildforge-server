@@ -118,7 +118,7 @@ const affixLootMult = Number(row.loot_mult ?? 1);
 const regionName = row.region_name ? String(row.region_name).trim() : null;
 await recordCreatureKill(playerId, creatureId, Number(row.affix_id) || null);
   // BASE RANGE
-  const base = 2 + (creatureLevel * 3);
+  const base = (2 + (creatureLevel * 3)) * 2;
   const min = Math.floor(base * 0.85);
   const max = Math.floor(base * 1.15);
 
