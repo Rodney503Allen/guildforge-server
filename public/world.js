@@ -29,9 +29,7 @@ async function initWorldPage() {
       return;
     }
 
-    await loadRegionName();
     await refreshWorld();
-    await loadNearbyObjects();
   } catch (err) {
     console.error("World init failed", err);
   }
@@ -397,7 +395,6 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNo
   const objectMap = buildWorldObjectMap(worldObjects || []);
 
   const resourceMap = new Map();
-
   for (const node of resourceNodes || []) {
     const key = `${Number(node.map_x)},${Number(node.map_y)}`;
     resourceMap.set(key, node);
@@ -406,10 +403,10 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNo
   const grid = document.getElementById("Grid");
   if (!grid) return;
 
-  grid.innerHTML = "";
+  const html = [];
 
-  const minX = player.map_x - 3;
-  const minY = player.map_y - 3;
+  const minX = Number(player.map_x) - 3;
+  const minY = Number(player.map_y) - 3;
 
   for (let r = 0; r < 7; r++) {
     for (let c = 0; c < 7; c++) {
@@ -418,48 +415,53 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNo
       const t = tileMap[`${x},${y}`];
 
       if (!t) {
-        grid.innerHTML += `<div class="tile"></div>`;
+        html.push(`<div class="tile"></div>`);
         continue;
       }
 
-
-
-      const isPlayer = x === player.map_x && y === player.map_y;
+      const isPlayer = x === Number(player.map_x) && y === Number(player.map_y);
       const resourceNode = resourceMap.get(`${x},${y}`);
       const { replaceSprite, overlays } = getTileVisualData(x, y, objectMap);
-      
+
       const terrainClass = replaceSprite ? "" : t.terrain;
       const baseStyle = replaceSprite
         ? ` style="background-image: url('${escapeHtml(replaceSprite)}');"`
         : "";
 
-      grid.innerHTML += `
+      const overlayHtml = overlays.map(src => `
+        <img class="tile-overlay" src="${escapeHtml(src)}" alt="">
+      `).join("");
+
+      const resourceHtml = resourceNode ? `
         <div
-          class="tile ${terrainClass} ${isPlayer ? "player" : ""} ${isPlayer && lastMoveDir ? `moving-${lastMoveDir}` : ""}"
+          class="resource-node-marker"
+          title="${escapeHtml(resourceNode.nodeName)}"
+        >
+          <img
+            src="${escapeHtml(resourceNode.image)}"
+            class="resource-node-image resource-${escapeHtml((resourceNode.affixName || "common").toLowerCase())}"
+            alt="${escapeHtml(resourceNode.nodeName)}"
+          >
+        </div>
+      ` : "";
+
+      html.push(`
+        <div
+          class="tile ${escapeHtml(terrainClass)} ${isPlayer ? "player" : ""} ${isPlayer && lastMoveDir ? `moving-${lastMoveDir}` : ""}"
           data-x="${x}"
           data-y="${y}"${baseStyle}
         >
-          ${overlays.map(src => `
-            <img class="tile-overlay" src="${escapeHtml(src)}" alt="">
-          `).join("")}
-          ${resourceNode ? `
-          <div
-              class="resource-node-marker"
-              title="${escapeHtml(resourceNode.nodeName)}"
-          >
-              <img
-                  src="${escapeHtml(resourceNode.image)}"
-                  class="resource-node-image resource-${(resourceNode.affixName || "common").toLowerCase()}"
-                  alt="${escapeHtml(resourceNode.nodeName)}"
-              >
-          </div>
-        ` : ""}
+          ${overlayHtml}
+          ${resourceHtml}
         </div>
-      `;
+      `);
     }
   }
 
+  grid.innerHTML = html.join("");
+
   const currentTile = tileMap[`${player.map_x},${player.map_y}`];
+
   const enterBtn = document.getElementById("enter-town-btn");
   if (enterBtn) {
     enterBtn.style.display = currentTile?.terrain === "town" ? "inline-block" : "none";
@@ -469,6 +471,7 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNo
   if (coords) {
     coords.textContent = `Position: (${player.map_x}, ${player.map_y})`;
   }
+
   renderCurrentResourcePanel(player, resourceNodes || []);
 }
 

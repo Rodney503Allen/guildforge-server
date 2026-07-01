@@ -184,7 +184,12 @@ router.get("/world", async (req, res) => {
 
   // Load player
   const [[player]]: any = await db.query(
-    "SELECT map_x, map_y FROM players WHERE id=?",
+    `
+    SELECT map_x, map_y, level, steps_since_encounter
+    FROM players
+    WHERE id=?
+    LIMIT 1
+    `,
     [pid]
   );
 
@@ -586,6 +591,12 @@ mountain: [
   return bucket[Math.floor(Math.random() * bucket.length)];
 }
 
+
+
+
+
+
+
 // =======================
 // MOVE ROUTE — bundles world/partial + nearby-objects + region into one response
 // =======================
@@ -596,77 +607,78 @@ router.get("/world/move/:dir", async (req, res) => {
   if (!pid || !directions[dir]) {
     return res.json({ success: false });
   }
-  const [[player]]: any = await db.query(
-    "SELECT map_x, map_y FROM players WHERE id=?",
-    [pid]
-  );
+const [[player]]: any = await db.query(
+  `
+  SELECT map_x, map_y, level, steps_since_encounter
+  FROM players
+  WHERE id=?
+  LIMIT 1
+  `,
+  [pid]
+);
 
-  const [dx, dy] = directions[dir];
-  const newX = player.map_x + dx;
-  const newY = player.map_y + dy;
+const [dx, dy] = directions[dir];
+const newX = Number(player.map_x) + dx;
+const newY = Number(player.map_y) + dy;
 
-  const [[tile]]: any = await db.query(
-    `
-    SELECT terrain, region_id
-    FROM world_map
-    WHERE x=? AND y=?
-    LIMIT 1
-    `,
-    [newX, newY]
-  );
-  if (!tile) {
-    return res.json({ success: false });
+const [[tile]]: any = await db.query(
+  `
+  SELECT
+    wm.terrain,
+    wm.region_id,
+    COALESCE(r.name, wm.region_name, 'Unknown Region') AS region_name,
+    COALESCE(r.level_min, 1) AS level_min,
+    COALESCE(r.level_max, 1) AS level_max,
+    r.controlling_guild_id
+  FROM world_map wm
+  LEFT JOIN regions r ON r.id = wm.region_id
+  WHERE wm.x=? AND wm.y=?
+  LIMIT 1
+  `,
+  [newX, newY]
+);
+
+if (!tile) {
+  return res.json({ success: false });
+}
+
+await db.query(
+  "UPDATE players SET map_x=?, map_y=? WHERE id=?",
+  [newX, newY, pid]
+);
+
+const spawnedResourceNode = await maybeSpawnResourceNodeForPlayer(pid);
+const resourceNodes = await getResourceNodesInRange(pid, newX, newY, 3);
+const enterAreaResult = await applyEnterAreaProgress(pid, tile.region_id ?? null);
+const playerLevel = Number(player.level ?? 1);
+const levelMin = Number(tile.level_min ?? 1);
+const levelMax = Number(tile.level_max ?? levelMin);
+
+const difficulty =
+  playerLevel < levelMin ? "hard" :
+  playerLevel > levelMax ? "easy" :
+  "even";
+
+const regionName = String(tile.region_name || "Unknown Region");
+const zoneLevel = levelMin;
+const controllingGuildId = tile.controlling_guild_id ?? null;
+
+let stepsSince = Number(player.steps_since_encounter ?? 999);
+stepsSince += 1;
+
+let enemy: any = null;
+
+if (stepsSince >= ENCOUNTER_GAP_STEPS) {
+  if (Math.random() < ENCOUNTER_CHANCE) {
+    enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
+    if (enemy) stepsSince = 0;
   }
+}
 
-  
-  await db.query(
-    "UPDATE players SET map_x=?, map_y=? WHERE id=?",
-    [newX, newY, pid]
-  );
-
-  const spawnedResourceNode = await maybeSpawnResourceNodeForPlayer(pid);
-
-  const resourceNodes = await getResourceNodesInRange(pid, newX, newY, 3);
-
-  const enterAreaResult = await applyEnterAreaProgress(pid, tile.region_id ?? null);
-
-  let regionName: string | null = null;
-  let zoneLevel: number | null = null;
-  let levelMin = 1;
-  let levelMax = 1;
-  let difficulty = "even";
-  let controllingGuildId: number | null = null;
-
-  if (tile.region_id) {
-    const [[regionRow]]: any = await db.query(
-      `
-      SELECT name, level_min, level_max, controlling_guild_id
-      FROM regions
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [tile.region_id]
-    );
-
-    if (regionRow) {
-      regionName = String(regionRow.name || "");
-      zoneLevel = Number(regionRow.level_min || 1);
-      levelMin = Number(regionRow.level_min ?? 1);
-      levelMax = Number(regionRow.level_max ?? levelMin);
-      controllingGuildId = regionRow.controlling_guild_id ?? null;
-
-      // Need player level for difficulty — fetch it
-      const [[playerLevel]]: any = await db.query(
-        `SELECT level FROM players WHERE id = ? LIMIT 1`,
-        [pid]
-      );
-      const pLevel = Number(playerLevel?.level ?? 1);
-      difficulty =
-        pLevel < levelMin ? "hard" :
-        pLevel > levelMax ? "easy" :
-        "even";
-    }
-  }
+await db.query(
+  `UPDATE players SET steps_since_encounter=? WHERE id=?`,
+  [stepsSince, pid]
+);
 
   // Nearest Haven
   let nearestHaven: any = null;
@@ -701,29 +713,6 @@ router.get("/world/move/:dir", async (req, res) => {
     console.warn("nearest town lookup failed", e);
   }
 
-  // Encounter pacing
-  const [[pstate]]: any = await db.query(
-    `SELECT steps_since_encounter FROM players WHERE id=? LIMIT 1`,
-    [pid]
-  );
-
-  let stepsSince = Number(pstate?.steps_since_encounter ?? 999);
-  stepsSince += 1;
-
-  let enemy: any = null;
-
-  if (stepsSince >= ENCOUNTER_GAP_STEPS) {
-    if (Math.random() < ENCOUNTER_CHANCE) {
-      enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
-      if (enemy) stepsSince = 0;
-    }
-  }
-
-  await db.query(
-    `UPDATE players SET steps_since_encounter=? WHERE id=?`,
-    [stepsSince, pid]
-  );
-
   // =======================
   // BUNDLE: world/partial data
   // =======================
@@ -732,14 +721,25 @@ router.get("/world/move/:dir", async (req, res) => {
   const minY = newY - 3;
   const maxY = newY + 3;
 
-  const [worldObjects]: any = await db.query(`
-    SELECT id, name, x, y, tile_sprite, tile_visual_type, z_index
-    FROM world_objects
-    WHERE is_active = 1
-      AND x BETWEEN ? AND ?
-      AND y BETWEEN ? AND ?
-    ORDER BY z_index ASC, id ASC
-  `, [minX, maxX, minY, maxY]);
+const [worldObjects]: any = await db.query(`
+SELECT
+  id,
+  name,
+  object_type,
+  region_name,
+  x,
+  y,
+  interaction_radius,
+  icon,
+  tile_sprite,
+  tile_visual_type,
+  z_index
+FROM world_objects
+WHERE is_active = 1
+  AND x BETWEEN ? AND ?
+  AND y BETWEEN ? AND ?
+ORDER BY z_index ASC, id ASC
+`, [minX, maxX, minY, maxY]);
 
   const [tiles]: any = await db.query(`
     SELECT *
@@ -748,37 +748,27 @@ router.get("/world/move/:dir", async (req, res) => {
       AND y BETWEEN ? AND ?
   `, [minX, maxX, minY, maxY]);
 
-  const [guilds]: any = await db.query("SELECT id, name FROM guilds");
-  const guildMap: any = {};
-  guilds.forEach((g: any) => guildMap[g.id] = g.name);
-
   // =======================
   // BUNDLE: nearby-objects data
   // =======================
-  const [nearbyRows]: any = await db.query(`
-    SELECT id, name, object_type, region_name, x, y, interaction_radius, icon
-    FROM world_objects
-    WHERE is_active = 1
-      AND x BETWEEN ? AND ?
-      AND y BETWEEN ? AND ?
-  `, [newX - 3, newX + 3, newY - 3, newY + 3]);
 
-  const nearbyObjects = (nearbyRows || []).map((r: any) => {
-    const d = Math.abs(newX - Number(r.x)) + Math.abs(newY - Number(r.y));
-    const radius = Math.max(0, Number(r.interaction_radius) || 1);
-    return {
-      id: Number(r.id),
-      name: String(r.name || "Unknown Object"),
-      object_type: String(r.object_type || "quest"),
-      region_name: r.region_name ?? null,
-      x: Number(r.x),
-      y: Number(r.y),
-      interaction_radius: radius,
-      inRange: d <= radius,
-      distance: d,
-      icon: r.icon ?? null
-    };
-  });
+const nearbyObjects = worldObjects.map((r: any) => {
+  const d = Math.abs(newX - Number(r.x)) + Math.abs(newY - Number(r.y));
+  const radius = Math.max(0, Number(r.interaction_radius) || 1);
+
+  return {
+    id: Number(r.id),
+    name: String(r.name || "Unknown Object"),
+    object_type: String(r.object_type || "quest"),
+    region_name: r.region_name ?? null,
+    x: Number(r.x),
+    y: Number(r.y),
+    interaction_radius: radius,
+    inRange: d <= radius,
+    distance: d,
+    icon: r.icon ?? null
+  };
+});
 
   return res.json({
     success: true,
@@ -805,7 +795,6 @@ router.get("/world/move/:dir", async (req, res) => {
     world: {
       player: { map_x: newX, map_y: newY },
       tiles,
-      guildMap,
       worldObjects,
       resourceNodes
     },
@@ -823,6 +812,10 @@ router.get("/world/move/:dir", async (req, res) => {
     } : null
   });
 });
+
+
+
+
 
 
 router.get("/api/world/nearby-objects", async (req, res) => {
@@ -935,14 +928,9 @@ router.get("/world/partial", async (req, res) => {
 
   const resourceNodes = await getResourceNodesInRange(Number(pid), player.map_x, player.map_y, 3);
 
-  const [guilds]: any = await db.query("SELECT id,name FROM guilds");
-  const guildMap: any = {};
-  guilds.forEach((g: any) => guildMap[g.id] = g.name);
-
   res.json({
     player,
     tiles,
-    guildMap,
     worldObjects,
     resourceNodes
   });
