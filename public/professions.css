@@ -520,3 +520,79 @@ body{
   .gf-book::after{ display:none; }
   .gf-page{ min-height: auto; }
 }
+
+
+
+/* =========================
+   Professions
+========================= */
+
+.gf-xpbar {
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.18);
+  overflow: hidden;
+}
+
+.gf-xpbar__fill {
+  height: 100%;
+  background: rgba(200,163,75,.62);
+}
+
+.gf-tool {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.14);
+}
+
+.gf-tool__icon {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.gf-tool__name {
+  font-weight: 900;
+}
+
+.gf-node-list {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.gf-node {
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(0,0,0,.12);
+}
+
+.gf-node__top {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+}
+
+.gf-node__name {
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.gf-node__meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.gf-prof-icon {
+  font-size: 18px;
+  margin-right: 6px;
+}

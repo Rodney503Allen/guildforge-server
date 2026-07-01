@@ -1,3 +1,4 @@
+/* toast.css */
 :root{
   /* fallback values if page doesn't define them */
   --panel:#0e131a;
@@ -8,13 +9,15 @@
 /* matches your sell/shop theme */
 .toast-wrap{
   position: fixed;
-  top: 110px;   /* under statpanel */
-  right: 18px;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 200000;
   display: flex;
   flex-direction: column;
   gap: 10px;
   pointer-events: none;
+  align-items: center;
 }
 
 .toast{
@@ -33,9 +36,9 @@
   box-shadow: 0 22px 60px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.06);
   color: rgba(215,219,226,.92);
 
-  transform: translateY(-10px);
+  transform: translateY(42vh);
   opacity: 0;
-  animation: toastIn .20s ease-out forwards;
+  animation: toastIn .35s ease-out forwards;
 
   position: relative;
   overflow: hidden;
@@ -63,8 +66,21 @@
   opacity: .95;
 }
 
-.toast.success{ border-color: rgba(182,75,46,.55); }
-.toast.success::after{ background: rgba(182,75,46,.90); }
+.toast.success{
+  border-color: rgba(76,175,80,.70);
+  background:
+    radial-gradient(900px 260px at 18% 0%, rgba(76,175,80,.18), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
+    linear-gradient(180deg, var(--panel), var(--panel2));
+}
+
+.toast.success::after{
+  background: rgb(76,175,80);
+}
+
+.toast.success .toast-title{
+  color: #b8f5bf;
+}
 
 .toast.error{ border-color: rgba(122,30,30,.70); }
 .toast.error::after{ background: rgba(122,30,30,.92); }
@@ -89,8 +105,15 @@
 }
 
 @keyframes toastIn{
-  to { transform: translateY(0); opacity: 1; }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
+
 @keyframes toastOut{
-  to { transform: translateY(-10px); opacity: 0; }
+  to {
+    transform: translateY(-16px);
+    opacity: 0;
+  }
 }

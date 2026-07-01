@@ -3,6 +3,7 @@ import express from "express";
 import { db } from "./db";
 import { trySpawnEnemy } from "./services/spawnService";
 import { applyInteractProgress, applyEnterAreaProgress } from "./services/questService";
+import { maybeSpawnResourceNodeForPlayer } from "./services/gatheringSpawnService";
 
 
 const router = express.Router();
@@ -67,6 +68,49 @@ function getTileVisualData(
     overlays
   };
 }
+
+async function getResourceNodesInRange(playerId: number, centerX: number, centerY: number, range = 3){
+  const [rows]: any = await db.query(
+    `
+    SELECT
+      srn.id AS spawnedNodeId,
+      srn.map_x,
+      srn.map_y,
+      srn.remaining_uses,
+
+      rn.name AS nodeName,
+      rn.description,
+      rn.image,
+      rn.required_level,
+      rn.rarity,
+      rn.base_gather_time_ms,
+
+      p.name AS professionName,
+
+      a.name AS affixName
+    FROM spawned_resource_nodes srn
+    JOIN resource_nodes rn ON rn.id = srn.node_id
+    JOIN professions p ON p.id = rn.profession_id
+    LEFT JOIN resource_node_affixes a ON a.id = srn.affix_id
+    WHERE srn.player_id = ?
+      AND srn.remaining_uses > 0
+      AND (srn.despawns_at IS NULL OR srn.despawns_at > NOW())
+      AND srn.map_x BETWEEN ? AND ?
+      AND srn.map_y BETWEEN ? AND ?
+    ORDER BY srn.id ASC
+    `,
+    [
+      playerId,
+      centerX - range,
+      centerX + range,
+      centerY - range,
+      centerY + range
+    ]
+  );
+
+  return rows;
+}
+
 
 router.get("/world/current-region", async (req, res) => {
   const pid = (req.session as any).playerId;
@@ -173,6 +217,8 @@ router.get("/world", async (req, res) => {
       AND y BETWEEN ? AND ?
   `, [minX, maxX, minY, maxY]);
 
+  const resourceNodes = await getResourceNodesInRange(Number(pid), player.map_x, player.map_y, 3);
+
   // Guild ownership
   const [guilds]: any = await db.query("SELECT id,name FROM guilds");
   const guildMap: any = {};
@@ -235,10 +281,6 @@ res.send(`
                   const t = tileMap[x + "," + y];
                   if (!t) return '<div class="tile"></div>';
 
-                  const owner = t.controlling_guild_id
-                    ? guildMap[t.controlling_guild_id]
-                    : "Neutral";
-
                   const isPlayer = x === player.map_x && y === player.map_y;
 
                   const { replaceSprite, overlays } = getTileVisualData(t, x, y, objectMap);
@@ -259,7 +301,6 @@ res.send(`
                           <img class="tile-overlay" src="${src}" alt="" />
                         `).join("")
                       }
-                      <div class="owner">${owner}</div>
                     </div>
                   `;
                 }).join("");
@@ -279,6 +320,12 @@ res.send(`
       <div class="flavor-card travel-log-card world-sidebar-card">
         <div class="flavor-title">Travel Log</div>
         <div class="flavor-text" id="movement-flavor">You press onward.</div>
+      </div>
+
+      <!-- Current Resource -->
+      <div id="currentResourcePanel"
+          class="resource-panel world-sidebar-card"
+          hidden>
       </div>
 
       <!-- Nearby -->
@@ -344,6 +391,20 @@ res.send(`
 
   <div id="combat-root"></div>
 
+  <!-- GATHERING MODAL -->
+<div id="gatheringModal" class="gathering-modal hidden">
+  <div class="gathering-modal__card">
+    <div class="gathering-modal__icon" id="gatheringModalIcon">⛏️</div>
+    <div class="gathering-modal__title" id="gatheringModalTitle">Mining...</div>
+    <div class="gathering-modal__sub" id="gatheringModalSub">Gathering resources</div>
+
+    <div class="gathering-progress">
+      <div id="gatheringProgressFill" class="gathering-progress__fill"></div>
+    </div>
+  </div>
+</div>
+
+
   <!-- LOOT CHEST MODAL -->
 <div id="lootChestModal" class="loot-modal hidden">
   <div class="loot-panel">
@@ -390,6 +451,9 @@ res.send(`
   <script src="/lootChest.js"></script>
   <link rel="stylesheet" href="/statpanel.css">
   <link rel="stylesheet" href="/ui/toast.css">
+  <script>
+    window.__RESOURCE_NODES__ = ${JSON.stringify(resourceNodes)};
+  </script>
   <script src="/ui/toast.js"></script>
   <script src="/statpanel.js"></script>
   <script src="/world.page.js" defer></script>
@@ -554,10 +618,15 @@ router.get("/world/move/:dir", async (req, res) => {
     return res.json({ success: false });
   }
 
+  
   await db.query(
     "UPDATE players SET map_x=?, map_y=? WHERE id=?",
     [newX, newY, pid]
   );
+
+  const spawnedResourceNode = await maybeSpawnResourceNodeForPlayer(pid);
+
+  const resourceNodes = await getResourceNodesInRange(pid, newX, newY, 3);
 
   const enterAreaResult = await applyEnterAreaProgress(pid, tile.region_id ?? null);
 
@@ -717,6 +786,7 @@ router.get("/world/move/:dir", async (req, res) => {
     terrain: tile.terrain,
     region: regionName,
     zoneLevel,
+    spawnedResourceNode,
     flavor: terrainFlavor(tile.terrain),
 
     poi: {
@@ -736,7 +806,8 @@ router.get("/world/move/:dir", async (req, res) => {
       player: { map_x: newX, map_y: newY },
       tiles,
       guildMap,
-      worldObjects
+      worldObjects,
+      resourceNodes
     },
 
     // Bundled — replaces separate /api/world/nearby-objects fetch
@@ -862,6 +933,8 @@ router.get("/world/partial", async (req, res) => {
       AND y BETWEEN ? AND ?
   `, [minX, player.map_x + 3, minY, player.map_y + 3]);
 
+  const resourceNodes = await getResourceNodesInRange(Number(pid), player.map_x, player.map_y, 3);
+
   const [guilds]: any = await db.query("SELECT id,name FROM guilds");
   const guildMap: any = {};
   guilds.forEach((g: any) => guildMap[g.id] = g.name);
@@ -870,7 +943,8 @@ router.get("/world/partial", async (req, res) => {
     player,
     tiles,
     guildMap,
-    worldObjects
+    worldObjects,
+    resourceNodes
   });
 });
 

@@ -142,7 +142,68 @@ router.get("/api/potions/equipped", requireLogin, async (req, res) => {
   const sp = await loadPotion(cols?.spInv ?? null, "sp");
 
   res.json({ hp, sp });
+
 });
+
+
+
+
+// =======================
+// EQUIPPED TOOL API
+// =======================
+async function loadTool(pid: number, invId: number | null, expectedType: string) {
+  if (!invId) return null;
+
+  const [[row]]: any = await db.query(
+    `
+    SELECT
+      inv.inventory_id AS inventoryId,
+      inv.quantity AS qty,
+      i.name,
+      i.icon,
+      i.type,
+      i.item_type,
+      i.description
+    FROM inventory inv
+    JOIN items i ON i.id = inv.item_id
+    WHERE inv.inventory_id = ?
+      AND inv.player_id = ?
+    LIMIT 1
+    `,
+    [invId, pid]
+  );
+
+  if (!row || Number(row.qty) <= 0) return null;
+  if (String(row.type) !== "tool") return null;
+  if (String(row.item_type) !== expectedType) return null;
+
+  return row;
+}
+
+const renderToolSlot = (label: string, tool: any, slot: string) => `
+  <div class="tool-slot tooltip-container">
+    <div class="tool-title">${label}</div>
+
+    ${
+      tool
+        ? `
+          <div class="tool-inner" ondblclick="unequipTool('${slot}')">
+            <img class="tool-img" src="${resolveIcon(tool.icon)}" onerror="this.style.display='none'">
+            <div class="tooltip">
+              <strong>${escapeHtml(tool.name)}</strong>
+              <div class="rarity">EQUIPPED TOOL</div>
+              <div>${escapeHtml(tool.description || "")}</div>
+            </div>
+          </div>
+        `
+        : `<div class="tool-empty">Empty</div>`
+    }
+  </div>
+`;
+
+
+
+
 
 // =======================
 // CHARACTER PAGE
@@ -393,6 +454,7 @@ router.get("/character", requireLogin, async (req, res) => {
       i.description AS static_description,
       i.category AS static_category,
       i.type AS static_type,
+      i.item_type AS static_item_type,
       i.value AS static_value,
       i.effect_target AS static_effect_target,
       i.attack AS static_attack,
@@ -455,7 +517,9 @@ router.get("/character", requireLogin, async (req, res) => {
       value: isRolled ? Number(g.base_sell_value || 0) : Number(g.static_value || 0),
 
       item_level: isRolled ? Number(g.rolled_item_level || 0) : null,
-      item_type: isRolled ? g.base_item_type : null,
+      item_type: isRolled
+      ? g.base_item_type
+      : g.static_item_type,
       armor_weight: isRolled ? g.base_armor_weight : null,
       base_attack: isRolled ? (Number(g.base_attack) || 0) : (Number(g.static_attack) || 0),
       base_defense: isRolled ? (Number(g.base_defense) || 0) : (Number(g.static_defense) || 0),
@@ -480,7 +544,21 @@ router.get("/character", requireLogin, async (req, res) => {
       is_rolled: isRolled
     };
   });
+  const [[toolCols]]: any = await db.query(
+    `
+    SELECT
+      equip_tool_mining_inventory_id AS miningInv,
+      equip_tool_herbalism_inventory_id AS herbalismInv,
+      equip_tool_woodcutting_inventory_id AS woodcuttingInv
+    FROM players
+    WHERE id = ?
+    `,
+    [pid]
+  );
 
+  const miningTool = await loadTool(pid, toolCols?.miningInv ?? null, "mining_tool");
+  const herbalismTool = await loadTool(pid, toolCols?.herbalismInv ?? null, "herbalism_tool");
+  const woodcuttingTool = await loadTool(pid, toolCols?.woodcuttingInv ?? null, "woodcutting_tool");
   const renderEquipSlot = (slotName: string, alt: string) => {
     const item = equipped[slotName];
     if (!item) {
@@ -601,49 +679,51 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
         ${renderEquipSlot("hands", "Hands")}
       </div>
 
-      <div class="potionbar">
-        <div class="potion-slot tooltip-container">
-          <div class="potion-title">Health Potion</div>
+<div class="quickbelt">
 
-          ${
-            hpPotion
-              ? `
-                <div class="potion-inner" ondblclick="unequipPotion('health')">
-                  <img class="potion-img" src="${resolveIcon(hpPotion.icon)}" onerror="this.style.display='none'">
-                  <div class="stack-count">${hpPotion.qty}</div>
+  <div class="potion-slot tooltip-container">
+    <div class="potion-title">Health</div>
+    ${
+      hpPotion
+        ? `
+          <div class="potion-inner" ondblclick="unequipPotion('health')">
+            <img class="potion-img" src="${resolveIcon(hpPotion.icon)}" onerror="this.style.display='none'">
+            <div class="stack-count">${hpPotion.qty}</div>
+            <div class="tooltip">
+              <strong>${hpPotion.name}</strong>
+              <div class="rarity">EQUIPPED</div>
+              <div>Slot: Health</div>
+            </div>
+          </div>
+        `
+        : `<div class="potion-empty">Empty</div>`
+    }
+  </div>
 
-                  <div class="tooltip">
-                    <strong>${hpPotion.name}</strong>
-                    <div class="rarity">EQUIPPED</div>
-                    <div>Slot: Health</div>
-                  </div>
-                </div>
-              `
-              : `<div class="potion-empty">Empty</div>`
-          }
-        </div>
+  ${renderToolSlot("Mining", miningTool, "mining")}
+  ${renderToolSlot("Herbalism", herbalismTool, "herbalism")}
+  ${renderToolSlot("Woodcutting", woodcuttingTool, "woodcutting")}
 
-        <div class="potion-slot tooltip-container">
-          <div class="potion-title">Mana Potion</div>
+  <div class="potion-slot tooltip-container">
+    <div class="potion-title">Mana</div>
+    ${
+      spPotion
+        ? `
+          <div class="potion-inner" ondblclick="unequipPotion('mana')">
+            <img class="potion-img" src="${resolveIcon(spPotion.icon)}" onerror="this.style.display='none'">
+            <div class="stack-count">${spPotion.qty}</div>
+            <div class="tooltip">
+              <strong>${spPotion.name}</strong>
+              <div class="rarity">EQUIPPED</div>
+              <div>Slot: Mana</div>
+            </div>
+          </div>
+        `
+        : `<div class="potion-empty">Empty</div>`
+    }
+  </div>
 
-          ${
-            spPotion
-              ? `
-                <div class="potion-inner" ondblclick="unequipPotion('mana')">
-                  <img class="potion-img" src="${resolveIcon(spPotion.icon)}" onerror="this.style.display='none'">
-                  <div class="stack-count">${spPotion.qty}</div>
-
-                  <div class="tooltip">
-                    <strong>${spPotion.name}</strong>
-                    <div class="rarity">EQUIPPED</div>
-                    <div>Slot: Mana</div>
-                  </div>
-                </div>
-              `
-              : `<div class="potion-empty">Empty</div>`
-          }
-        </div>
-      </div>
+</div>
     </div>
   </div>
 
@@ -675,6 +755,7 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
               ${baseAttrs}
               data-id="${g.instance_id}"
               data-slot="${g.slot || ""}"
+              data-item-type="${g.item_type || ""}"
               data-search="${escapeHtml((g.name || "").toLowerCase())}"
               data-qty="${Number(g.quantity || 1)}"
 
@@ -686,7 +767,13 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
                       ? `equipPotion(${g.instance_id}, 'health')`
                       : (String(g.type) === "potion" && String(g.effect_target).toLowerCase() === "sp")
                           ? `equipPotion(${g.instance_id}, 'mana')`
-                          : ``
+                          : (String(g.type) === "tool" && String(g.item_type) === "mining_tool")
+                              ? `equipTool(${g.instance_id}, 'mining')`
+                              : (String(g.type) === "tool" && String(g.item_type) === "herbalism_tool")
+                                  ? `equipTool(${g.instance_id}, 'herbalism')`
+                                  : (String(g.type) === "tool" && String(g.item_type) === "woodcutting_tool")
+                                      ? `equipTool(${g.instance_id}, 'woodcutting')`
+                                      : ``
               }"
             >
               <img src="${resolveIcon(g.icon)}" alt=""
@@ -1066,6 +1153,176 @@ router.post("/character/unequip-potion", requireLogin, async (req, res) => {
     conn.release();
     console.error("unequip potion failed:", err);
     res.json({ error: "Failed to unequip potion" });
+  }
+});
+
+
+// =======================
+// EQUIP TOOLS
+// =======================
+router.post("/character/equip-tool", requireLogin, async (req, res) => {
+  const pid = req.session.playerId as number;
+  const slot = String(req.body.slot || "");
+  const inventoryId = Number(req.body.inventoryId);
+
+  const expectedType =
+    slot === "mining" ? "mining_tool" :
+    slot === "herbalism" ? "herbalism_tool" :
+    slot === "woodcutting" ? "woodcutting_tool" :
+    null;
+
+  const col =
+    slot === "mining" ? "equip_tool_mining_inventory_id" :
+    slot === "herbalism" ? "equip_tool_herbalism_inventory_id" :
+    slot === "woodcutting" ? "equip_tool_woodcutting_inventory_id" :
+    null;
+
+  if (!expectedType || !col || !Number.isFinite(inventoryId)) {
+    return res.json({ error: "Invalid tool slot or inventoryId" });
+  }
+
+  const conn = await db.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [[player]]: any = await conn.query(
+      `SELECT ${col} AS oldInventoryId FROM players WHERE id = ? LIMIT 1`,
+      [pid]
+    );
+
+    if (!player) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Player not found" });
+    }
+
+    const oldInventoryId = Number(player.oldInventoryId || 0);
+
+    const [[row]]: any = await conn.query(
+      `
+      SELECT
+        inv.inventory_id,
+        inv.player_id,
+        inv.quantity,
+        inv.equipped,
+        i.type,
+        i.item_type
+      FROM inventory inv
+      JOIN items i ON i.id = inv.item_id
+      WHERE inv.inventory_id = ?
+        AND inv.player_id = ?
+      LIMIT 1
+      `,
+      [inventoryId, pid]
+    );
+
+    if (!row) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Tool not found" });
+    }
+
+    if (Number(row.quantity) <= 0) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "No quantity remaining" });
+    }
+
+    if (String(row.type) !== "tool") {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Item is not a tool" });
+    }
+
+    if (String(row.item_type) !== expectedType) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ error: "Tool does not match that slot" });
+    }
+
+    if (oldInventoryId && oldInventoryId !== inventoryId) {
+      await conn.query(
+        `UPDATE inventory SET equipped = 0 WHERE inventory_id = ? AND player_id = ?`,
+        [oldInventoryId, pid]
+      );
+    }
+
+    await conn.query(
+      `UPDATE inventory SET equipped = 1 WHERE inventory_id = ? AND player_id = ?`,
+      [inventoryId, pid]
+    );
+
+    await conn.query(
+      `UPDATE players SET ${col} = ? WHERE id = ?`,
+      [inventoryId, pid]
+    );
+
+    await conn.commit();
+    conn.release();
+
+    res.json({ success: true });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    conn.release();
+    console.error("equip tool failed:", err);
+    res.json({ error: "Failed to equip tool" });
+  }
+});
+
+router.post("/character/unequip-tool", requireLogin, async (req, res) => {
+  const pid = req.session.playerId as number;
+  const slot = String(req.body.slot || "");
+
+  const col =
+    slot === "mining" ? "equip_tool_mining_inventory_id" :
+    slot === "herbalism" ? "equip_tool_herbalism_inventory_id" :
+    slot === "woodcutting" ? "equip_tool_woodcutting_inventory_id" :
+    null;
+
+  if (!col) return res.json({ error: "Invalid tool slot" });
+
+  const space = await hasInventorySpace(pid, 1);
+
+  if (!space.hasSpace) {
+    return res.json({
+      error: `Inventory full (${space.used}/${space.capacity}). Sell, use, or equip something first.`
+    });
+  }
+
+  const conn = await db.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [[player]]: any = await conn.query(
+      `SELECT ${col} AS inventoryId FROM players WHERE id = ? LIMIT 1`,
+      [pid]
+    );
+
+    const oldInventoryId = Number(player?.inventoryId || 0);
+
+    if (oldInventoryId) {
+      await conn.query(
+        `UPDATE inventory SET equipped = 0 WHERE inventory_id = ? AND player_id = ?`,
+        [oldInventoryId, pid]
+      );
+    }
+
+    await conn.query(
+      `UPDATE players SET ${col} = NULL WHERE id = ?`,
+      [pid]
+    );
+
+    await conn.commit();
+    conn.release();
+
+    res.json({ success: true });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    conn.release();
+    console.error("unequip tool failed:", err);
+    res.json({ error: "Failed to unequip tool" });
   }
 });
 

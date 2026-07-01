@@ -35,6 +35,8 @@ export type InventoryItemView = {
   roll_json?: any;
 };
 
+export const DEFAULT_MAX_STACK_SIZE = 20;
+
 function parseRollJson(v: any) {
   if (!v) return [];
   if (Array.isArray(v)) return v;
@@ -175,18 +177,31 @@ export async function addItemWithConn(
   qty = Math.max(1, Math.floor(qty));
 
   const [[item]]: any = await conn.query(
-    `SELECT category FROM items WHERE id=? LIMIT 1 FOR UPDATE`,
+    `SELECT category, type, item_type FROM items WHERE id=? LIMIT 1 FOR UPDATE`,
     [itemId]
   );
   if (!item) throw new Error("ITEM_NOT_FOUND");
 
   const category = String(item.category || "").toLowerCase();
-  const isStackable = STACKABLE_CATEGORIES.has(category);
+  const type = String(item.type || "").toLowerCase();
+  const itemType = String(item.item_type || "").toLowerCase();
+
+  const isTool =
+    type === "tool" ||
+    itemType === "mining_tool" ||
+    itemType === "herbalism_tool" ||
+    itemType === "woodcutting_tool";
+
+  const isStackable =
+    !isTool &&
+    STACKABLE_CATEGORIES.has(category);
 
   if (isStackable) {
-    const [[row]]: any = await conn.query(
+    let remaining = qty;
+
+    const [stacks]: any = await conn.query(
       `
-      SELECT inventory_id
+      SELECT inventory_id, quantity
       FROM inventory
       WHERE player_id=?
         AND item_id=?
@@ -194,26 +209,53 @@ export async function addItemWithConn(
         AND equipped=0
         AND randid IS NULL
         AND durability IS NULL
+        AND quantity < ?
       ORDER BY inventory_id ASC
-      LIMIT 1
       FOR UPDATE
       `,
-      [pid, itemId]
+      [pid, itemId, DEFAULT_MAX_STACK_SIZE]
     );
 
-    if (row?.inventory_id) {
+    for (const stack of stacks) {
+      if (remaining <= 0) break;
+
+      const currentQty = Number(stack.quantity || 0);
+      const room = DEFAULT_MAX_STACK_SIZE - currentQty;
+      const addQty = Math.min(room, remaining);
+
+      if (addQty <= 0) continue;
+
       const [u]: any = await conn.query(
-        `UPDATE inventory SET quantity = quantity + ? WHERE inventory_id=? AND player_id=?`,
-        [qty, row.inventory_id, pid]
+        `
+        UPDATE inventory
+        SET quantity = quantity + ?
+        WHERE inventory_id = ?
+          AND player_id = ?
+        `,
+        [addQty, stack.inventory_id, pid]
       );
+
       if (!u?.affectedRows) throw new Error("INV_ADD_FAILED");
-    } else {
+
+      remaining -= addQty;
+    }
+
+    while (remaining > 0) {
+      const stackQty = Math.min(DEFAULT_MAX_STACK_SIZE, remaining);
+
       const [i]: any = await conn.query(
-        `INSERT INTO inventory (player_id, item_id, player_item_id, quantity, equipped, durability, randid)
-         VALUES (?, ?, NULL, ?, 0, NULL, NULL)`,
-        [pid, itemId, qty]
+        `
+        INSERT INTO inventory
+          (player_id, item_id, player_item_id, quantity, equipped, durability, randid)
+        VALUES
+          (?, ?, NULL, ?, 0, NULL, NULL)
+        `,
+        [pid, itemId, stackQty]
       );
+
       if (!i?.affectedRows) throw new Error("INV_INSERT_FAILED");
+
+      remaining -= stackQty;
     }
 
     return;

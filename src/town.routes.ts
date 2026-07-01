@@ -51,6 +51,7 @@ function serviceSubtitle(s: any) {
   if (route === "/inventory") return "Manage gear, items, and supplies.";
   if (route === "/quests") return "Review your active work and rumors.";
   if (route === "/world") return "Leave the safety of the walls.";
+  if (route === "/world") return "Purchase tools, accept commissions, and master your professions.";
 
   if (name.includes("market")) return "Browse wares, trade, and deal.";
   if (name.includes("tavern")) return "Rumors, quests, and good company.";
@@ -60,6 +61,7 @@ function serviceSubtitle(s: any) {
   if (name.includes("guild")) return "Manage guild roles, perks, and progress.";
   if (name.includes("quest")) return "Review your active work and rumors.";
   if (name.includes("inventory") || name.includes("backpack")) return "Manage gear, items, and supplies.";
+  if (name.includes("workshop")) return "Purchase tools, accept commissions, and master your professions.";
 
   return "Open service.";
 }

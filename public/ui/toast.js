@@ -1,3 +1,4 @@
+//toast.js
 (function () {
   const DEFAULT_DURATION_MS = 3800;
 

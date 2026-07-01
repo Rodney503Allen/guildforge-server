@@ -92,6 +92,53 @@ if (data.error) {
   location.reload();
 }
 
+async function equipTool(inventoryId, slot) {
+  const res = await fetch("/character/equip-tool", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ inventoryId, slot })
+  });
+
+  const data = await res.json();
+  if (data.error) return showErrorToast(data.error);
+
+  location.reload();
+}
+
+async function unequipTool(slot) {
+  const res = await fetch("/character/unequip-tool", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slot })
+  });
+
+  const data = await res.json();
+  if (data.error) return showErrorToast(data.error);
+
+  location.reload();
+}
+
+function dropTool(e, expectedToolSlot) {
+  e.preventDefault();
+  if (!draggedId) return;
+
+  const el = document.querySelector(`[data-id="${draggedId}"]`);
+  const itemType = String(el?.dataset.itemType || "").toLowerCase();
+
+  const expectedType =
+    expectedToolSlot === "mining" ? "mining_tool" :
+    expectedToolSlot === "herbalism" ? "herbalism_tool" :
+    expectedToolSlot === "woodcutting" ? "woodcutting_tool" :
+    "";
+
+  if (itemType !== expectedType) {
+    showErrorToast("That tool does not belong in this slot.");
+    return;
+  }
+
+  equipTool(draggedId, expectedToolSlot);
+}
+
 function dropEquip(e, expectedSlot) {
   e.preventDefault();
   if (!draggedId) return;

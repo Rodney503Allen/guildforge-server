@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Guildforge | Professions</title>
+
+  <link rel="stylesheet" href="/statpanel.css" />
+  <link rel="stylesheet" href="/professions.css" />
+  <link rel="stylesheet" href="/ui/toast.css" />
+</head>
+
+<body>
+<div id="statpanel-root"></div>
+
+<main class="gf-wrap">
+  <section class="gf-panel">
+    <header class="gf-panel__header">
+      <div class="gf-title">
+        <div class="gf-journalbar">
+          <button id="btn-return" class="gf-btn gf-btn--return" type="button">← Return</button>
+        </div>
+
+        <div class="gf-title__kicker">Craft & Trade</div>
+        <h1 class="gf-title__h1">Professions</h1>
+        <div class="gf-title__sub">A record of your gathering knowledge, tools, and mastery.</div>
+      </div>
+    </header>
+
+    <div class="gf-panel__body">
+      <div id="professions-status" class="gf-status">Loading…</div>
+
+      <div id="professions-book" class="gf-book" hidden>
+        <aside class="gf-page gf-page--left">
+          <div class="gf-page__head">
+            <h2 class="gf-page__title">Trades</h2>
+            <div class="gf-page__hint">Select a profession to inspect your progress.</div>
+          </div>
+
+          <div class="gf-filter">
+            <button class="gf-chip is-active" type="button" data-filter="all">All</button>
+            <button class="gf-chip" type="button" data-filter="gathering">Gathering</button>
+            <button class="gf-chip" type="button" data-filter="crafting">Crafting</button>
+          </div>
+
+          <div id="profession-list" class="gf-list"></div>
+        </aside>
+
+        <section class="gf-page gf-page--right">
+          <div id="profession-detail" class="gf-detail">
+            <div class="gf-detail__empty">
+              <div class="gf-detail__sigil">⚒</div>
+              <div class="gf-detail__msg">Choose a profession from the left page.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <script src="/statpanel.js" defer></script>
+  <script src="/ui/toast.js"></script>
+  <script src="/professions.js" defer></script>
+</main>
+</body>
+</html>

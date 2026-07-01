@@ -25,6 +25,9 @@ import adminRoutes from "./admin.routes";
 import journalRoutes from "./journal.routes";
 import interactablesRoutes from "./interactables.routes";
 import codexRoutes from "./codex.routes";
+import gatheringRoutes from "./gathering.routes";
+import professionsRoutes from "./professions.routes";
+import workshopRoutes from "./workshop.routes";
 
 const app = express();
 
@@ -126,6 +129,9 @@ app.use(adminRoutes);
 app.use(journalRoutes);
 app.use("/api", interactablesRoutes);
 app.use(codexRoutes);
+app.use(gatheringRoutes);
+app.use(professionsRoutes);
+app.use("/workshop", workshopRoutes);
 
 // =======================
 // MAIN PAGE

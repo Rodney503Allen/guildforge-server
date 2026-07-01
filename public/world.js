@@ -8,6 +8,8 @@ const MOVE_COOLDOWN_MS = 500;
 let lastMoveAt = 0;
 let moveLock = false;
 
+let currentResourceNode = null;
+
 // =======================
 // INIT
 // =======================
@@ -128,6 +130,106 @@ function queueCombatOpen() {
   });
 }
 
+
+
+function professionActionLabel(professionName) {
+  switch (String(professionName || "").toLowerCase()) {
+    case "mining":
+      return "Mining...";
+    case "herbalism":
+      return "Harvesting...";
+    case "woodcutting":
+      return "Chopping...";
+    default:
+      return "Gathering...";
+  }
+}
+
+function playGatheringSound(professionName) {
+  let file;
+
+  switch (String(professionName || "").toLowerCase()) {
+    case "mining":
+      file = "/sounds/gathering/mining2.ogg";
+      break;
+
+    case "herbalism":
+      file = "/sounds/gathering/herbalism2.ogg";
+      break;
+
+    case "woodcutting":
+      file = "/sounds/gathering/woodcutting2.ogg";
+      break;
+
+    default:
+      return null;
+  }
+
+
+
+  const audio = new Audio(file);
+  audio.volume = 0.5;
+  audio.loop = true;
+
+  audio.play().catch(() => {});
+
+  return audio;
+}
+
+function playGatherCompleteSound() {
+  const audio = new Audio("/sounds/gathering/collected.ogg");
+  audio.volume = 0.6;
+  audio.play().catch(() => {});
+}
+
+function playProfessionLevelSound() {
+  const audio = new Audio("/sounds/profession-level.ogg");
+  audio.volume = 0.65;
+  audio.play().catch(() => {});
+}
+function showGatheringModal({ professionName, nodeName, durationMs }) {
+  const modal = document.getElementById("gatheringModal");
+  const icon = document.getElementById("gatheringModalIcon");
+  const title = document.getElementById("gatheringModalTitle");
+  const sub = document.getElementById("gatheringModalSub");
+  const fill = document.getElementById("gatheringProgressFill");
+
+  if (!modal || !icon || !title || !sub || !fill) return;
+
+
+
+  icon.textContent = getResourceIcon(professionName);
+  title.textContent = professionActionLabel(professionName);
+  sub.textContent = nodeName || "Gathering resources";
+
+  fill.style.transition = "none";
+  fill.style.width = "0%";
+
+  modal.classList.remove("hidden");
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      fill.style.transition = `width ${durationMs}ms linear`;
+      fill.style.width = "100%";
+    });
+  });
+}
+
+function hideGatheringModal() {
+  const modal = document.getElementById("gatheringModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+
+
+
+
+
 // =======================
 // ENEMY PORTRAIT
 // =======================
@@ -234,15 +336,72 @@ function getTileVisualData(x, y, objectMap) {
 // =======================
 // WORLD RENDER
 // =======================
+function renderCurrentResourcePanel(player, resourceNodes) {
+  const panel = document.getElementById("currentResourcePanel");
+  if (!panel) return;
+
+  const node = (resourceNodes || []).find(n =>
+    Number(n.map_x) === Number(player.map_x) &&
+    Number(n.map_y) === Number(player.map_y)
+  );
+
+  if (!node) {
+    currentResourceNode = null;
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+
+  currentResourceNode = node;
+  panel.hidden = false;
+
+  const displayName = node.affixName
+    ? `${node.affixName} ${node.nodeName}`
+    : node.nodeName;
+
+  panel.innerHTML = `
+    <div class="resource-panel__head">
+      <div class="resource-panel__icon">${getResourceIcon(node.professionName)}</div>
+      <div>
+        <div class="resource-panel__name">${escapeHtml(displayName)}</div>
+        <div class="resource-panel__sub">
+          ${escapeHtml(node.professionName)} • ${escapeHtml(node.rarity || "common")} • Uses: ${Number(node.remaining_uses || 0)}
+        </div>
+      </div>
+    </div>
+
+    <div class="resource-panel__body">
+      <div class="resource-panel__desc">
+        ${escapeHtml(node.description || "A harvestable resource node.")}
+      </div>
+
+      <div class="resource-panel__meta">
+        Required Level: ${Number(node.required_level || 1)}
+      </div>
+
+      <button class="resource-panel__btn" onclick="gatherResourceNode(${Number(node.spawnedNodeId)})">
+        Gather
+      </button>
+    </div>
+  `;
+}
+
 
 // Shared render logic — used by both refreshWorld() and moveWorld()
-function renderWorldFromData({ player, tiles, guildMap, worldObjects }) {
+function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNodes }) {
   const tileMap = {};
   for (const t of tiles || []) {
     tileMap[`${t.x},${t.y}`] = t;
   }
 
   const objectMap = buildWorldObjectMap(worldObjects || []);
+
+  const resourceMap = new Map();
+
+  for (const node of resourceNodes || []) {
+    const key = `${Number(node.map_x)},${Number(node.map_y)}`;
+    resourceMap.set(key, node);
+  }
 
   const grid = document.getElementById("Grid");
   if (!grid) return;
@@ -263,13 +422,12 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects }) {
         continue;
       }
 
-      const owner = t.controlling_guild_id
-        ? guildMap[t.controlling_guild_id]
-        : "Neutral";
+
 
       const isPlayer = x === player.map_x && y === player.map_y;
+      const resourceNode = resourceMap.get(`${x},${y}`);
       const { replaceSprite, overlays } = getTileVisualData(x, y, objectMap);
-
+      
       const terrainClass = replaceSprite ? "" : t.terrain;
       const baseStyle = replaceSprite
         ? ` style="background-image: url('${escapeHtml(replaceSprite)}');"`
@@ -284,7 +442,18 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects }) {
           ${overlays.map(src => `
             <img class="tile-overlay" src="${escapeHtml(src)}" alt="">
           `).join("")}
-          <div class="owner">${escapeHtml(owner)}</div>
+          ${resourceNode ? `
+          <div
+              class="resource-node-marker"
+              title="${escapeHtml(resourceNode.nodeName)}"
+          >
+              <img
+                  src="${escapeHtml(resourceNode.image)}"
+                  class="resource-node-image resource-${(resourceNode.affixName || "common").toLowerCase()}"
+                  alt="${escapeHtml(resourceNode.nodeName)}"
+              >
+          </div>
+        ` : ""}
         </div>
       `;
     }
@@ -300,6 +469,7 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects }) {
   if (coords) {
     coords.textContent = `Position: (${player.map_x}, ${player.map_y})`;
   }
+  renderCurrentResourcePanel(player, resourceNodes || []);
 }
 
 // Initial page load — still fetches /world/partial directly
@@ -309,8 +479,12 @@ async function refreshWorld() {
   });
 
   const data = await res.json();
+
   renderWorldFromData(data);
   updateNavHUD(data);
+
+  // NEW
+  await loadNearbyObjects();
 }
 
 function enterTown() {
@@ -516,7 +690,142 @@ async function interactWithWorldObject(objectId) {
     alert("Interaction failed.");
   }
 }
+function getResourceIcon(professionName) {
+  switch (String(professionName || "").toLowerCase()) {
+    case "mining":
+      return "⛏️";
+    case "herbalism":
+      return "🌿";
+    case "woodcutting":
+      return "🪓";
+    default:
+      return "✨";
+  }
+}
 
+function showErrorToast(message, title = "Action Failed") {
+  if (window.GFToast?.show) {
+    GFToast.show(title, message, {
+      type: "error",
+      durationMs: 2400
+    });
+    return;
+  }
+
+  console.warn(`${title}: ${message}`);
+}
+
+async function gatherResourceNode(spawnedNodeId) {
+  if (isInCombat()) return;
+
+  const panel = document.getElementById("currentResourcePanel");
+  const btn = panel?.querySelector(".resource-panel__btn");
+
+  let sound = null;
+
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/gathering/gather/${spawnedNodeId}`, {
+      method: "POST",
+      credentials: "include"
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      showErrorToast(
+        formatGatheringError(data?.error || "Failed to gather resource.")
+      );
+      return;
+    }
+
+    const gatherTime = Number(data.gatherTimeMs || 1800);
+
+    showGatheringModal({
+      professionName: data.professionName,
+      nodeName: data.nodeName,
+      durationMs: gatherTime
+    });
+
+    sound = playGatheringSound(data.professionName);
+
+    await sleep(gatherTime);
+
+    playGatherCompleteSound();
+
+    const itemsText = (data.gatheredItems || [])
+      .map(item => `${item.quantity}x ${item.name}`)
+      .join(", ");
+
+    if (window.GFToast?.show) {
+      GFToast.show(
+        data.nodeName,
+        `+${data.xpGained} ${data.professionName} XP${itemsText ? ` • ${itemsText}` : ""}`,
+        {
+          type: "success",
+          durationMs: 2600
+        }
+      );
+    }
+
+    if (data.leveledUp && window.GFToast?.show) {
+      playProfessionLevelSound();
+
+      GFToast.show(
+        "Profession Increased!",
+        `${data.professionName} reached Level ${data.newLevel}!`,
+        {
+          type: "success",
+          durationMs: 4500
+        }
+      );
+    }
+
+    await refreshWorld();
+
+    if (typeof loadInventory === "function") {
+      await loadInventory();
+    }
+  } catch (err) {
+    console.error("Gathering failed", err);
+    showErrorToast("Gathering failed.");
+  } finally {
+    if (sound) {
+      sound.pause();
+      sound.currentTime = 0;
+      sound.loop = false;
+    }
+
+    hideGatheringModal();
+
+    if (btn) btn.disabled = false;
+  }
+}
+function formatGatheringError(error) {
+  switch (String(error)) {
+    case "inventory_full":
+      return "Your inventory is full.";
+
+    case "missing_gathering_tool":
+      return "You don't have the required gathering tool equipped.";
+
+    case "invalid_gathering_tool":
+      return "The equipped tool is not valid for this resource.";
+
+    case "profession_level_too_low":
+      return "Your profession level is too low to gather this resource.";
+
+    case "node_not_found_or_expired":
+      return "That resource has already been depleted.";
+
+    case "too_far_from_node":
+      return "Move onto the resource before gathering.";
+
+    default:
+      return error || "Gathering failed.";
+  }
+}
 // =======================
 // LORE MODAL
 // =======================
