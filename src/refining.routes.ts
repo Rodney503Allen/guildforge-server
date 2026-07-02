@@ -78,24 +78,17 @@ if (Number(professionRow.professionLevel || 1) < Number(recipe.required_level ||
   try {
     await conn.beginTransaction();
 
-    const [[inputStack]]: any = await conn.query(
-      `
-      SELECT inventory_id, quantity
-      FROM inventory
-      WHERE player_id = ?
-        AND item_id = ?
-        AND equipped = 0
-      ORDER BY inventory_id ASC
-      LIMIT 1
-      FOR UPDATE
-      `,
-      [pid, recipe.input_item_id]
-    );
+const ok = await consumeItemStacks(
+  conn,
+  pid,
+  Number(recipe.input_item_id),
+  Number(recipe.input_qty || 1)
+);
 
-    if (!inputStack || Number(inputStack.quantity || 0) < Number(recipe.input_qty || 1)) {
-      await conn.rollback();
-      return res.status(400).json({ error: "missing_materials" });
-    }
+if (!ok) {
+  await conn.rollback();
+  return res.status(400).json({ error: "missing_materials" });
+}
 
     const [goldUpdate]: any = await conn.query(
       `
@@ -110,27 +103,6 @@ if (Number(professionRow.professionLevel || 1) < Number(recipe.required_level ||
     if (!goldUpdate?.affectedRows) {
       await conn.rollback();
       return res.status(400).json({ error: "not_enough_gold" });
-    }
-
-    const remainingQty = Number(inputStack.quantity) - Number(recipe.input_qty);
-
-    if (remainingQty > 0) {
-      await conn.query(
-        `
-        UPDATE inventory
-        SET quantity = ?
-        WHERE inventory_id = ?
-        `,
-        [remainingQty, inputStack.inventory_id]
-      );
-    } else {
-      await conn.query(
-        `
-        DELETE FROM inventory
-        WHERE inventory_id = ?
-        `,
-        [inputStack.inventory_id]
-      );
     }
 
     await addItemWithConn(
@@ -529,5 +501,51 @@ async function startRefining(recipeId) {
 
 
 });
+
+async function consumeItemStacks(conn: any, playerId: number, itemId: number, qtyNeeded: number) {
+  const [stacks]: any = await conn.query(
+    `
+    SELECT inventory_id, quantity
+    FROM inventory
+    WHERE player_id = ?
+      AND item_id = ?
+      AND equipped = 0
+    ORDER BY inventory_id ASC
+    FOR UPDATE
+    `,
+    [playerId, itemId]
+  );
+
+  let total = 0;
+  for (const s of stacks) total += Number(s.quantity || 0);
+
+  if (total < qtyNeeded) return false;
+
+  let remaining = qtyNeeded;
+
+  for (const s of stacks) {
+    if (remaining <= 0) break;
+
+    const stackQty = Number(s.quantity || 0);
+    const take = Math.min(stackQty, remaining);
+    const newQty = stackQty - take;
+
+    if (newQty > 0) {
+      await conn.query(
+        `UPDATE inventory SET quantity = ? WHERE inventory_id = ?`,
+        [newQty, s.inventory_id]
+      );
+    } else {
+      await conn.query(
+        `DELETE FROM inventory WHERE inventory_id = ?`,
+        [s.inventory_id]
+      );
+    }
+
+    remaining -= take;
+  }
+
+  return true;
+}
 
 export default router;
