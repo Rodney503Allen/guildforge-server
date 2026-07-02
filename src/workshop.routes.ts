@@ -1,3 +1,4 @@
+//src/workshop.routes.ts
 import express from "express";
 import { db } from "./db";
 import { addItemWithConn } from "./services/inventoryService";
@@ -57,7 +58,21 @@ router.get("/", requireLogin, async (req: any, res: any) => {
   [pid]
 );
 
-const toolCards = tools.map((t: any) => {
+const [refiningStations]: any = await db.query(
+  `
+  SELECT
+    profession_key,
+    station_name,
+    MIN(required_level) AS min_level,
+    COUNT(*) AS recipe_count
+  FROM refining_recipes
+  WHERE is_active = 1
+  GROUP BY profession_key, station_name
+  ORDER BY MIN(display_order) ASC
+  `
+);
+
+  const toolCards = tools.map((t: any) => {
   const price = Number(t.price || 0);
   const canAfford = Number(player.gold || 0) >= price;
 
@@ -84,6 +99,46 @@ const toolCards = tools.map((t: any) => {
         }
       </div>
     </article>
+  `;
+}).join("");
+
+const stationMeta: Record<string, { icon: string; desc: string; action: string }> = {
+    smithing: {
+    icon: "🔥",
+    desc: "Smelt ores into ingots and forge metal equipment.",
+    action: "Use Forge"
+  },
+  carpentry: {
+    icon: "🪚",
+    desc: "Mill logs into planks and craft wooden equipment.",
+    action: "Use Bench"
+  },
+  alchemy: {
+    icon: "🧪",
+    desc: "Distill herbs into oils, extracts, potions, and elixirs.",
+    action: "Use Still"
+  }
+};
+
+const refiningCards = refiningStations.map((s: any) => {
+  const key = String(s.profession_key || "").toLowerCase();
+  const meta = stationMeta[key] || {
+    icon: "⚒️",
+    desc: "Refine raw materials into usable components.",
+    action: "Enter Station"
+  };
+
+  return `
+    <a class="station-card" href="/workshop/refining/${esc(s.profession_key)}">
+      <div class="station-icon">${meta.icon}</div>
+
+      <div class="station-main">
+        <strong>${esc(s.station_name)}</strong>
+        <p>${esc(meta.desc)}</p>
+      </div>
+
+      <div class="station-action">${esc(meta.action)}</div>
+    </a>
   `;
 }).join("");
 
@@ -141,6 +196,20 @@ const toolCards = tools.map((t: any) => {
             </div>
             </section>
 
+            <section class="card service-card">
+              <div class="cardHeader">
+                <div class="cardTitle">
+                  <h2>🔥 Refining Stations</h2>
+                  <p>Turn raw materials into usable crafting components.</p>
+                </div>
+                <span class="badge good">Available</span>
+              </div>
+
+              <div class="cardBody station-list">
+                ${refiningCards || `<div class="empty">No refining stations are available.</div>`}
+              </div>
+            </section>
+
         <section class="card service-card">
           <div class="cardHeader">
             <div class="cardTitle">
@@ -196,7 +265,6 @@ const toolCards = tools.map((t: any) => {
 </html>`);
 });
 
-
 router.get("/buy/:itemId", requireLogin, async (req: any, res: any) => {
   const pid = req.session.playerId as number;
   const itemId = Number(req.params.itemId);
@@ -231,6 +299,8 @@ router.get("/buy/:itemId", requireLogin, async (req: any, res: any) => {
 
   const space = await hasInventorySpace(pid, 1);
   if (!space.hasSpace) return res.redirect("/workshop");
+
+  
 
   const conn = await db.getConnection();
 

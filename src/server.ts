@@ -28,6 +28,8 @@ import codexRoutes from "./codex.routes";
 import gatheringRoutes from "./gathering.routes";
 import professionsRoutes from "./professions.routes";
 import workshopRoutes from "./workshop.routes";
+import refiningRoutes from "./refining.routes";
+import craftingRoutes from "./crafting.routes";
 
 const app = express();
 
@@ -132,6 +134,8 @@ app.use(codexRoutes);
 app.use(gatheringRoutes);
 app.use(professionsRoutes);
 app.use("/workshop", workshopRoutes);
+app.use("/workshop", refiningRoutes);
+app.use("/workshop", craftingRoutes);
 
 // =======================
 // MAIN PAGE
