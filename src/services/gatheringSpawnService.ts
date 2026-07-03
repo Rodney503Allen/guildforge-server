@@ -1,6 +1,6 @@
 import { db } from "../db";
 
-const RESOURCE_SPAWN_CHANCE = 0.02;
+const RESOURCE_SPAWN_CHANCE = 0.04;
 const NODE_DESPAWN_MINUTES = 4;
 const MAX_ACTIVE_NODES_PER_PLAYER = 5;
 
