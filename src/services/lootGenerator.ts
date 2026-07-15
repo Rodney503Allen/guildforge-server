@@ -164,14 +164,24 @@ function getArmorWeightRule(weight: string | null) {
   return null;
 }
 
+function getItemLevelMultiplier(itemLevel: number): number {
+  const safeLevel = Math.max(1, Number(itemLevel) || 1);
+  return 1 + Math.floor(safeLevel / 5) * 0.5;
+}
+
 function getAdjustedAffixRange(
   affix: AffixRow,
-  armorWeight: string | null
+  armorWeight: string | null,
+  itemLevel: number
 ): { min: number; max: number } {
+  const levelMultiplier = getItemLevelMultiplier(itemLevel);
   const rule = getArmorWeightRule(armorWeight);
 
   let min = Number(affix.value_min || 0);
   let max = Number(affix.value_max || 0);
+
+  min = Math.max(1, Math.floor(min * levelMultiplier));
+  max = Math.max(min, Math.floor(max * levelMultiplier));
 
   if (rule?.bestSourceStat && affix.stat_key === rule.bestSourceStat) {
     min = Math.max(1, Math.floor(min * rule.minMultiplier));
@@ -230,26 +240,7 @@ export async function generateLootForCreature(
     rarity,
   });
 
-
-console.log("[LOOT] eligible affixes", {
-  base: base.name,
-  slot: base.slot,
-  itemType: base.item_type,
-  armorWeight: base.armor_weight,
-  rarity,
-  itemLevel,
-  count: affixPool.length,
-  affixes: affixPool.map(a => ({
-    stat: a.stat_key,
-    label: a.label,
-    slot: a.slot,
-    applies_to: a.applies_to,
-    armor_weight: a.armor_weight,
-    rarity_min: a.rarity_min
-  }))
-});
-
-  const affixes = rollAffixes(affixPool, rarity, base.armor_weight);
+  const affixes = rollAffixes(affixPool, rarity, base.armor_weight, itemLevel);
 
   const item = buildFinalItem({
     base,
@@ -451,7 +442,8 @@ async function getEligibleAffixes(args: {
 function rollAffixes(
   pool: AffixRow[],
   rarity: LootRarity,
-  armorWeight: string | null
+  armorWeight: string | null,
+  itemLevel: number
 ): RolledAffix[] {
   const affixCount = RARITY_CONFIG[rarity].affixCount;
 
@@ -476,7 +468,7 @@ function rollAffixes(
     );
 
     const isResonant = rarity === "transcendent" && i === resonantIndex;
-    const adjustedRange = getAdjustedAffixRange(chosen, armorWeight);
+    const adjustedRange = getAdjustedAffixRange(chosen, armorWeight, itemLevel);
 
     const rawValue = isResonant
       ? adjustedRange.max
@@ -693,7 +685,7 @@ export async function generateLootFromBaseItem(args: {
     rarity,
   });
 
-  const affixes = rollAffixes(affixPool, rarity, base.armor_weight);
+  const affixes = rollAffixes(affixPool, rarity, base.armor_weight, itemLevel);
 
   const item = buildFinalItem({
     base,

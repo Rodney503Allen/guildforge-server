@@ -321,6 +321,8 @@ async function startCrafting(recipeId) {
 
     const data = await res.json();
 
+    console.log("Crafting response:", data);
+
     if (workSound) {
       workSound.pause();
       workSound.currentTime = 0;
@@ -538,16 +540,24 @@ try {
         Number(recipe.output_id),
         Number(recipe.output_qty || 1)
       );
-    } else if (recipe.output_type === "item_base") {
-      const createdItemId = await createItemFromBase(conn, Number(recipe.output_id));
+} else if (recipe.output_type === "item_base") {
+  const playerItemId = await createPlayerItemFromBase(
+    conn,
+    pid,
+    Number(recipe.output_id),
+    recipeId
+  );
 
-      await addItemWithConn(
-        conn,
-        pid,
-        createdItemId,
-        Number(recipe.output_qty || 1)
-      );
-    }
+  await conn.query(
+    `
+    INSERT INTO inventory
+      (player_id, player_item_id, item_id, quantity, equipped)
+    VALUES
+      (?, ?, NULL, 1, 0)
+    `,
+    [pid, playerItemId]
+  );
+}
 
     const professionResult = await grantProfessionExperience(
       conn,
@@ -650,7 +660,12 @@ async function consumeItemStacks(conn: any, playerId: number, itemId: number, qt
 }
 
 
-async function createItemFromBase(conn: any, baseId: number) {
+async function createPlayerItemFromBase(
+  conn: any,
+  playerId: number,
+  baseId: number,
+  recipeId?: number
+) {
   const [[base]]: any = await conn.query(
     `
     SELECT *
@@ -664,30 +679,30 @@ async function createItemFromBase(conn: any, baseId: number) {
 
   if (!base) throw new Error("ITEM_BASE_NOT_FOUND");
 
-  const category = base.slot === "weapon" ? "weapon" : "armor";
-
   const [result]: any = await conn.query(
     `
-    INSERT INTO items
-    (
-      name, type, slot, rarity,
-      attack, defense, agility, vitality, intellect, crit,
-      icon, description, value, category, item_type, is_combat
-    )
+    INSERT INTO player_items
+      (
+        player_id,
+        item_base_id,
+        name,
+        item_level,
+        rarity,
+        is_equipped,
+        is_claimed,
+        roll_json,
+        source_type,
+        source_id
+      )
     VALUES
-    (?, ?, ?, 'common', ?, ?, 0, 0, 0, 0, ?, ?, ?, ?, ?, 0)
+      (?, ?, ?, ?, 'base', 0, 1, NULL, 'crafting', ?)
     `,
     [
+      playerId,
+      baseId,
       base.name,
-      base.item_type,
-      base.slot,
-      Number(base.base_attack || 0),
-      Number(base.base_defense || 0),
-      base.icon,
-      base.description,
-      Number(base.sell_value || 0),
-      category,
-      base.weapon_class || base.armor_weight || base.item_type
+      Number(base.required_level || base.item_level || 1),
+      recipeId ?? null
     ]
   );
 

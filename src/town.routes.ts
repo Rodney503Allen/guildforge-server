@@ -51,7 +51,7 @@ function serviceSubtitle(s: any) {
   if (route === "/inventory") return "Manage gear, items, and supplies.";
   if (route === "/quests") return "Review your active work and rumors.";
   if (route === "/world") return "Leave the safety of the walls.";
-  if (route === "/world") return "Purchase tools, accept commissions, and master your professions.";
+  if (route === "/workshop") return "Purchase tools, accept commissions, and master your professions.";
 
   if (name.includes("market")) return "Browse wares, trade, and deal.";
   if (name.includes("tavern")) return "Rumors, quests, and good company.";
@@ -148,11 +148,23 @@ router.get("/town", async (req, res) => {
   const pid = (req.session as any).playerId;
   if (!pid) return res.redirect("/login.html");
 
-  const [[player]]: any = await db.query(`
-    SELECT map_x, map_y
+const [[player]]: any = await db.query(
+  `
+    SELECT
+      map_x,
+      map_y,
+      skill_points
     FROM players
     WHERE id = ?
-  `, [pid]);
+    LIMIT 1
+  `,
+  [pid]
+);
+
+if (!player) return res.redirect("/login.html");
+
+const hasAvailableSkillPoints =
+  Number(player.skill_points || 0) >= 1;
 
   const [[town]]: any = await db.query(`
     SELECT *
@@ -198,29 +210,6 @@ router.get("/town", async (req, res) => {
     town.description ||
     "A guarded haven where travelers trade stories, mend wounds, and prepare for the wilds."
   );
-
-  const [[spellAlertRow]]: any = await db.query(
-    `
-    SELECT COUNT(*) AS availableCount
-    FROM spells s
-    WHERE s.sclass = (
-      SELECT pclass FROM players WHERE id = ? LIMIT 1
-    )
-      AND s.level <= (
-        SELECT level FROM players WHERE id = ? LIMIT 1
-      )
-      AND s.is_combat = 1
-      AND NOT EXISTS (
-        SELECT 1
-        FROM player_spells ps
-        WHERE ps.player_id = ?
-          AND ps.spell_id = s.id
-      )
-    `,
-    [pid, pid, pid]
-  );
-
-  const hasLearnableSpells = Number(spellAlertRow?.availableCount || 0) > 0;
 
 
   res.send(`
@@ -277,7 +266,7 @@ router.get("/town", async (req, res) => {
             <div class="services-grid">
               ${services.map((s: any) => `
                 <a class="service-tile service-${serviceClass(s)} ${
-                    String(s.route || "").toLowerCase() === "/trainer" && hasLearnableSpells
+                    String(s.route || "").toLowerCase() === "/trainer" && hasAvailableSkillPoints
                       ? "has-spell-alert"
                       : ""
                   }"

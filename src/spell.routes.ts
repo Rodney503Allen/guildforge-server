@@ -1,12 +1,10 @@
 //spell.routes.ts
 import express from "express";
 import { db } from "./db";
-import { applyBuff } from "./services/buffService";
 import { getFinalPlayerStats } from "./services/playerService";
 import { handleCreatureKill } from "./services/killService";
-import { applyCreatureDebuff } from "./services/creatureBuffService";
-import { ARCHETYPE_SCALING } from "./services/archetypeScaling";
-import { resolveSpellDamage } from "./services/combatEngine";
+import { getSpellHandler } from "./services/spellHandlers";
+
 import {
   ensureCombatSession,
   createCombatSession,
@@ -17,6 +15,7 @@ import {
   isCooldownReady,
   setCooldown
 } from "./services/combatSessionService";
+import { getEquippedSpells } from "./services/spellLoadoutService";
 
 const router = express.Router();
 async function getOrCreateSession(pid: number) {
@@ -28,26 +27,75 @@ async function getOrCreateSession(pid: number) {
 }
 // ⏱️ playerId:spellId -> timestamp
 
-router.post("/spells/cast", async (req, res) => {
+// =======================
+// GET COMBAT HOTBAR SPELLS
+// =======================
+router.get("/combat/spells", async (req, res) => {
   try {
-    const pid = (req.session as any).playerId;
-    const { spellId } = req.body;
+    const pid = Number((req.session as any)?.playerId || 0);
 
-    let reward: any = null;
-    let appliedStatus = false;
-
-    if (!pid) return res.status(401).json({ error: "Not logged in" });
-    if (!spellId) return res.status(400).json({ error: "Missing spellId" });
-
-    const session = await getOrCreateSession(pid);
-    if (!session) {
-      return res.status(404).json({ error: "No enemy" });
+    if (!pid) {
+      return res.status(401).json({
+        error: "Not logged in"
+      });
     }
 
-    // refresh session player from authoritative computed stats
+    const slots = await getEquippedSpells(pid);
+
+    return res.json({
+      success: true,
+      maxSlots: 6,
+      slots
+    });
+  } catch (err) {
+    console.error("GET /combat/spells failed", err);
+
+    return res.status(500).json({
+      error: "Server error"
+    });
+  }
+});
+
+router.post("/spells/cast", async (req, res) => {
+  try {
+    const pid = Number(
+      (req.session as any)?.playerId || 0
+    );
+
+    const spellId = Number(req.body?.spellId);
+
+    let reward: any = null;
+
+    if (!pid) {
+      return res.status(401).json({
+        error: "Not logged in"
+      });
+    }
+
+    if (
+      !Number.isInteger(spellId) ||
+      spellId <= 0
+    ) {
+      return res.status(400).json({
+        error: "Invalid spellId"
+      });
+    }
+
+    const session = await getOrCreateSession(pid);
+
+    if (!session) {
+      return res.status(404).json({
+        error: "No enemy"
+      });
+    }
+
+    // Refresh the session using authoritative player stats.
     const player = await getFinalPlayerStats(pid);
+
     if (!player) {
-      return res.status(404).json({ error: "Player not found" });
+      return res.status(404).json({
+        error: "Player not found"
+      });
     }
 
     session.player.stats = player;
@@ -55,7 +103,9 @@ router.post("/spells/cast", async (req, res) => {
     session.player.hp = Number(player.hpoints ?? 0);
     session.player.maxHp = Number(player.maxhp ?? 1);
     session.player.sp = Number(player.spoints ?? 0);
-    session.player.maxSp = Number(player.maxspoints ?? 0);
+    session.player.maxSp = Number(
+      player.maxspoints ?? 0
+    );
 
     advanceCombatSession(session);
 
@@ -69,58 +119,76 @@ router.post("/spells/cast", async (req, res) => {
     if (!session.player.ready) {
       return res.json({
         error: "not_ready",
-        remainingMs: getActorReadyInMs(session.player),
+        remainingMs: getActorReadyInMs(
+          session.player
+        ),
         snapshot: buildCombatSnapshot(session)
       });
     }
 
-    // 1️⃣ Verify player knows the spell
-    const [[known]]: any = await db.query(
+    // Verify that the spell is learned, equipped,
+    // and usable in combat.
+    const [[spell]]: any = await db.query(
       `
-      SELECT 1
-      FROM player_spells
-      WHERE player_id = ? AND spell_id = ?
+      SELECT
+        s.*,
+        pes.slot
+      FROM player_equipped_spells pes
+
+      JOIN player_spells ps
+        ON ps.player_id = pes.player_id
+       AND ps.spell_id = pes.spell_id
+
+      JOIN spells s
+        ON s.id = pes.spell_id
+
+      WHERE pes.player_id = ?
+        AND pes.spell_id = ?
+        AND s.is_combat = 1
+
+      LIMIT 1
       `,
       [pid, spellId]
     );
 
-    if (!known) {
-      return res.status(403).json({ error: "Spell not learned" });
-    }
-
-    // 2️⃣ Load spell definition
-    const [[spell]]: any = await db.query(
-      `
-      SELECT *
-      FROM spells
-      WHERE id = ?
-      `,
-      [spellId]
-    );
-
     if (!spell) {
-      return res.status(404).json({ error: "Spell not found" });
+      return res.status(403).json({
+        error: "Spell not equipped"
+      });
     }
 
-    const scost = Number(spell.scost) || 0;
-    const baseDamage = Number(spell.damage) || 0;
-    const baseHeal = Number(spell.heal) || 0;
-    const cooldownSec = Number(spell.cooldown) || 0;
+    const manaCost =
+      Number(spell.mana_cost) || 0;
+
+    const cooldownSec =
+      Number(spell.cooldown) || 0;
 
     const cooldownKey = `spell:${spellId}`;
 
-    // hybrid cooldown check — do NOT consume the turn if unavailable
-    if (!isCooldownReady(session.player, cooldownKey)) {
+    // Cooldown failure does not consume SP or the turn.
+    if (
+      !isCooldownReady(
+        session.player,
+        cooldownKey
+      )
+    ) {
       const now = Date.now();
-      const readyAt = session.player.cooldowns[cooldownKey] || now;
+
+      const readyAt =
+        session.player.cooldowns[cooldownKey] ||
+        now;
+
       return res.json({
         error: "cooldown",
-        remaining: Math.max(1, Math.ceil((readyAt - now) / 1000)),
+        remaining: Math.max(
+          1,
+          Math.ceil((readyAt - now) / 1000)
+        ),
         snapshot: buildCombatSnapshot(session)
       });
     }
 
-    // 3️⃣ Load current enemy (if any)
+    // Load the current enemy.
     const [[enemy]]: any = await db.query(
       `
       SELECT
@@ -128,293 +196,181 @@ router.post("/spells/cast", async (req, res) => {
         pc.hp,
         c.maxhp,
         c.defense
+
       FROM player_creatures pc
-      JOIN creatures c ON c.id = pc.creature_id
+
+      JOIN creatures c
+        ON c.id = pc.creature_id
+
       WHERE pc.player_id = ?
+
+      LIMIT 1
       `,
       [pid]
     );
 
-    let log = "";
-    let enemyHP = enemy?.hp;
-    let playerHP = session.player.hp;
+    // Find the generic spell handler.
+    const handler = getSpellHandler(spell);
 
-    // For damage spells, require enemy before spending SP
-    if ((spell.type === "damage" || spell.type === "dot" || spell.type === "damage_dot") && !enemy) {
+    if (!handler) {
+      console.error(
+        `No spell handler for type "${spell.type}"`,
+        {
+          spellId: spell.id,
+          spellName: spell.name
+        }
+      );
+
+      return res.status(500).json({
+        error:
+          `No handler exists for spell type: ${spell.type}`
+      });
+    }
+
+    // Target validation happens before SP is spent.
+    if (handler.requiresEnemy && !enemy) {
       return res.json({
         error: "No enemy to target",
         snapshot: buildCombatSnapshot(session)
       });
     }
 
-    // Check SP — do NOT consume turn if not enough
-    if (Number(session.player.sp) < scost) {
+    // Configuration validation happens before SP is spent.
+    const configurationError =
+      handler.validate(spell);
+
+    if (configurationError) {
+      console.error(
+        "Invalid spell configuration",
+        {
+          spellId: spell.id,
+          spellName: spell.name,
+          spellType: spell.type,
+          configurationError
+        }
+      );
+
+      return res.status(500).json({
+        error: configurationError
+      });
+    }
+
+    // SP failure does not consume the turn.
+    if (
+      Number(session.player.sp) < manaCost
+    ) {
       return res.json({
         error: "Not enough SP",
         snapshot: buildCombatSnapshot(session)
       });
     }
 
-    // Spend SP
-    const newSP = Number(session.player.sp) - scost;
+    // Spend SP only after all normal validation passes.
+    const newSP =
+      Number(session.player.sp) - manaCost;
+
     session.player.sp = newSP;
 
     await db.query(
-      "UPDATE players SET spoints = ? WHERE id = ?",
+      `
+      UPDATE players
+      SET spoints = ?
+      WHERE id = ?
+      `,
       [newSP, pid]
     );
 
-// =========================
-// DOT SPELL
-// =========================
-if (spell.type === "dot" || spell.type === "damage_dot") {
-  const dotBaseDamage = Number(spell.dot_damage) || 0;
-  const dotDuration = Number(spell.dot_duration) || 0;
-  const tickRate = Number(spell.dot_tick_rate) || 1;
-
-  if (dotBaseDamage <= 0 || dotDuration <= 0 || tickRate <= 0) {
-    return res.status(500).json({ error: "Invalid DOT spell config" });
-  }
-
-  const scalingStat = ARCHETYPE_SCALING[player.archetype];
-
-  let statValue = 0;
-  switch (scalingStat) {
-    case "attack":
-      statValue = player.attack;
-      break;
-    case "agility":
-      statValue = player.agility;
-      break;
-    case "intellect":
-      statValue = player.intellect;
-      break;
-  }
-
-  const spellPower = Number(player.spellPower || 1);
-
-  const scaledDotDamage = Math.max(
-    1,
-    Math.floor(dotBaseDamage + statValue * 0.5 * spellPower)
-  );
-
-  const dotResult = resolveSpellDamage(
-    player,
-    {
-      ...player,
-      attack: 0,
-      defense: Number(enemy.defense || 0),
-      damageReduction: 0,
-      dodgeChance: 0,
-      crit: 0,
-      critDamageMult: 1,
-      spellPower: 1
-    },
-    scaledDotDamage
-  );
-
-  const totalDotDamage = Math.max(1, dotResult.damage);
-  const totalTicks = Math.max(1, Math.floor(dotDuration / tickRate));
-  const damagePerTick = Math.max(1, Math.floor(totalDotDamage / totalTicks));
-
-  await db.query(
-    `
-    INSERT INTO player_creature_dots
-      (player_creature_id, damage, tick_interval, next_tick_at, expires_at, source)
-    VALUES
-      (?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?)
-    `,
-    [
-      enemy.id,
-      damagePerTick,
-      tickRate,
-      dotDuration,
-      `spell:${spell.id}`
-    ]
-  );
-
-  log = dotResult.crit
-    ? `☠ Critical! ${spell.name} afflicts the enemy for ${totalDotDamage} damage over ${dotDuration}s!`
-    : `☠ ${spell.name} afflicts the enemy for ${totalDotDamage} damage over ${dotDuration}s!`;
-
-  // optional direct hit part for damage_dot
-  if (spell.type === "damage_dot" && baseDamage > 0) {
-    const scaledDirectDamage = Math.max(
-      1,
-      Math.floor(baseDamage + statValue * 0.5 * spellPower)
-    );
-
-    const directResult = resolveSpellDamage(
+    // Execute the actual spell effect.
+    const result = await handler.execute({
+      playerId: pid,
+      spell,
       player,
-      {
-        ...player,
-        attack: 0,
-        defense: Number(enemy.defense || 0),
-        damageReduction: 0,
-        dodgeChance: 0,
-        crit: 0,
-        critDamageMult: 1,
-        spellPower: 1
-      },
-      scaledDirectDamage
+      enemy: enemy ?? null,
+      currentPlayerHP: Number(session.player.hp),
+      maxPlayerHP: Number(session.player.maxHp)
+    });
+
+if (result.appliedStatus) {
+  const refreshedPlayer =
+    await getFinalPlayerStats(pid);
+
+  if (refreshedPlayer) {
+    session.player.stats =
+      refreshedPlayer;
+
+    session.player.maxHp =
+      Number(refreshedPlayer.maxhp ?? 1);
+
+    session.player.maxSp =
+      Number(refreshedPlayer.maxspoints ?? 0);
+
+    session.player.hp = Math.min(
+      Number(refreshedPlayer.hpoints ?? session.player.hp),
+      session.player.maxHp
     );
 
-    const directDmg = directResult.damage;
-    const directCrit = directResult.crit;
-
-    enemyHP = Math.max(0, Number(enemy.hp) - directDmg);
-
-    await db.query(
-      "UPDATE player_creatures SET hp = ? WHERE id = ?",
-      [enemyHP, enemy.id]
+    session.player.sp = Math.min(
+      Number(refreshedPlayer.spoints ?? session.player.sp),
+      session.player.maxSp
     );
-
-    log = directCrit
-      ? `✨ Critical! ${spell.name} hits for ${directDmg} damage and afflicts the enemy for ${totalDotDamage} damage over ${dotDuration}s!`
-      : `✨ You cast ${spell.name} for ${directDmg} damage and afflict the enemy for ${totalDotDamage} damage over ${dotDuration}s!`;
-
-    if (enemyHP <= 0) {
-      reward = await handleCreatureKill(pid, enemy.id);
-    }
   }
 }
 
-    // =========================
-    // DAMAGE SPELL
-    // =========================
-    if (spell.type === "damage") {
-      const scalingStat = ARCHETYPE_SCALING[player.archetype];
+    let enemyHP =
+      result.enemyHP !== undefined
+        ? Number(result.enemyHP)
+        : enemy
+          ? Number(enemy.hp)
+          : undefined;
 
-      let statValue = 0;
-      switch (scalingStat) {
-        case "attack":
-          statValue = player.attack;
-          break;
-        case "agility":
-          statValue = player.agility;
-          break;
-        case "intellect":
-          statValue = player.intellect;
-          break;
-      }
+    let playerHP =
+      result.playerHP !== undefined
+        ? Number(result.playerHP)
+        : Number(session.player.hp);
 
-      const spellPower = Number(player.spellPower || 1);
+    const appliedStatus =
+      result.appliedStatus ?? false;
 
-      const scaledDamage = Math.max(
-        1,
-        Math.floor(baseDamage + statValue * 0.5 * spellPower)
-      );
-
-      const result = resolveSpellDamage(
-        player,
-        {
-          ...player,
-          attack: 0,
-          defense: Number(enemy.defense || 0),
-          damageReduction: 0,
-          dodgeChance: 0,
-          crit: 0,
-          critDamageMult: 1,
-          spellPower: 1
-        },
-        scaledDamage
-      );
-
-      const dmg = result.damage;
-      const isCrit = result.crit;
-
-      enemyHP = Math.max(0, Number(enemy.hp) - dmg);
-
-      await db.query(
-        "UPDATE player_creatures SET hp = ? WHERE id = ?",
-        [enemyHP, enemy.id]
-      );
-
-      log = isCrit
-        ? `✨ Critical! ${spell.name} hits for ${dmg} damage!`
-        : `✨ You cast ${spell.name} for ${dmg} damage!`;
-
-      const dStat = String(spell.debuff_stat || "").trim();
-      const dVal = Number(spell.debuff_value) || 0;
-      const dDur = Number(spell.debuff_duration) || 0;
-
-      if (dStat && dDur > 0 && dVal !== 0) {
-        await applyCreatureDebuff(
-          enemy.id,
-          dStat,
-          dVal,
-          dDur,
-          `spell:${spell.id}`
-        );
-
-        appliedStatus = true;
-        log += ` 🕸 Debuff applied: ${dStat.toUpperCase()} ${dVal > 0 ? "+" : ""}${dVal} (${dDur}s)`;
-      }
-
-      if (enemyHP <= 0) {
-        reward = await handleCreatureKill(pid, enemy.id);
-      }
-    }
-
-    // =========================
-    // HEAL SPELL
-    // =========================
-    if (spell.type === "heal") {
-      playerHP = Math.min(session.player.maxHp, session.player.hp + baseHeal);
+    if (result.playerHP !== undefined) {
       session.player.hp = playerHP;
-
-      await db.query(
-        "UPDATE players SET hpoints = ? WHERE id = ?",
-        [playerHP, pid]
-      );
-
-      log = `✨ You cast ${spell.name} and heal ${baseHeal} HP!`;
     }
 
-    // =========================
-    // BUFF SPELL
-    // =========================
-    if (spell.type === "buff") {
-      if (!spell.buff_stat || !spell.buff_duration) {
-        return res.status(500).json({ error: "Invalid buff spell config" });
-      }
+    if (
+      result.enemyHP !== undefined &&
+      session.enemy
+    ) {
+      session.enemy.hp = enemyHP!;
+    }
 
-      await applyBuff(
+    // Process direct-hit kills.
+    if (
+      result.killedEnemy &&
+      enemy
+    ) {
+      reward = await handleCreatureKill(
         pid,
-        spell.buff_stat,
-        spell.buff_value,
-        spell.buff_duration,
-        `spell:${spell.id}`
+        enemy.id
       );
-
-      log = `✨ You cast ${spell.name} and gain a buff!`;
-
-      if (enemy && spell.debuff_stat && spell.debuff_value && spell.debuff_duration) {
-        await applyCreatureDebuff(
-          enemy.id,
-          spell.debuff_stat,
-          Number(spell.debuff_value),
-          Number(spell.debuff_duration),
-          `spell:${spell.id}`
-        );
-
-        log += ` 🔻 ${spell.debuff_stat.toUpperCase()} reduced!`;
-      }
     }
 
-    // successful spell cast: set cooldown + consume ATB turn
+    // A successful cast receives its cooldown.
     if (cooldownSec > 0) {
-      setCooldown(session.player, cooldownKey, cooldownSec);
+      setCooldown(
+        session.player,
+        cooldownKey,
+        cooldownSec
+      );
     }
 
-    consumeActorTurn(session.player, 450);
-
-    if (enemyHP !== undefined) {
-      session.enemy.hp = Number(enemyHP);
-    }
+    // A successful cast consumes the player's ATB turn.
+    consumeActorTurn(
+      session.player,
+      450
+    );
 
     if (reward) {
       session.state = "victory";
+
       session.rewards = {
         exp: reward?.expGained,
         gold: reward?.goldGained,
@@ -424,33 +380,67 @@ if (spell.type === "dot" || spell.type === "damage_dot") {
       };
     }
 
-    session.log.push(log);
+    session.log.push(result.log);
+
     if (reward) {
-      session.log.push("🏆 Enemy defeated!");
-      if (reward?.expGained) session.log.push(`✨ You gained ${reward.expGained} EXP!`);
-      if (reward?.goldGained) session.log.push(`💰 You gained ${reward.goldGained} gold!`);
-      if (reward?.levelUp) session.log.push("⬆ LEVEL UP!");
+      session.log.push(
+        "🏆 Enemy defeated!"
+      );
+
+      if (reward?.expGained) {
+        session.log.push(
+          `✨ You gained ${reward.expGained} EXP!`
+        );
+      }
+
+      if (reward?.goldGained) {
+        session.log.push(
+          `💰 You gained ${reward.goldGained} gold!`
+        );
+      }
+
+      if (reward?.levelUp) {
+        session.log.push(
+          "⬆ LEVEL UP!"
+        );
+      }
     }
 
-    res.json({
-      log,
+    return res.json({
+      log: result.log,
+
       enemyHP,
       enemyMaxHP: enemy?.maxhp,
+
       playerHP,
       playerSP: newSP,
+
       appliedStatus,
-      dead: enemyHP !== undefined && enemyHP <= 0,
+
+      dead:
+        enemyHP !== undefined &&
+        enemyHP <= 0,
+
       exp: reward?.expGained,
       gold: reward?.goldGained,
       levelUp: reward?.levelUp,
+
       chest: reward?.chest ?? null,
       quest: reward?.quest ?? null,
+
       cooldown: cooldownSec,
+
       snapshot: buildCombatSnapshot(session)
     });
   } catch (err) {
-    console.error("POST /spells/cast failed", err);
-    res.status(500).json({ error: "Server error" });
+    console.error(
+      "POST /spells/cast failed",
+      err
+    );
+
+    return res.status(500).json({
+      error: "Server error"
+    });
   }
 });
 

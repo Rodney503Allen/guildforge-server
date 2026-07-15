@@ -18,7 +18,7 @@ const LootChestModal = (() => {
   chestOpenSound.preload = "auto";
   chestOpenSound.volume = 0.5;
 
-  const lootClaimSound = new Audio("/sounds/itemCollect.mp3");
+  const lootClaimSound = new Audio("/sounds/itemCollect.ogg");
   lootClaimSound.preload = "auto";
   lootClaimSound.volume = 0.5;
 

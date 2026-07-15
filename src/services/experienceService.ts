@@ -1,4 +1,4 @@
-// experienceService.ts
+//services/experienceService.ts
 import { db } from "../db";
 import { getFinalPlayerStats } from "./playerService";
 
@@ -111,52 +111,72 @@ async function applyLevelUp(
   const spGainPerLevel = 10;
   const statPointsPerLevel = 5;
 
+  const oldLevel = Number(p.level);
+  const newLevel = Number(level);
+
   const totalHpGain = hpGainPerLevel * levelsGained;
   const totalSpGain = spGainPerLevel * levelsGained;
   const totalStatPoints = statPointsPerLevel * levelsGained;
 
-  // First apply level/max/stat point gains
-  await querySource.query(`
-    UPDATE players
-    SET level = ?,
-        exper = ?,
-        maxhp = maxhp + ?,
-        maxspoints = maxspoints + ?,
-        stat_points = stat_points + ?
-    WHERE id = ?
-  `, [
-    level,
-    exp,
-    totalHpGain,
-    totalSpGain,
-    totalStatPoints,
-    playerId
-  ]);
+  // Award 1 skill point for every even level reached.
+  // Examples:
+  // Level 1 -> 2 awards 1
+  // Level 2 -> 3 awards 0
+  // Level 3 -> 6 awards 2 (levels 4 and 6)
+  const totalSkillPoints =
+    Math.floor(newLevel / 2) - Math.floor(oldLevel / 2);
 
-  // Then calculate final derived maxes from stat engine/playerService
+  // Apply level, max-resource, stat-point, and skill-point gains.
+  await querySource.query(
+    `
+      UPDATE players
+      SET level = ?,
+          exper = ?,
+          maxhp = maxhp + ?,
+          maxspoints = maxspoints + ?,
+          stat_points = stat_points + ?,
+          skill_points = skill_points + ?
+      WHERE id = ?
+    `,
+    [
+      newLevel,
+      exp,
+      totalHpGain,
+      totalSpGain,
+      totalStatPoints,
+      totalSkillPoints,
+      playerId
+    ]
+  );
+
+  // Recalculate final derived maximums after the level-up.
   const finalStats = await getFinalPlayerStats(playerId);
 
   if (finalStats) {
-    await querySource.query(`
-      UPDATE players
-      SET hpoints = ?,
-          spoints = ?
-      WHERE id = ?
-    `, [
-      finalStats.maxhp,
-      finalStats.maxspoints,
-      playerId
-    ]);
+    await querySource.query(
+      `
+        UPDATE players
+        SET hpoints = ?,
+            spoints = ?
+        WHERE id = ?
+      `,
+      [
+        finalStats.maxhp,
+        finalStats.maxspoints,
+        playerId
+      ]
+    );
   }
 
   return {
-    oldLevel: p.level,
-    newLevel: level,
+    oldLevel,
+    newLevel,
     levelsGained,
     exp,
     hpGain: totalHpGain,
     spGain: totalSpGain,
     statPoints: totalStatPoints,
+    skillPoints: totalSkillPoints,
     restoredToFull: true
   };
 }

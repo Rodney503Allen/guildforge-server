@@ -2,28 +2,46 @@ const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
 
-const inputDir = "./public/icons/player_portraits";   // change if needed
-const outputDir = "./public/icons/player_portraits";
+const inputDir = "./public/icons/spellspng";
+const outputDir = "./public/icons/spells_webp";
 
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
+async function convertDirectory(currentDir) {
+  const entries = fs.readdirSync(currentDir, {
+    withFileTypes: true
+  });
 
-async function convertImages() {
-  const files = fs.readdirSync(inputDir);
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
 
-  for (const file of files) {
-    const ext = path.extname(file).toLowerCase();
-    if (![".png", ".jpg", ".jpeg"].includes(ext)) continue;
+    if (entry.isDirectory()) {
+      await convertDirectory(fullPath);
+      continue;
+    }
 
-    const inputPath = path.join(inputDir, file);
-    const outputPath = path.join(
+    const ext = path.extname(entry.name).toLowerCase();
+
+    if (![".png", ".jpg", ".jpeg"].includes(ext)) {
+      continue;
+    }
+
+    const relativeDir = path.relative(inputDir, currentDir);
+
+    const destinationDir = path.join(
       outputDir,
-      path.basename(file, ext) + ".webp"
+      relativeDir
+    );
+
+    fs.mkdirSync(destinationDir, {
+      recursive: true
+    });
+
+    const outputPath = path.join(
+      destinationDir,
+      path.basename(entry.name, ext) + ".webp"
     );
 
     try {
-      await sharp(inputPath)
+      await sharp(fullPath)
         .resize(128, 128, {
           fit: "inside",
           withoutEnlargement: true
@@ -34,13 +52,14 @@ async function convertImages() {
         })
         .toFile(outputPath);
 
-      console.log("✔ Converted:", file);
+      console.log("✔", path.relative(inputDir, fullPath));
     } catch (err) {
-      console.error("✖ Error:", file, err);
+      console.error("✖", fullPath, err);
     }
   }
-
-  console.log("Done converting ranger spells.");
 }
 
-convertImages();
+(async () => {
+  await convertDirectory(inputDir);
+  console.log("Done converting spell icons.");
+})();

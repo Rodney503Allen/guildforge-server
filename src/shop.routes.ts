@@ -14,45 +14,28 @@ type ClassShopLoadout = {
 };
 
 const CLASS_LOADOUTS: Record<string, ClassShopLoadout> = {
-  Mage: {
-    armorWeights: ["light"],
-    weaponSlots: ["weapon"],
-    offhandSlots: ["offhand"]
-  },
-  Warlock: {
-    armorWeights: ["light"],
-    weaponSlots: ["weapon"],
-    offhandSlots: ["offhand"]
-  },
-  Warrior: {
+  warrior: {
     armorWeights: ["heavy"],
     weaponSlots: ["weapon"],
     offhandSlots: ["offhand"]
   },
-  Berserker: {
-    armorWeights: ["heavy"],
-    weaponSlots: ["weapon"],
-    offhandSlots: []
-  },
-  Ranger: {
-    armorWeights: ["medium"],
-    weaponSlots: ["weapon"],
-    offhandSlots: []
-  },
-  Marksman: {
-    armorWeights: ["medium"],
-    weaponSlots: ["weapon"],
-    offhandSlots: []
-  },
-  Cleric: {
+
+  cleric: {
     armorWeights: ["light", "medium"],
     weaponSlots: ["weapon"],
     offhandSlots: ["offhand"]
   },
-  Druid: {
-    armorWeights: ["light", "medium"],
+
+  mage: {
+    armorWeights: ["light"],
     weaponSlots: ["weapon"],
     offhandSlots: ["offhand"]
+  },
+
+  hunter: {
+    armorWeights: ["medium"],
+    weaponSlots: ["weapon"],
+    offhandSlots: []
   }
 };
 
@@ -140,12 +123,21 @@ router.get("/shop", async (req, res) => {
     if (!pid) return res.redirect("/login.html");
 
     const [[player]]: any = await db.query(
-      `SELECT id, pclass, gold, map_x, map_y FROM players WHERE id=? LIMIT 1`,
+      `SELECT
+          p.id,
+          p.gold,
+          p.map_x,
+          p.map_y,
+          c.slug AS class_slug
+      FROM players p
+      LEFT JOIN classes c
+          ON c.id = p.class_id
+      WHERE p.id = ?`,
       [pid]
     );
     if (!player) return res.redirect("/login.html");
 
-    const loadout = CLASS_LOADOUTS[player.pclass] ?? {
+    const loadout = CLASS_LOADOUTS[player.class_slug] ?? {
       armorWeights: [],
       weaponSlots: [],
       offhandSlots: []
@@ -736,7 +728,16 @@ router.post("/api/shop/buy-base", async (req, res) => {
     }
 
     const [[player]]: any = await conn.query(
-      `SELECT id, pclass, gold, map_x, map_y FROM players WHERE id=? LIMIT 1`,
+      `SELECT
+          p.id,
+          p.gold,
+          p.map_x,
+          p.map_y,
+          c.slug AS class_slug
+      FROM players p
+      LEFT JOIN classes c
+          ON c.id = p.class_id
+      WHERE p.id = ?`,
       [pid]
     );
     if (!player) {
@@ -744,7 +745,7 @@ router.post("/api/shop/buy-base", async (req, res) => {
       return res.json({ error: "Player not found" });
     }
 
-    const loadout = CLASS_LOADOUTS[player.pclass] ?? {
+    const loadout = CLASS_LOADOUTS[player.class_slug] ?? {
       armorWeights: [],
       weaponSlots: [],
       offhandSlots: []

@@ -58,10 +58,12 @@ function fmt(n: number) {
 }
 
 function getHealCost(level: number) {
+  if (level <= 3) return 5;
   return Math.max(10, Math.floor(level * 4));
 }
 
 function getRestoreCost(level: number) {
+  if (level <= 3) return 5;
   return Math.max(10, Math.floor(level * 4));
 }
 
@@ -97,10 +99,13 @@ router.get("/", requireLogin, async (req, res) => {
     await db.query(
       `
       UPDATE players
-      SET revive_at=NULL,
-          hpoints=?,
-          spoints=?
-      WHERE id=?
+      SET
+        revive_at = NULL,
+        hpoints = ?,
+        spoints = ?,
+        map_x = 0,
+        map_y = 0
+      WHERE id = ?
       `,
       [stats.maxhp, stats.maxspoints, pid]
     );
@@ -289,8 +294,13 @@ res.send(`
                     <div class="reviveHint">${reviveHint}</div>
                   </div>
 
-                  <form method="POST" action="/church/revive">
-                    <button class="btn danger ${!isDead ? "disabled" : ""}" ${!isDead ? "disabled" : ""}>
+                  <form id="reviveForm">
+                    <button
+                      id="reviveBtn"
+                      type="submit"
+                      class="btn danger ${!isDead ? "disabled" : ""}"
+                      ${!isDead ? "disabled" : ""}
+                    >
                       Revive (${reviveCost}g)
                     </button>
                   </form>
@@ -433,7 +443,12 @@ const [r]: any = await db.query(
   [stats.maxhp, cost, pid, cost]
 );
 
-if (!r?.affectedRows) return res.send("Not enough gold.");
+if (!r?.affectedRows) {
+  return res.redirect(
+    "/church?error=" +
+    encodeURIComponent(`You need ${cost} gold for this service.`)
+  );
+}
 
   res.redirect("/church");
 });
@@ -459,7 +474,12 @@ router.post("/restore", requireLogin, async (req, res) => {
     [stats.maxspoints, cost, pid, cost]
   );
 
-  if (!r?.affectedRows) return res.send("Not enough gold.");
+if (!r?.affectedRows) {
+  return res.redirect(
+    "/church?error=" +
+    encodeURIComponent(`You need ${cost} gold for this service.`)
+  );
+}
 
 res.redirect("/church");
 });
@@ -468,32 +488,75 @@ res.redirect("/church");
 // REVIVE (GOLD)
 // =======================
 router.post("/revive", requireLogin, async (req, res) => {
-  const pid = Number((req.session as any).playerId);
+  try {
+    const pid = Number((req.session as any).playerId);
 
-  const base = await loadBasePlayer(pid);
-  if (!base) return res.redirect("/login.html");
+    const base = await loadBasePlayer(pid);
 
-  const stats = await loadFinal(pid);
-  if (!stats) return res.redirect("/login.html");
+    if (!base) {
+      return res.status(404).json({
+        error: "Player not found."
+      });
+    }
 
-  if (base.hpoints > 0) return res.redirect("/church");
-  const cost = getReviveCost(base.level);
+    const stats = await loadFinal(pid);
 
-  const [r]: any = await db.query(
-    `
-    UPDATE players
-    SET hpoints=?,
-        spoints=?,
-        gold=gold-?,
-        revive_at=NULL
-    WHERE id=? AND gold >= ?
-    `,
-    [stats.maxhp, stats.maxspoints, cost, pid, cost]
-  );
+    if (!stats) {
+      return res.status(500).json({
+        error: "Could not load player stats."
+      });
+    }
 
-  if (!r?.affectedRows) return res.send("Not enough gold for revival.");
+    if (base.hpoints > 0) {
+      return res.status(400).json({
+        error: "You are already alive."
+      });
+    }
 
-  res.redirect("/church");
+    const cost = getReviveCost(base.level);
+
+    const [result]: any = await db.query(
+      `
+      UPDATE players
+      SET
+        hpoints = ?,
+        spoints = ?,
+        gold = gold - ?,
+        revive_at = NULL,
+        map_x = 0,
+        map_y = 0
+      WHERE id = ?
+        AND gold >= ?
+      `,
+      [
+        stats.maxhp,
+        stats.maxspoints,
+        cost,
+        pid,
+        cost
+      ]
+    );
+
+    if (!result?.affectedRows) {
+      return res.status(400).json({
+        error: `You need ${cost} gold to revive.`
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "You have been restored to life.",
+      hpoints: stats.maxhp,
+      spoints: stats.maxspoints,
+      goldSpent: cost
+    });
+  } catch (err) {
+    console.error("Church revival failed:", err);
+
+    return res.status(500).json({
+      error: "Revival failed."
+    });
+  }
 });
 
 export default router;

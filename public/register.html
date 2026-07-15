@@ -1,3 +1,4 @@
+//public/register.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -451,6 +452,43 @@
 .tip-body{
   color:rgba(215,219,226,.92);
 }
+
+.discipline-preview{
+  margin-top:12px;
+  padding-top:11px;
+  border-top:1px solid rgba(255,255,255,.06);
+}
+
+.discipline-list{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:9px;
+  margin-top:9px;
+}
+
+.discipline-card{
+  padding:10px 9px;
+  border-radius:12px;
+  border:1px solid rgba(200,163,75,.14);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.20)),
+    rgba(0,0,0,.22);
+  text-align:left;
+}
+
+.discipline-name{
+  font-family:'Cinzel', ui-serif, Georgia, "Times New Roman", serif;
+  font-size:12px;
+  color:#e2cfa9;
+  font-weight:900;
+  margin-bottom:5px;
+}
+
+.discipline-desc{
+  font-size:11px;
+  line-height:1.35;
+  color:rgba(215,219,226,.82);
+}
     /* responsive: stack blocks on small screens */
     @media (max-width: 420px){
       .class-grid{ grid-template-columns: 1fr; }
@@ -486,6 +524,7 @@
           <div class="class-value" id="classRole">—</div>
         </div>
 
+
         <div class="class-block">
           <div class="class-label">Strengths</div>
           <div class="class-value" id="classStrengths">—</div>
@@ -496,6 +535,11 @@
           <div class="class-value" id="classWeakness">—</div>
         </div>
       </div>
+
+        <div class="discipline-preview">
+          <div class="class-title" style="margin-top:12px;">Disciplines</div>
+          <div class="discipline-list" id="disciplineList"></div>
+        </div>
 
       <div class="class-stats">
         <div class="class-title" style="margin-top:10px;">Starting Attributes</div>
@@ -529,71 +573,101 @@
 
   <script>
     // Flavor (front-end)
-    const CLASS_INFO = {
-      Warrior: {
-        title: "Warrior",
-        tagline: "A disciplined shield between the realm and ruin.",
-        role: "Tank",
-        strengths: "🛡 High Defense, ❤️ Strong HP, ⚔ Reliable frontline damage",
-        weakness: "🐢 Slower actions and lower burst"
-      },
+const CLASS_INFO = {
+  Warrior: {
+    title: "Warrior",
+    tagline: "A martial combatant who relies on strength, armor, weapons, and battlefield discipline.",
+    role: "Protector / Damage / Support",
+    strengths: "🛡 Strong defense, ❤️ High HP, ⚔ Martial versatility",
+    weakness: "✨ Limited magical utility"
+  },
 
-      Berserker: {
-        title: "Berserker",
-        tagline: "Bloodied, unbroken, and impossible to ignore.",
-        role: "Tank",
-        strengths: "⚔ High Attack, 🩸 Self-sustain, 🎯 Critical pressure",
-        weakness: "🛡 Lower mitigation, riskier tanking style"
-      },
+  Cleric: {
+    title: "Cleric",
+    tagline: "A divine combatant who channels sacred power to heal, protect, and judge their enemies.",
+    role: "Protector / Damage / Heal",
+    strengths: "✨ Healing, 🛡 Divine protection, ⚔ Holy offense",
+    weakness: "🏃 Lower agility"
+  },
 
-      Ranger: {
-        title: "Ranger",
-        tagline: "Swift hunter of the wild roads—strike, vanish, repeat.",
-        role: "Damage",
-        strengths: "🏃 High Agility (faster turns), 🎯 Precision damage, ⚔ Consistency",
-        weakness: "❤️ Low survivability if focused"
-      },
+  Mage: {
+    title: "Mage",
+    tagline: "An arcane practitioner who manipulates elemental, vital, and void energies.",
+    role: "Protector / Damage / Heal",
+    strengths: "🧠 High intellect, ✨ Powerful spells, 🔮 Arcane versatility",
+    weakness: "❤️ Lower physical durability"
+  },
 
-      Marksman: {
-        title: "Marksman",
-        tagline: "One shot. One breath. One legend carved at range.",
-        role: "Damage",
-        strengths: "🎯 High critical potential, ⚔ Burst damage windows, 🧠 Tactical timing",
-        weakness: "🛡 Weak defenses, punished if mistimed"
-      },
+  Warden: {
+    title: "Warden",
+    tagline: "A guardian of the wild who combines survival, ranged combat, natural resilience, and restorative wisdom.",
+    role: "Protector / Damage / Heal",
+    strengths: "🏹 Ranged combat, 🌿 Natural support, 🏃 High agility",
+    weakness: "🛡 Moderate armor"
+  }
+};
 
-      Mage: {
-        title: "Mage",
-        tagline: "Arcane power shaped into purpose—bright, dangerous, absolute.",
-        role: "Damage",
-        strengths: "🧠 High Intellect scaling, ⚔ Powerful spells, ✨ Utility options",
-        weakness: "❤️ Very fragile, relies on positioning and timing"
-      },
+const DISCIPLINE_INFO = {
+  Warrior: [
+    {
+      name: "Knight",
+      desc: "A defensive warrior focused on shields, interception, and protecting allies."
+    },
+    {
+      name: "Berserker",
+      desc: "An aggressive warrior focused on rage, bleeding, and relentless melee damage."
+    },
+    {
+      name: "Warlord",
+      desc: "A tactical warrior focused on commands, banners, and empowering allies."
+    }
+  ],
 
-      Warlock: {
-        title: "Warlock",
-        tagline: "Power taken, not given. Every spell has a price.",
-        role: "Damage",
-        strengths: "☠ Damage over time, ✨ Debuffs & pressure, 🧠 Sustained damage",
-        weakness: "❤️ Risky sustain, slower burst"
-      },
+  Cleric: [
+    {
+      name: "Paladin",
+      desc: "A holy protector focused on sacred barriers, mitigation, and defensive blessings."
+    },
+    {
+      name: "Templar",
+      desc: "An offensive cleric focused on judgment, holy strikes, and divine punishment."
+    },
+    {
+      name: "Priest",
+      desc: "A restorative cleric focused on healing, cleansing, blessings, and divine support."
+    }
+  ],
 
-      Cleric: {
-        title: "Cleric",
-        tagline: "Faith made steel. Keep allies standing when all else fails.",
-        role: "Support",
-        strengths: "✨ Healing, 🛡 Defensive utility, ❤️ High sustain",
-        weakness: "⚔ Low damage output"
-      },
+  Mage: [
+    {
+      name: "Voidwalker",
+      desc: "A protective mage focused on void barriers, spatial manipulation, and damage suppression."
+    },
+    {
+      name: "Elementalist",
+      desc: "A destructive mage focused on fire, frost, lightning, and elemental combinations."
+    },
+    {
+      name: "Bloodweaver",
+      desc: "A restorative mage focused on blood magic, life transfer, bonds, and healing."
+    }
+  ],
 
-      Druid: {
-        title: "Druid",
-        tagline: "Nature answers those who listen—roots, storms, renewal.",
-        role: "Support",
-        strengths: "✨ Sustained healing, ⚔ Flexible damage, 🧠 Adaptability",
-        weakness: "🎯 Lower burst impact"
-      }
-    };
+  Warden: [
+    {
+      name: "Sentinel",
+      desc: "A natural protector focused on resilience, roots, defensive spirits, and battlefield control."
+    },
+    {
+      name: "Ranger",
+      desc: "A ranged attacker focused on precision shots, poison, mobility, and survival tactics."
+    },
+    {
+      name: "Sage",
+      desc: "A natural healer focused on regeneration, herbs, cleansing, and restorative magic."
+    }
+  ]
+};
 
     // Stat explanations (tooltips) — now includes HP/SP
     const STAT_DEFS = {
@@ -642,11 +716,11 @@
 
     // Damage scaling rule (front-end). Recommended: move to DB as damage_stat later.
     function getDamageScalingStat(className) {
-      const melee = ["Warrior","Berserker","Ranger","Marksman"];
-      const caster = ["Mage","Warlock","Cleric","Druid"];
+      const row = DB_CLASSES.get(className);
+      if (row?.damage_stat) {
+        return String(row.damage_stat).charAt(0).toUpperCase() + String(row.damage_stat).slice(1);
+      }
 
-      if (melee.includes(className)) return "Attack";
-      if (caster.includes(className)) return "Intellect";
       return "Attack";
     }
 
@@ -694,14 +768,19 @@
 
       const dbRow = DB_CLASSES.get(className);
       renderStatsFromDb(dbRow);
+      renderDisciplines(className);
 
       const scale = getDamageScalingStat(className);
       document.getElementById("damageScaling").textContent = scale;
 
+      const scalingDescriptions = {
+        Attack: "Your martial attacks and physical skills gain additional damage from Attack.",
+        Agility: "Your precision attacks and Warden skills gain additional damage from Agility.",
+        Intellect: "Your spells and magical skills gain additional damage from Intellect."
+      };
+
       document.getElementById("damageScalingTip").textContent =
-        scale === "Attack"
-          ? "Your weapon attacks and physical skills gain additional damage from Attack."
-          : "Your spells and magical skills gain additional damage from Intellect.";
+        scalingDescriptions[scale] || `${scale} increases the effectiveness of your primary attacks and skills.`;
     }
 
     async function loadClasses() {
@@ -729,6 +808,20 @@
         document.getElementById("class").innerHTML = "<option>Error loading classes</option>";
         setClassPanel("");
       }
+    }
+
+    function renderDisciplines(className) {
+      const list = document.getElementById("disciplineList");
+      const disciplines = DISCIPLINE_INFO[className] || [];
+
+      if (!list) return;
+
+      list.innerHTML = disciplines.map(d => `
+        <div class="discipline-card">
+          <div class="discipline-name">${d.name}</div>
+          <div class="discipline-desc">${d.desc}</div>
+        </div>
+      `).join("");
     }
 
     window.addEventListener("DOMContentLoaded", loadClasses);

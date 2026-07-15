@@ -271,9 +271,29 @@ function syncCombatSnapshot(snapshot) {
     window.playerMaxHP = player.maxHp;
     window.playerMaxSP = player.maxSp;
 
+    // Action Timer
     const playerGauge = Math.max(0, Math.min(100, Number(player.gauge || 0)));
     updateBar("playerATBBar", playerGauge, 100);
-    setText("playerATBText", player.ready ? "READY" : `${Math.round(playerGauge)}%`);
+    setText(
+      "playerATBText",
+      player.ready ? "READY" : `${Math.round(playerGauge)}%`
+    );
+
+    // Auto Attack Timer
+    const autoMs = Number(player.autoAttackMs ?? 0);
+    const autoTotal = Number(player.autoAttackTotalMs ?? 6000);
+
+    const autoElapsed = Math.max(0, autoTotal - autoMs);
+    const autoPct =
+      autoTotal > 0
+        ? Math.max(0, Math.min(100, (autoElapsed / autoTotal) * 100))
+        : 0;
+
+    updateBar("playerAutoAttackBar", autoPct, 100);
+    setText(
+      "playerAutoAttackText",
+      autoMs <= 0 ? "Swinging..." : `${(autoMs / 1000).toFixed(1)}s`
+    );
 
     const playerPanel = document.querySelector(".player-panel");
     if (playerPanel) {
@@ -292,11 +312,15 @@ function syncCombatSnapshot(snapshot) {
     setText("enemyDescription", enemy.description);
     setText("enemyHP", enemy.hp);
     setText("enemyMaxHP", enemy.maxHp);
+
     updateBar("enemyHPBar", enemy.hp, enemy.maxHp);
 
     const enemyGauge = Math.max(0, Math.min(100, Number(enemy.gauge || 0)));
     updateBar("enemyATBBar", enemyGauge, 100);
-    setText("enemyATBText", enemy.ready ? "READY" : `${Math.round(enemyGauge)}%`);
+    setText(
+      "enemyATBText",
+      enemy.ready ? "READY" : `${Math.round(enemyGauge)}%`
+    );
 
     const enemyPanel = document.querySelector(".enemy-panel");
     if (enemyPanel) {
@@ -304,11 +328,6 @@ function syncCombatSnapshot(snapshot) {
     }
   }
 
-  // Optional: disable Attack button unless player is ready
-  const attackBtn = document.getElementById("combatAttackBtn");
-  if (attackBtn && !combatOver) {
-    attackBtn.disabled = !player?.ready;
-  }
   syncServerCombatLog(snapshot);
 }
 /* ===============================
@@ -327,6 +346,9 @@ window.openCombatModal = async function (enemy) {
     savePotionCooldowns();
   }
 });
+
+const attackBtn = document.getElementById("combatAttackBtn");
+if (attackBtn) attackBtn.style.display = "none";
 // ✅ NEW: always populate the hotbar ASAP
 loadHotbarSpells();
 
@@ -450,13 +472,18 @@ window.closeCombatModal = function () {
   stopCombatStatePolling();
   currentEnemy = null;
 
-  document.getElementById("combatModal").classList.add("hidden");
+  document.getElementById("combatModal")?.classList.add("hidden");
 
-  // ✅ If combat ended, closing means "continue" → refresh everything
   if (combatOver) {
-    location.reload();
+    // Tell any player-facing UI components to refresh themselves
+    window.dispatchEvent(new CustomEvent("guildforge:player-updated", {
+      detail: {
+        source: "combat",
+        reason: "combat-ended"
+      }
+    }));
   } else {
-    // if you ever allow manual closing mid-fight later, keep it disabled by default
+    // Preserve this for possible manual closing later
     setCombatCloseEnabled(false);
   }
 
@@ -529,12 +556,8 @@ async function combatFlee() {
 
     logCombat("🏃 You fled from combat!");
 
+    combatOver = true;
     closeCombatModal();
-
-    // Reload world cleanly (server is now authoritative)
-    setTimeout(() => {
-      location.reload();
-    }, 500);
 
   } catch (err) {
     console.error("Flee failed", err);
@@ -629,7 +652,7 @@ function renderHotbarSpells(spells) {
     `;
   } else {
       const name = (s.name ?? "Spell").toString();
-      const icon = (s.icon ?? "default.png").toString();
+      const icon = (s.icon ?? "default.webp").toString();
 
       btn.title = name;
       btn.onclick = () => castSpell(s.id);
@@ -646,7 +669,7 @@ switch (s.type) {
 }
 
 btn.innerHTML = `
-  <img src="/icons/spells/${icon}" alt="${name}" onerror="this.src='/icons/default.png'">
+  <img src="/icons/spells/${icon}" alt="${name}" onerror="this.src='/icons/default.webp'">
   <span class="hotbar-key">${key}</span>
   <div class="hotbar-cd hidden" id="hotbar-cd-${s.id}"></div>
 
@@ -656,7 +679,7 @@ btn.innerHTML = `
 
     <div class="tt-row">
       <span class="tt-muted">Cost</span>
-      <span>${s.scost ?? 0} SP</span>
+      <span>${s.manaCost ?? s.mana_cost ?? 0} SP</span>
     </div>
 
     ${s.cooldown ? `
@@ -771,20 +794,56 @@ async function castSpell(spellId) {
     return;
   }
 
-  closeSpellsModal();
 }
+
 async function loadHotbarSpells() {
   try {
-    const res = await fetch("/combat/spells", { credentials: "include" });
-    const spells = await res.json();
-    if (Array.isArray(spells)) {
-      renderHotbarSpells(spells);
-    } else {
-      renderHotbarSpells([]); // show empty slots
+    const res = await fetch("/combat/spells", {
+      credentials: "include",
+      cache: "no-store"
+    });
+
+    const raw = await res.text();
+
+    console.log("GET /combat/spells:", {
+      status: res.status,
+      raw
+    });
+
+    let data;
+
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error("Combat spells endpoint returned non-JSON.");
     }
-  } catch (e) {
-    console.warn("Hotbar spells load failed:", e);
-    renderHotbarSpells([]); // fail gracefully
+
+    if (!res.ok || data.error) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    console.log("Combat hotbar data:", data);
+
+    const slots = Array.isArray(data.slots)
+      ? data.slots
+      : [];
+
+    const spells = Array.from({ length: 6 }, (_, index) => {
+      const slotNumber = index + 1;
+
+      const entry = slots.find(
+        slot => Number(slot.slot) === slotNumber
+      );
+
+      return entry?.spell || null;
+    });
+
+    console.log("Mapped combat spells:", spells);
+
+    renderHotbarSpells(spells);
+  } catch (err) {
+    console.error("Hotbar spells load failed:", err);
+    renderHotbarSpells([]);
   }
 }
 
@@ -793,7 +852,7 @@ async function loadHotbarSpells() {
 ================================ */
 function resolveItemIcon(rawIcon) {
   const raw = (rawIcon ?? "").toString().trim();
-  if (!raw) return "/icons/default.png";
+  if (!raw) return "/icons/default.webp";
 
   // absolute url
   if (raw.startsWith("http")) return raw;

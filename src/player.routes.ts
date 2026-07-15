@@ -1,3 +1,4 @@
+//src/player.routes.ts
 import express from "express";
 import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
@@ -17,7 +18,10 @@ router.get("/me", async (req, res) => {
 res.json({
   id: p.id,
   name: p.name,
-  pclass: p.pclass,
+  pclass: p.pclass, // legacy fallback
+  class_id: p.class_id,
+  class_name: p.class_name,
+  class_slug: p.class_slug,
   archetype: p.archetype,
   level: p.level,
   exper: p.exper,
@@ -72,6 +76,8 @@ router.get("/api/classes", async (_req, res) => {
       SELECT
         id,
         name,
+        slug,
+        description,
         archetype,
         attack,
         defense,
@@ -80,9 +86,11 @@ router.get("/api/classes", async (_req, res) => {
         intellect,
         crit,
         hpoints,
-        spoints
+        spoints,
+        class_color
       FROM classes
-      ORDER BY name ASC
+      WHERE is_active = 1
+      ORDER BY display_order ASC, name ASC
     `);
 
     res.json(classes);
@@ -128,8 +136,15 @@ router.get("/profile", async (req, res) => {
   if (!pid) return res.redirect("/login.html");
 
   const [[player]]: any = await db.query(`
-    SELECT name, pclass, level, exper, gold
-    FROM players WHERE id=?
+    SELECT
+      p.name,
+      p.level,
+      p.exper,
+      p.gold,
+      c.name AS class_name
+    FROM players p
+    LEFT JOIN classes c ON c.id = p.class_id
+    WHERE p.id=?
   `,[pid]);
 
   if (!player)
@@ -137,7 +152,7 @@ router.get("/profile", async (req, res) => {
 
   res.send(`
     <h2>${player.name}</h2>
-    <p>Class: ${player.pclass}</p>
+    <p>Class: ${player.class_name || "Unknown"}</p>
     <p>Level: ${player.level}</p>
     <p>XP: ${player.exper}</p>
     <p>Gold: ${player.gold}</p>

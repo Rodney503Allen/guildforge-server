@@ -597,7 +597,7 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
   <script src="/ui/toast.js"></script>
   <script defer src="/ui/itemTooltip.js"></script>
   <script defer src="/statpanel.js"></script>
-  <script defer src="/character.js?v=2"></script>
+  <script defer src="/character.js?v=5"></script>
 </head>
 
 <body>
@@ -610,7 +610,7 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
 
     <div class="char-box">
       <h2>${p.name}</h2>
-      <p>Class: ${p.pclass}</p>
+      <p>Class: ${p.class_name}</p>
       <p>Level: ${p.level}</p>
       <p>XP: ${p.exper} / ${expToNext}</p>
 
@@ -631,6 +631,14 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
 
       <p>SP: ${p.spoints} / ${p.maxspoints}</p>
       <p>Crit Chance: ${(p.crit * 100).toFixed(1)}%</p>
+      <p class="tooltip-container">
+        Dodge Chance: ${(p.dodgeChance * 100).toFixed(1)}%
+
+        <span class="tooltip">
+          <strong>Dodge Chance</strong>
+          Chance to completely avoid an incoming attack.
+        </span>
+      </p>
     </div>
 
     <div class="char-box">
@@ -786,6 +794,52 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
       </div>
     </div>
   </div>
+
+    <section class="char-box skill-loadout-panel">
+    <div class="skill-panel-header">
+      <div>
+        <h3>Combat Skills</h3>
+        <p>
+          Choose up to six learned skills for your combat hotbar.
+          Click a skill, then choose a slot.
+        </p>
+      </div>
+
+      <div class="skill-loadout-count">
+        <span id="equippedSkillCount">0</span> / 6 Equipped
+      </div>
+    </div>
+
+    <div class="skill-loadout-layout">
+
+    <div class="skill-library-section">
+      <div class="skill-section-title">Learned Skills</div>
+
+      <div
+        id="disciplineSkillLibrary"
+        class="discipline-skill-library"
+      >
+        <div class="skills-loading">
+          Loading learned skills...
+        </div>
+      </div>
+    </div>
+
+      <div class="skill-hotbar-section">
+        <div class="skill-section-title">Combat Hotbar</div>
+
+        <div
+          id="skillHotbar"
+          class="skill-hotbar"
+        ></div>
+
+        <p class="skill-help">
+          Drag slots to reorder. Double-click an equipped skill to remove it.
+        </p>
+      </div>
+
+    </div>
+  </section>
 
 </div>
 

@@ -76,7 +76,7 @@ router.post("/register", async (req, res) => {
     }
 
     const [[existing]]: any = await db.query(
-      "SELECT id FROM players WHERE name=? LIMIT 1",
+      "SELECT id FROM players WHERE name = ? LIMIT 1",
       [name]
     );
 
@@ -84,23 +84,23 @@ router.post("/register", async (req, res) => {
       return res.json({ error: "Username already taken" });
     }
 
-    // Pull FULL base stats from classes
     const [[base]]: any = await db.query(
       `
-      SELECT
-        name,
-        archetype,
-        attack,
-        defense,
-        agility,
-        vitality,
-        intellect,
-        crit,
-        hpoints,
-        spoints
-      FROM classes
-      WHERE name=?
-      LIMIT 1
+        SELECT
+          id,
+          name,
+          attack,
+          defense,
+          agility,
+          vitality,
+          intellect,
+          crit,
+          hpoints,
+          spoints
+        FROM classes
+        WHERE name = ?
+          AND is_active = 1
+        LIMIT 1
       `,
       [pclass]
     );
@@ -111,76 +111,81 @@ router.post("/register", async (req, res) => {
 
     const hash = await bcrypt.hash(password, 10);
 
-const [result]: any = await db.query(
-  `
-  INSERT INTO players
-  (
-    name,
-    email,
-    password,
-    level,
-    exper,
+    const [result]: any = await db.query(
+      `
+        INSERT INTO players
+        (
+          name,
+          email,
+          password,
+          level,
+          exper,
 
-    attack,
-    defense,
-    agility,
-    vitality,
-    intellect,
-    crit,
+          attack,
+          defense,
+          agility,
+          vitality,
+          intellect,
+          crit,
 
-    hpoints,
-    maxhp,
-    spoints,
-    maxspoints,
+          hpoints,
+          maxhp,
+          spoints,
+          maxspoints,
 
-    gold,
-    pclass,
-    location
-  )
-  VALUES
-  (
-    ?, ?, ?, 1, 0,
-    ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?,
-    100, ?, 'Crocania'
-  )
-  `,
-  [
-    name,
-    email || null,
-    hash,
+          gold,
+          skill_points,
+          pclass,
+          class_id,
+          location
+        )
+        VALUES
+        (
+          ?, ?, ?, 1, 0,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          100, 1, ?, ?, 'Crocania'
+        )
+      `,
+      [
+        name,
+        email || null,
+        hash,
 
-    base.attack,
-    base.defense,
-    base.agility,
-    base.vitality,
-    base.intellect,
-    base.crit,
+        base.attack,
+        base.defense,
+        base.agility,
+        base.vitality,
+        base.intellect,
+        base.crit,
 
-    base.hpoints,
-    base.hpoints,
-    base.spoints,
-    base.spoints,
+        base.hpoints,
+        base.hpoints,
+        base.spoints,
+        base.spoints,
 
-    pclass
-  ]
-);
+        base.name,
+        base.id
+      ]
+    );
 
     const playerId = result.insertId;
 
     const p = await getFinalPlayerStats(playerId);
-    if (!p) throw new Error("Failed to compute stats for new player");
 
-    // full resources on creation
+    if (!p) {
+      throw new Error("Failed to compute stats for new player");
+    }
+
     await db.query(
-      `UPDATE players
-      SET hpoints = ?, spoints = ?
-      WHERE id = ?`,
+      `
+        UPDATE players
+        SET hpoints = ?,
+            spoints = ?
+        WHERE id = ?
+      `,
       [p.maxhp, p.maxspoints, playerId]
     );
-
-
-
 
     res.json({ success: true });
   } catch (err) {

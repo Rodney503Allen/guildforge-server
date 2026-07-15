@@ -45,12 +45,19 @@ export type ItemMods = Partial<
   hp?: number;
   mana?: number;
   sp?: number;
+  
+
+  // percentage resource bonuses
+  maxhp_pct?: number;
 
   // percent / derived combat bonuses
-  dodge?: number;              // e.g. 3 = +3% dodge
-  crit_damage?: number;        // e.g. 15 = +15% crit damage
-  damage_reduction?: number;   // e.g. 4 = +4% DR
-  lifesteal?: number;          // e.g. 2 = +2% lifesteal
+  dodge?: number;
+  crit_damage?: number;
+  damage_reduction?: number;
+  lifesteal?: number;
+  healing_received_pct?: number;
+  attack_pct?: number;
+  atb_rate_pct?: number;
 };
 
 export type BuffMods = ItemMods;
@@ -64,6 +71,10 @@ export type DerivedStats = BasePlayerStats & {
   critDamageMult: number;    // e.g. 1.50 = +50% crit damage baseline
   damageReduction: number;   // 0.00 - 0.50
   lifesteal: number;         // 0.00 - 0.25
+  healingReceivedMult: number;
+  atbRateMult: number;
+
+  damageTakenMult: number;
 };
 
 export type PerkMultipliers = {
@@ -120,6 +131,9 @@ function normalizeMod(mod: ItemMods = {}) {
     mana:
       n(mod.mana) + n(mod.sp),
 
+    maxHpPct:
+      n(mod.maxhp_pct),
+
     // derived combat bonuses
     dodge:
       n(mod.dodge),
@@ -132,6 +146,13 @@ function normalizeMod(mod: ItemMods = {}) {
 
     lifesteal:
       n(mod.lifesteal),
+    
+    healingReceivedPct:
+      n(mod.healing_received_pct),
+    attackPct:
+      n(mod.attack_pct),
+    atbRatePct:
+      n(mod.atb_rate_pct),
   };
 }
 
@@ -162,15 +183,21 @@ export function computePlayerStats(
   final.spoints = n(final.spoints);
   final.maxhp = n(final.maxhp, 1);
   final.maxspoints = n(final.maxspoints, 1);
+  final.damageTakenMult = 1;
 
   let flatHealthBonus = 0;
   let flatManaBonus = 0;
+
+  let maxHpBonusPct = 0;
 
   let dodgeBonusPct = 0;
   let critChanceBonusPct = 0;
   let critDamageBonusPct = 0;
   let damageReductionPct = 0;
   let lifestealPct = 0;
+  let healingReceivedPct = 0;
+  let attackBonusPct = 0;
+  let atbRateBonusPct = 0;
 
   // gear mods
   for (const raw of gearMods) {
@@ -186,11 +213,16 @@ export function computePlayerStats(
     flatHealthBonus += g.health;
     flatManaBonus += g.mana;
 
+    maxHpBonusPct += g.maxHpPct;
+
     dodgeBonusPct += g.dodge;
     critChanceBonusPct += g.critChanceBonus;
     critDamageBonusPct += g.critDamage;
     damageReductionPct += g.damageReduction;
     lifestealPct += g.lifesteal;
+    healingReceivedPct += g.healingReceivedPct;
+    attackBonusPct += g.attackPct;
+    atbRateBonusPct += g.atbRatePct;
   }
 
   // buff mods
@@ -207,11 +239,26 @@ export function computePlayerStats(
     flatHealthBonus += b.health;
     flatManaBonus += b.mana;
 
+    maxHpBonusPct += b.maxHpPct;
+
     dodgeBonusPct += b.dodge;
     critChanceBonusPct += b.critChanceBonus;
     critDamageBonusPct += b.critDamage;
     damageReductionPct += b.damageReduction;
     lifestealPct += b.lifesteal;
+    healingReceivedPct += b.healingReceivedPct;
+    attackBonusPct += b.attackPct;
+    atbRateBonusPct += b.atbRatePct;
+
+    final.healingReceivedMult = Math.max(
+      0,
+      1 + healingReceivedPct / 100
+    );
+
+    final.atbRateMult = Math.max(
+      0.1,
+      1 + atbRateBonusPct / 100
+    );
   }
 
   // derived scaling from core stats
@@ -226,7 +273,18 @@ export function computePlayerStats(
   final.crit = clamp(critFromStat + critFromAgi + critFromBonusPct, 0, 0.4);
 
   // resources
-  final.maxhp = Math.max(1, final.maxhp + vitBonusHP + flatHealthBonus);
+  const maxHpBeforePercent =
+    final.maxhp +
+    vitBonusHP +
+    flatHealthBonus;
+
+  final.maxhp = Math.max(
+    1,
+    Math.floor(
+      maxHpBeforePercent *
+      (1 + maxHpBonusPct / 100)
+    )
+  );
   final.maxspoints = Math.max(1, final.maxspoints + intBonusSP + flatManaBonus);
 
   // perk multipliers
@@ -234,7 +292,14 @@ export function computePlayerStats(
   const hpMult = n(perkMults.hpMult, 1);
   const critMult = n(perkMults.critMult, 1);
 
-  final.attack = Math.max(0, Math.round(final.attack * damageMult));
+  final.attack = Math.max(
+    0,
+    Math.round(
+      final.attack *
+      damageMult *
+      (1 + attackBonusPct / 100)
+    )
+  );
   final.maxhp = Math.max(1, Math.floor(final.maxhp * hpMult));
   final.crit = clamp(final.crit * critMult, 0, 0.4);
 
@@ -253,7 +318,11 @@ export function computePlayerStats(
   final.critDamageMult = 1.5 + (critDamageBonusPct / 100);
 
   // cap DR and lifesteal so gear can't get silly
-  final.damageReduction = clamp(damageReductionPct / 100, 0, 0.5);
+  final.damageReduction = clamp(
+    damageReductionPct / 100,
+    -0.5,
+    0.5
+  );
   final.lifesteal = clamp(lifestealPct / 100, 0, 0.25);
 
   return final as DerivedStats;

@@ -30,6 +30,8 @@ import professionsRoutes from "./professions.routes";
 import workshopRoutes from "./workshop.routes";
 import refiningRoutes from "./refining.routes";
 import craftingRoutes from "./crafting.routes";
+import restRoutes from "./rest.routes";
+import spellLoadoutRoutes from "./spellLoadout.routes";
 
 const app = express();
 
@@ -136,6 +138,8 @@ app.use(professionsRoutes);
 app.use("/workshop", workshopRoutes);
 app.use("/workshop", refiningRoutes);
 app.use("/workshop", craftingRoutes);
+app.use("/rest", restRoutes);
+app.use(spellLoadoutRoutes);
 
 // =======================
 // MAIN PAGE

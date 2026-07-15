@@ -47,6 +47,133 @@
     audio.currentTime = 0;
   }
 
+document.addEventListener("DOMContentLoaded", () => {
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  const errorMessage = params.get("error");
+  const successMessage = params.get("success");
+
+  if (errorMessage && window.GFToast) {
+    window.GFToast.show(
+      "Revival Failed",
+      errorMessage,
+      {
+        type: "error",
+        durationMs: 3000
+      }
+    );
+  }
+
+  if (successMessage && window.GFToast) {
+    window.GFToast.show(
+      "Revival Complete",
+      successMessage,
+      {
+        type: "success",
+        durationMs: 2600
+      }
+    );
+  }
+
+  if (errorMessage || successMessage) {
+    const cleanUrl =
+      window.location.pathname +
+      window.location.hash;
+
+    window.history.replaceState(
+      {},
+      document.title,
+      cleanUrl
+    );
+  }
+});
+
+
+const reviveForm = document.getElementById("reviveForm");
+
+if (reviveForm) {
+  reviveForm.addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const reviveBtn = document.getElementById("reviveBtn");
+
+    if (reviveBtn?.disabled) {
+      return;
+    }
+
+    if (reviveBtn) {
+      reviveBtn.disabled = true;
+    }
+
+    try {
+      const response = await fetch("/church/revive", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        window.GFToast.show(
+          "Revival Failed",
+          data.error || "You could not be revived.",
+          {
+            type: "error",
+            durationMs: 3000
+          }
+        );
+
+        if (reviveBtn) {
+          reviveBtn.disabled = false;
+        }
+
+        return;
+      }
+
+      window.GFToast.show(
+        "Revival Complete",
+        data.message || "You have been restored to life.",
+        {
+          type: "success",
+          durationMs: 2500
+        }
+      );
+
+      window.dispatchEvent(
+        new CustomEvent("guildforge:player-updated", {
+          detail: {
+            source: "sanctuary",
+            reason: "revived"
+          }
+        })
+      );
+
+      setTimeout(() => {
+        window.location.href = "/town";
+      }, 900);
+    } catch (err) {
+      console.error("Revival request failed:", err);
+
+      window.GFToast.show(
+        "Revival Failed",
+        "The Sanctuary could not complete the revival.",
+        {
+          type: "error",
+          durationMs: 3000
+        }
+      );
+
+      if (reviveBtn) {
+        reviveBtn.disabled = false;
+      }
+    }
+  });
+}
   // =========================
   // SANCTUARY TIMER
   // =========================

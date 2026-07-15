@@ -829,6 +829,58 @@ function formatGatheringError(error) {
       return error || "Gathering failed.";
   }
 }
+
+// =======================
+// REST MODAL
+// =======================
+async function openRest() {
+  if (isInCombat()) return;
+
+  const root = document.getElementById("rest-root");
+  if (!root) {
+    console.error("Missing #rest-root in world page.");
+    return;
+  }
+
+  try {
+    const res = await fetch("/rest/modal", {
+      credentials: "include"
+    });
+
+    const html = await res.text();
+    root.innerHTML = html;
+
+    if (typeof window.initRestModal === "function") {
+      window.initRestModal();
+    }
+  } catch (err) {
+    console.error("Failed to open rest modal", err);
+  }
+}
+
+function closeRestModal() {
+  if (typeof window.clearRestIntervals === "function") {
+    window.clearRestIntervals();
+  }
+
+  const root = document.getElementById("rest-root");
+  if (root) root.innerHTML = "";
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    const modal = document.getElementById("rest-root");
+
+    if (modal && modal.children.length) {
+      closeRestModal();
+    }
+  }
+});
+
+window.openRest = openRest;
+window.closeRestModal = closeRestModal;
+
+
 // =======================
 // LORE MODAL
 // =======================

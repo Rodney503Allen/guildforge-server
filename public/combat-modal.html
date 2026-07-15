@@ -190,15 +190,15 @@
     text-transform: uppercase;
   }
 
-  .bar{
-    position: relative;
-    height: 14px;
-    background: rgba(0,0,0,.28);
-    border-radius: 999px;
-    overflow: hidden;
-    border: 1px solid rgba(43,52,64,.95);
-    box-shadow: inset 0 0 10px rgba(0,0,0,.85);
-  }
+.bar{
+  position: relative;
+  height: 18px;
+  background: rgba(0,0,0,.28);
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(43,52,64,.95);
+  box-shadow: inset 0 0 10px rgba(0,0,0,.85);
+}
 
   .bar-fill{
     position:absolute;
@@ -213,16 +213,30 @@
   .bar-fill.sp{ background: linear-gradient(90deg, rgba(0,51,170,.85), rgba(0,174,255,.78)); }
   .bar-fill.enemy{ background: linear-gradient(90deg, rgba(75,0,0,.95), rgba(192,32,32,.90)); }
 
-  .bar-text{
-    font-size: 11px;
-    color: rgba(215,219,226,.86);
-    margin-top: 4px;
-    font-weight: 600;
-  }
-  .bar.atb{
-    height: 12px;
-    background: rgba(0,0,0,.34);
-  }
+.bar-text{
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  margin: 0;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+
+  color: rgba(255,255,255,.92);
+  text-shadow: 0 1px 2px rgba(0,0,0,.9);
+  pointer-events: none;
+}
+
+.bar.atb{
+  height: 16px;
+  background: rgba(0,0,0,.34);
+}
 
   .bar-fill.atb{
     background: linear-gradient(90deg, rgba(180,140,40,.92), rgba(255,210,90,.95));
@@ -832,6 +846,7 @@
   justify-content: center;
   gap: var(--hotbar-gap);
 
+  margin-top: 14px;     /* Space above the hotbar */
   padding: 0 12px 12px;
 }
 
@@ -1019,6 +1034,21 @@
   filter: brightness(0.55);
   opacity: 0.85;
 }
+
+.combat-footer-actions{
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 12px;
+}
+
+.flee-btn{
+  min-width: 110px;
+  border-color: rgba(122,30,30,.65);
+  background: linear-gradient(180deg, rgba(122,30,30,.72), rgba(0,0,0,.22));
+}
+
 /* responsive */
 @media (max-width: 520px){
   .combat-hotbar{
@@ -1026,11 +1056,6 @@
     row-gap: var(--hotbar-gap);
   }
 }
-
-
-
-
-
 
 /* responsive: 2 columns on small screens */
 @media (max-width: 520px){
@@ -1059,99 +1084,112 @@
   </div>
 
 
-  <!-- PANELS -->
-  <div class="combat-panels">
+<!-- PANELS -->
+<div class="combat-panels">
 
-    <!-- PLAYER -->
-    <div class="combat-panel player-panel">
-      <div class="portrait-frame">
-        <img id="playerPortrait" src="/images/portraits/default.png">
+  <!-- PLAYER -->
+  <div class="combat-panel player-panel">
+    <div class="portrait-frame">
+      <img id="playerPortrait" src="/images/portraits/default.png">
+    </div>
+
+    <div class="panel-info">
+      <div id="playerName" class="name"></div>
+      <div class="meta">
+        <span id="playerClass"></span> · Lv <span id="playerLevel"></span>
       </div>
 
-      <div class="panel-info">
-        <div id="playerName" class="name"></div>
-        <div class="meta">
-          <span id="playerClass"></span> · Lv <span id="playerLevel"></span>
-        </div>
-
-        <div class="bar-group">
-          <div class="bar-label">❤️ HP</div>
-          <div class="bar">
-            <div id="playerHPBar" class="bar-fill hp"></div>
-          </div>
+      <!-- HP -->
+      <div class="bar-group">
+        <div class="bar-label">❤️ HP</div>
+        <div class="bar">
+          <div id="playerHPBar" class="bar-fill hp"></div>
           <div class="bar-text">
             <span id="playerHP"></span> / <span id="playerMaxHP"></span>
           </div>
         </div>
+      </div>
 
-                <div class="bar-group">
-          <div class="bar-label">✨ SP</div>
-          <div class="bar">
-            <div id="playerSPBar" class="bar-fill sp"></div>
-          </div>
+      <!-- SP -->
+      <div class="bar-group">
+        <div class="bar-label">✨ SP</div>
+        <div class="bar">
+          <div id="playerSPBar" class="bar-fill sp"></div>
           <div class="bar-text">
             <span id="playerSP"></span> / <span id="playerMaxSP"></span>
           </div>
         </div>
+      </div>
 
-        <div class="bar-group atb-group">
-          <div class="bar-label">⏳ ATB</div>
-          <div class="bar atb">
-            <div id="playerATBBar" class="bar-fill atb"></div>
-          </div>
+      <!-- Action Timer -->
+      <div class="bar-group atb-group">
+        <div class="bar-label">⏳ Action Timer</div>
+        <div class="bar atb">
+          <div id="playerATBBar" class="bar-fill atb"></div>
           <div class="bar-text">
             <span id="playerATBText">0%</span>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- ENEMY -->
-    <div class="combat-panel enemy-panel">
-      <div class="portrait-frame enemy">
-        <img id="enemyPortrait" src="/images/portraits/default_enemy.png">
+      <!-- Auto Attack -->
+      <div class="bar-group atb-group">
+        <div class="bar-label">⚔ Auto Attack</div>
+        <div class="bar atb">
+          <div id="playerAutoAttackBar" class="bar-fill atb"></div>
+          <div class="bar-text">
+            <span id="playerAutoAttackText">6.0s</span>
+          </div>
+        </div>
       </div>
 
-      <div class="panel-info right">
-        <div id="enemyName" class="name enemy-name"></div>
-        <div class="meta">
-          Lv <span id="enemyLevel"></span>
-        </div>
+    </div>
+  </div>
 
-        <div id="enemyDescription" class="meta enemy-description"></div>
+  <!-- ENEMY -->
+  <div class="combat-panel enemy-panel">
+    <div class="portrait-frame enemy">
+      <img id="enemyPortrait" src="/images/portraits/default_enemy.png">
+    </div>
 
-                <div class="bar-group">
-          <div class="bar-label">☠ HP</div>
-          <div class="bar">
-            <div id="enemyHPBar" class="bar-fill hp enemy"></div>
-          </div>
+    <div class="panel-info right">
+      <div id="enemyName" class="name enemy-name"></div>
+
+      <div class="meta">
+        Lv <span id="enemyLevel"></span>
+      </div>
+
+      <div id="enemyDescription" class="meta enemy-description"></div>
+
+      <!-- Enemy HP -->
+      <div class="bar-group">
+        <div class="bar-label">☠ HP</div>
+        <div class="bar">
+          <div id="enemyHPBar" class="bar-fill hp enemy"></div>
           <div class="bar-text">
             <span id="enemyHP"></span> / <span id="enemyMaxHP"></span>
           </div>
         </div>
+      </div>
 
-        <div class="bar-group atb-group">
-          <div class="bar-label">⏳ ATB</div>
-          <div class="bar atb">
-            <div id="enemyATBBar" class="bar-fill atb enemy-atb"></div>
-          </div>
+      <!-- Enemy Action Timer -->
+      <div class="bar-group atb-group">
+        <div class="bar-label">⏳ Enemy Action</div>
+        <div class="bar atb">
+          <div id="enemyATBBar" class="bar-fill atb enemy-atb"></div>
           <div class="bar-text">
             <span id="enemyATBText">0%</span>
           </div>
         </div>
       </div>
-    </div>
 
+    </div>
   </div>
+
+</div>
 
   <!-- COMBAT LOG -->
   <div id="combatLog" class="combat-log"></div>
-
-  <!-- ACTIONS -->
-<div class="combat-actions">
-  <button id="combatAttackBtn" onclick="combatAttack()">⚔ Attack</button>
-  <button onclick="combatFlee()">🏃 Flee</button>
-</div>
 
 
 <!-- NEW: HOTBAR (Potions + 6 spells) -->
@@ -1182,10 +1220,11 @@
       <div class="tt-muted">No potion equipped</div>
     </div>
   </button>
-
-
-
-
 </div>
+
+<div class="combat-footer-actions">
+  <button class="combat-btn flee-btn" onclick="combatFlee()">🏃 Flee</button>
+</div>
+
 </body>
 </html>

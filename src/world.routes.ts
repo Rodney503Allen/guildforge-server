@@ -243,6 +243,7 @@ res.send(`
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
   <title>Guildforge | World Map</title>
   <link rel="stylesheet" href="/world.css">
+  <link rel="stylesheet" href="/rest.css">
   <link rel="stylesheet" href="/ui/itemTooltip.css">
 </head>
 
@@ -257,14 +258,24 @@ res.send(`
       <div class="coords">Position: (${player.map_x}, ${player.map_y})</div>
 
       <!-- Enter Town Button -->
-      <div class="world-actions">
-        <button id="enter-town-btn"
-                class="world-action-btn"
-                style="display:none"
-                onclick="enterTown()">
-          Enter Town
+    <div class="world-actions">
+
+        <button
+            id="rest-btn"
+            class="world-action-btn"
+            onclick="openRest()">
+            Rest
         </button>
-      </div>
+
+        <button
+            id="enter-town-btn"
+            class="world-action-btn"
+            style="display:none"
+            onclick="enterTown()">
+            Enter Town
+        </button>
+
+    </div>
     </div>
   </div>
 
@@ -395,6 +406,7 @@ res.send(`
   </div>
 
   <div id="combat-root"></div>
+  <div id="rest-root"></div>
 
   <!-- GATHERING MODAL -->
 <div id="gatheringModal" class="gathering-modal hidden">
@@ -477,6 +489,7 @@ res.send(`
   <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>
+  <script defer src="/rest.js"></script>
 </body>
 
 

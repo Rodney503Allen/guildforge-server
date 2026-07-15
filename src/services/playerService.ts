@@ -14,7 +14,9 @@ export type PlayerComputed = DerivedStats & {
   stat_points: number;
   location?: string;
 
+  class_id: number | null;
   class_name: string;
+  class_slug?: string | null;
   archetype: Archetype;
 
   guild_name?: string | null;
@@ -195,10 +197,12 @@ export async function getBasePlayer(playerId: number) {
     `
     SELECT
       p.*,
+      c.id AS class_id,
       c.name AS class_name,
+      c.slug AS class_slug,
       c.archetype
     FROM players p
-    JOIN classes c ON c.name = p.pclass
+    LEFT JOIN classes c ON c.id = p.class_id
     WHERE p.id = ?
     `,
     [playerId]
@@ -319,7 +323,9 @@ export async function getFinalPlayerStats(
     stat_points: Number(base.stat_points || 0),
     location: base.location,
 
-    class_name: base.class_name,
+    class_id: base.class_id ? Number(base.class_id) : null,
+    class_name: base.class_name ?? base.pclass ?? "Unknown",
+    class_slug: base.class_slug ?? null,
     archetype: asArchetype(base.archetype),
 
     guild_name: guildRow?.guild_name ?? null,

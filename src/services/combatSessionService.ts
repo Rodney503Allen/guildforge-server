@@ -27,6 +27,8 @@ export type CombatActor = {
   ready: boolean;
   recoveryUntil: number;   // unix ms timestamp
 
+  atbRateMult: number;        // 0.0 - 2.0
+
   cooldowns: Record<string, number>; // spell:12 => timestamp, item:health => timestamp
 };
 
@@ -36,6 +38,8 @@ export type CombatSession = {
 
   createdAt: number;
   updatedAt: number;
+
+  nextPlayerAutoAttackAt: number;
 
   state: "active" | "victory" | "defeat" | "fled";
 
@@ -65,6 +69,7 @@ const BASE_ATB_SECONDS = 6.0;
 const MIN_ATB_SECONDS = 3.0;
 const MAX_AGILITY = 500;
 const AGILITY_EXPONENT = 0.6;
+const PLAYER_AUTO_ATTACK_MS = 6000;
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
@@ -86,6 +91,7 @@ async function refreshSessionPlayer(session: CombatSession) {
   session.player.maxHp = Number(player.maxhp ?? 1);
   session.player.sp = Number(player.spoints ?? 0);
   session.player.maxSp = Number(player.maxspoints ?? 0);
+  session.player.atbRateMult = Number(player.atbRateMult ?? 1);
 
   return player;
 }
@@ -141,11 +147,63 @@ async function refreshSessionEnemy(session: CombatSession) {
   const baseDescription = String(enemyRow.description ?? "");
   const affixDescription = String(enemyRow.affix_description ?? "");
 
+const baseEnemyAgility =
+  Math.floor(
+    Number(enemyRow.agility ?? 0) *
+    speedMult
+  ) + Number(debuffs.agility || 0);
+
+const attackSpeedSlowPct = Math.max(
+  0,
+  Math.min(
+    80,
+    Number(debuffs.attack_speed_pct || 0)
+  )
+);
+
+const enemyAtbRateMult = Math.max(
+  0.2,
+  1 - attackSpeedSlowPct / 100
+);
+
+const baseEnemyAttack =
+  Math.floor(
+    Number(enemyRow.attack ?? 0) *
+    attackMult
+  ) + Number(debuffs.attack || 0);
+
+const damageDealtReductionPct = Math.max(
+  0,
+  Math.min(
+    80,
+    Number(debuffs.damage_dealt_pct || 0)
+  )
+);
+
+const finalEnemyAttack = Math.max(
+  0,
+  Math.floor(
+    baseEnemyAttack *
+    (
+      1 -
+      damageDealtReductionPct / 100
+    )
+  )
+);
+
+const damageTakenPct = Math.max(
+  0,
+  Number(debuffs.damage_taken_pct || 0)
+);
+
+const damageTakenMult =
+  1 + damageTakenPct / 100;
+
   const enemyStats: DerivedStats = {
     level: Number(enemyRow.level ?? 1),
-    attack: Math.floor(Number(enemyRow.attack ?? 0) * attackMult) + Number(debuffs.attack || 0),
+    attack: finalEnemyAttack,
     defense: Math.floor(Number(enemyRow.defense ?? 0) * defenseMult) + Number(debuffs.defense || 0),
-    agility: Math.floor(Number(enemyRow.agility ?? 0) * speedMult) + Number(debuffs.agility || 0),
+    agility: Math.max(0,baseEnemyAgility),
     vitality: Number(debuffs.vitality || 0),
     intellect: Number(debuffs.intellect || 0),
     crit: Number(enemyRow.crit ?? 0) + Number(debuffs.crit || 0),
@@ -157,7 +215,10 @@ async function refreshSessionEnemy(session: CombatSession) {
     dodgeChance: 0,
     critDamageMult: 1.5,
     damageReduction: 0,
-    lifesteal: 0
+    lifesteal: 0,
+    healingReceivedMult: 1,
+    atbRateMult: 1,
+    damageTakenMult: damageTakenMult,
   };
 
 session.enemy.name = enemyDisplayName;
@@ -165,6 +226,9 @@ session.enemy.hp = Number(enemyRow.hp ?? 0);
 session.enemy.maxHp = modifiedMaxHp;
 session.enemy.stats = enemyStats;
 session.enemy.level = Number(enemyRow.level ?? 1);
+
+session.enemy.atbRateMult = enemyAtbRateMult;
+
 session.enemy.description = enemyRow.affix_name
   ? `${baseDescription}\n\n${affixDescription}`
   : baseDescription;
@@ -242,6 +306,541 @@ async function processEnemyDots(session: CombatSession) {
   }
 }
 
+async function processPlayerHots(session: CombatSession) {
+  if (session.state !== "active") return;
+
+  const [hots]: any = await db.query(
+    `
+    SELECT *
+    FROM player_hots
+    WHERE player_id = ?
+      AND next_tick_at <= NOW()
+      AND expires_at > NOW()
+    `,
+    [session.playerId]
+  );
+
+  if (!hots?.length) {
+    await db.query(
+      `
+      DELETE FROM player_hots
+      WHERE player_id = ?
+        AND expires_at <= NOW()
+      `,
+      [session.playerId]
+    );
+
+    return;
+  }
+
+  const player = await getFinalPlayerStats(
+    session.playerId
+  );
+
+  if (!player) return;
+
+  let playerHP = Number(player.hpoints || 0);
+  const maxPlayerHP = Math.max(
+    1,
+    Number(player.maxhp || 1)
+  );
+
+  for (const hot of hots) {
+    const healing = Math.max(
+      0,
+      Number(hot.healing || 0)
+    );
+
+    const previousHP = playerHP;
+
+    playerHP = Math.min(
+      maxPlayerHP,
+      playerHP + healing
+    );
+
+    const actualHealing = Math.max(
+      0,
+      playerHP - previousHP
+    );
+
+    await db.query(
+      `
+      UPDATE player_hots
+      SET next_tick_at =
+        DATE_ADD(
+          next_tick_at,
+          INTERVAL tick_interval SECOND
+        )
+      WHERE id = ?
+      `,
+      [hot.id]
+    );
+
+    if (actualHealing > 0) {
+    const displayName =
+      String(
+        hot.display_name ||
+        "Healing over Time"
+      );
+
+    pushLog(
+      session,
+      `✨ ${displayName} restores ${actualHealing} HP.`
+    );
+    }
+  }
+
+  await db.query(
+    `
+    UPDATE players
+    SET hpoints = ?
+    WHERE id = ?
+    `,
+    [playerHP, session.playerId]
+  );
+
+  await db.query(
+    `
+    DELETE FROM player_hots
+    WHERE player_id = ?
+      AND expires_at <= NOW()
+    `,
+    [session.playerId]
+  );
+
+  session.player.hp = playerHP;
+  session.player.maxHp = maxPlayerHP;
+}
+
+async function processPlayerAutoAttack(session: CombatSession) {
+  if (session.state !== "active") return;
+
+  const now = Date.now();
+  if (now < session.nextPlayerAutoAttackAt) return;
+
+  const player = await refreshSessionPlayer(session);
+  const enemyStats = await refreshSessionEnemy(session);
+
+  if (!player || !enemyStats) {
+    session.state = "victory";
+    return;
+  }
+
+  const result = resolveAttack(session.player.stats as any, enemyStats as any);
+
+  const damage = Math.max(0, Number(result.damage || 0));
+  const newEnemyHP = Math.max(0, session.enemy.hp - damage);
+
+  await db.query(
+    `UPDATE player_creatures SET hp = ? WHERE id = ?`,
+    [newEnemyHP, session.enemyInstanceId]
+  );
+
+  session.enemy.hp = newEnemyHP;
+
+  pushLog(
+    session,
+    result.dodged
+      ? "⚔ Your auto attack missed!"
+      : `⚔ You auto attack for ${damage}${result.crit ? " (CRITICAL!)" : ""}`
+  );
+
+  let lifestealHeal = 0;
+
+  if (!result.dodged && damage > 0 && Number(session.player.stats.lifesteal || 0) > 0) {
+    lifestealHeal = Math.floor(damage * Number(session.player.stats.lifesteal || 0));
+
+    if (lifestealHeal > 0) {
+      session.player.hp = Math.min(session.player.maxHp, session.player.hp + lifestealHeal);
+
+      await db.query(
+        `UPDATE players SET hpoints = ? WHERE id = ?`,
+        [session.player.hp, session.playerId]
+      );
+
+      pushLog(session, `🩸 You restore ${lifestealHeal} HP.`);
+    }
+  }
+
+  session.nextPlayerAutoAttackAt = now + PLAYER_AUTO_ATTACK_MS;
+
+  if (newEnemyHP <= 0) {
+    const reward = await handleCreatureKill(session.playerId, session.enemyInstanceId);
+
+    session.state = "victory";
+    session.rewards = {
+      exp: reward?.expGained,
+      gold: reward?.goldGained,
+      levelUp: reward?.levelUp,
+      chest: reward?.chest ?? null,
+      quest: reward?.quest ?? null
+    };
+
+    pushLog(session, "🏆 Enemy defeated!");
+    if (reward?.expGained) pushLog(session, `✨ You gained ${reward.expGained} EXP!`);
+    if (reward?.goldGained) pushLog(session, `💰 You gained ${reward.goldGained} gold!`);
+    if (reward?.levelUp) pushLog(session, "⬆ LEVEL UP!");
+  }
+}
+
+type ShieldAbsorbResult = {
+  incomingDamage: number;
+  absorbedDamage: number;
+  remainingDamage: number;
+  shieldBroken: boolean;
+};
+
+async function absorbDamageWithPlayerShields(
+  playerId: number,
+  incomingDamage: number
+): Promise<ShieldAbsorbResult> {
+  let remainingDamage = Math.max(
+    0,
+    Math.floor(incomingDamage)
+  );
+
+  let absorbedDamage = 0;
+  let shieldBroken = false;
+
+  if (remainingDamage <= 0) {
+    return {
+      incomingDamage: 0,
+      absorbedDamage: 0,
+      remainingDamage: 0,
+      shieldBroken: false
+    };
+  }
+
+  // Remove expired or depleted shields first.
+  await db.query(
+    `
+    DELETE FROM player_shields
+    WHERE player_id = ?
+      AND (
+        expires_at <= NOW(3)
+        OR remaining_absorb <= 0
+      )
+    `,
+    [playerId]
+  );
+
+  const [shields]: any = await db.query(
+    `
+    SELECT
+      id,
+      remaining_absorb,
+      source
+    FROM player_shields
+    WHERE player_id = ?
+      AND expires_at > NOW(3)
+      AND remaining_absorb > 0
+    ORDER BY expires_at ASC, id ASC
+    `,
+    [playerId]
+  );
+
+  for (const shield of shields) {
+    if (remainingDamage <= 0) break;
+
+    const availableAbsorb = Math.max(
+      0,
+      Number(shield.remaining_absorb) || 0
+    );
+
+    if (availableAbsorb <= 0) continue;
+
+    const absorbedFromShield = Math.min(
+      remainingDamage,
+      availableAbsorb
+    );
+
+    const newRemainingAbsorb =
+      availableAbsorb - absorbedFromShield;
+
+    remainingDamage -= absorbedFromShield;
+    absorbedDamage += absorbedFromShield;
+
+    if (newRemainingAbsorb <= 0) {
+      await db.query(
+        `
+        DELETE FROM player_shields
+        WHERE id = ?
+        `,
+        [shield.id]
+      );
+
+      shieldBroken = true;
+    } else {
+      await db.query(
+        `
+        UPDATE player_shields
+        SET remaining_absorb = ?
+        WHERE id = ?
+        `,
+        [
+          newRemainingAbsorb,
+          shield.id
+        ]
+      );
+    }
+  }
+
+  return {
+    incomingDamage: Math.max(
+      0,
+      Math.floor(incomingDamage)
+    ),
+
+    absorbedDamage,
+    remainingDamage,
+    shieldBroken
+  };
+}
+
+
+
+type AegisResult = {
+  damage: number;
+  triggered: boolean;
+  preventedDeath: boolean;
+  reductionPercent: number;
+};
+
+async function applyAegisOfFaith(
+  playerId: number,
+  currentHP: number,
+  incomingDamage: number
+): Promise<AegisResult> {
+  const damage = Math.max(
+    0,
+    Math.floor(incomingDamage)
+  );
+
+  if (damage <= 0) {
+    return {
+      damage: 0,
+      triggered: false,
+      preventedDeath: false,
+      reductionPercent: 0
+    };
+  }
+
+  // Remove expired or empty effects.
+  await db.query(
+    `
+    DELETE FROM player_status_effects
+    WHERE player_id = ?
+      AND effect_key = 'death_prevention'
+      AND (
+        expires_at <= NOW(3)
+        OR charges <= 0
+      )
+    `,
+    [playerId]
+  );
+
+  const [[effect]]: any = await db.query(
+    `
+    SELECT
+      id,
+      charges,
+      value
+    FROM player_status_effects
+    WHERE player_id = ?
+      AND effect_key = 'death_prevention'
+      AND expires_at > NOW(3)
+      AND charges > 0
+    ORDER BY expires_at ASC, id ASC
+    LIMIT 1
+    `,
+    [playerId]
+  );
+
+  if (!effect) {
+    return {
+      damage,
+      triggered: false,
+      preventedDeath: false,
+      reductionPercent: 0
+    };
+  }
+
+  const reductionPercent = Math.max(
+    0,
+    Math.min(
+      100,
+      Number(effect.value) || 0
+    )
+  );
+
+let reducedDamage = Math.max(
+  1,
+  Math.ceil(
+    damage *
+    (1 - reductionPercent / 100)
+  )
+);
+
+let preventedDeath = false;
+
+if (reducedDamage >= currentHP) {
+  reducedDamage = Math.max(
+    0,
+    currentHP - 1
+  );
+
+  preventedDeath = true;
+}
+
+  const remainingCharges = Math.max(
+    0,
+    Number(effect.charges) - 1
+  );
+
+  if (remainingCharges <= 0) {
+    await db.query(
+      `
+      DELETE FROM player_status_effects
+      WHERE id = ?
+      `,
+      [effect.id]
+    );
+  } else {
+    await db.query(
+      `
+      UPDATE player_status_effects
+      SET charges = ?
+      WHERE id = ?
+      `,
+      [
+        remainingCharges,
+        effect.id
+      ]
+    );
+  }
+
+  return {
+    damage: reducedDamage,
+    triggered: true,
+    preventedDeath,
+    reductionPercent
+  };
+}
+
+type InterceptResult = {
+  damage: number;
+  triggered: boolean;
+  reductionPercent: number;
+};
+
+async function applyIntercept(
+  playerId: number,
+  incomingDamage: number
+): Promise<InterceptResult> {
+  const damage = Math.max(
+    0,
+    Math.floor(incomingDamage)
+  );
+
+  if (damage <= 0) {
+    return {
+      damage: 0,
+      triggered: false,
+      reductionPercent: 0
+    };
+  }
+
+  // Remove expired or depleted Intercept effects.
+  await db.query(
+    `
+    DELETE FROM player_status_effects
+    WHERE player_id = ?
+      AND effect_key = 'intercept'
+      AND (
+        expires_at <= NOW(3)
+        OR charges <= 0
+      )
+    `,
+    [playerId]
+  );
+
+  const [[effect]]: any = await db.query(
+    `
+    SELECT
+      id,
+      charges,
+      value
+    FROM player_status_effects
+    WHERE player_id = ?
+      AND effect_key = 'intercept'
+      AND expires_at > NOW(3)
+      AND charges > 0
+    ORDER BY expires_at ASC, id ASC
+    LIMIT 1
+    `,
+    [playerId]
+  );
+
+  if (!effect) {
+    return {
+      damage,
+      triggered: false,
+      reductionPercent: 0
+    };
+  }
+
+  const reductionPercent = Math.max(
+    0,
+    Math.min(
+      90,
+      Number(effect.value) || 0
+    )
+  );
+
+  // Round upward so a positive nonlethal hit normally
+  // still deals at least one point of damage.
+  const reducedDamage = Math.max(
+    1,
+    Math.ceil(
+      damage *
+      (1 - reductionPercent / 100)
+    )
+  );
+
+  const remainingCharges = Math.max(
+    0,
+    Number(effect.charges) - 1
+  );
+
+  if (remainingCharges <= 0) {
+    await db.query(
+      `
+      DELETE FROM player_status_effects
+      WHERE id = ?
+      `,
+      [effect.id]
+    );
+  } else {
+    await db.query(
+      `
+      UPDATE player_status_effects
+      SET charges = ?
+      WHERE id = ?
+      `,
+      [
+        remainingCharges,
+        effect.id
+      ]
+    );
+  }
+
+  return {
+    damage: reducedDamage,
+    triggered: true,
+    reductionPercent
+  };
+}
+
 async function processEnemyAction(session: CombatSession) {
   if (session.state !== "active") return;
   if (!session.enemy.ready) return;
@@ -254,24 +853,161 @@ async function processEnemyAction(session: CombatSession) {
     return;
   }
 
-  const result = resolveAttack(enemyStats, player as any);
-  const dmg = Math.max(0, Math.floor(Number(result.damage) || 0));
-  const newHP = Math.max(0, session.player.hp - dmg);
+const result = resolveAttack(
+  enemyStats,
+  player as any
+);
 
-  session.player.hp = newHP;
+const mitigatedDamage = Math.max(
+  0,
+  Math.floor(
+    Number(result.damage) || 0
+  )
+);
 
-  await db.query(
-    `UPDATE players SET hpoints = ? WHERE id = ?`,
-    [newHP, session.playerId]
+let hpDamage = mitigatedDamage;
+let absorbedDamage = 0;
+let shieldBroken = false;
+
+if (!result.dodged && mitigatedDamage > 0) {
+  const shieldResult =
+    await absorbDamageWithPlayerShields(
+      session.playerId,
+      mitigatedDamage
+    );
+
+  hpDamage = shieldResult.remainingDamage;
+  absorbedDamage = shieldResult.absorbedDamage;
+  shieldBroken = shieldResult.shieldBroken;
+}
+
+let interceptTriggered = false;
+let interceptReductionPercent = 0;
+
+if (
+  !result.dodged &&
+  hpDamage > 0
+) {
+  const interceptResult =
+    await applyIntercept(
+      session.playerId,
+      hpDamage
+    );
+
+  hpDamage =
+    interceptResult.damage;
+
+  interceptTriggered =
+    interceptResult.triggered;
+
+  interceptReductionPercent =
+    interceptResult.reductionPercent;
+}
+
+let aegisTriggered = false;
+let aegisPreventedDeath = false;
+let aegisReductionPercent = 0;
+
+if (
+  !result.dodged &&
+  hpDamage > 0
+) {
+  const aegisResult =
+    await applyAegisOfFaith(
+      session.playerId,
+      session.player.hp,
+      hpDamage
+    );
+
+  hpDamage = aegisResult.damage;
+  aegisTriggered = aegisResult.triggered;
+  aegisPreventedDeath =
+    aegisResult.preventedDeath;
+  aegisReductionPercent =
+    aegisResult.reductionPercent;
+}
+
+const newHP = Math.max(
+  0,
+  session.player.hp - hpDamage
+);
+
+session.player.hp = newHP;
+
+await db.query(
+  `
+  UPDATE players
+  SET hpoints = ?
+  WHERE id = ?
+  `,
+  [newHP, session.playerId]
+);
+
+if (result.dodged) {
+  pushLog(
+    session,
+    `💨 ${session.enemy.name} missed you!`
   );
+} else {
+  let attackLog =
+    `💥 ${session.enemy.name} hits you`;
+
+  if (hpDamage > 0) {
+    attackLog += ` for ${hpDamage}`;
+  } else if (absorbedDamage > 0) {
+    attackLog += ", but your shield absorbs the attack";
+  } else if (aegisTriggered) {
+    attackLog += ", but Aegis of Faith negates the attack";
+  } else {
+    attackLog += " for no damage";
+  }
+
+  if (result.crit) {
+    attackLog += " (CRITICAL!)";
+  }
 
   pushLog(
     session,
-    result.dodged
-      ? `💨 ${session.enemy.name} missed you!`
-      : `💥 ${session.enemy.name} hits you for ${dmg}${result.crit ? " (CRITICAL!)" : ""}`
+    `${attackLog}!`
   );
 
+  if (absorbedDamage > 0) {
+    pushLog(
+      session,
+      `🛡️ Your shield absorbs ${absorbedDamage} damage.`
+    );
+  }
+
+  if (shieldBroken) {
+    pushLog(
+      session,
+      "💥 Your shield shatters!"
+    );
+  }
+
+  if (interceptTriggered) {
+  pushLog(
+    session,
+    `🛡️ Intercept reduces the attack by ` +
+    `${interceptReductionPercent}%!`
+  );
+}
+
+  if (aegisTriggered) {
+  pushLog(
+    session,
+    `✨ Aegis of Faith reduces the attack by ` +
+    `${aegisReductionPercent}%!`
+  );
+}
+
+if (aegisPreventedDeath) {
+  pushLog(
+    session,
+    "🕊️ Aegis of Faith prevents a lethal blow!"
+  );
+}
+}
   consumeActorTurn(session.enemy, 450);
 
   if (newHP <= 0) {
@@ -314,7 +1050,16 @@ export function getActorReadyInMs(actor: CombatActor) {
     return actor.recoveryUntil - now;
   }
 
-  const fillRate = getATBFillRate(actor.stats.agility);
+  const baseFillRate =
+    getATBFillRate(actor.stats.agility);
+
+  const atbRateMult = Math.max(
+    0.01,
+    Number(actor.atbRateMult) || 1
+  );
+
+  const fillRate =
+    baseFillRate * atbRateMult;
   const remainingGauge = Math.max(0, 100 - actor.gauge);
 
   return Math.ceil((remainingGauge / Math.max(fillRate, 0.001)) * 1000);
@@ -336,7 +1081,8 @@ const [[enemyRow]]: any = await db.query(
     c.agility,
     c.crit,
     c.level,
-    c.description
+    c.description,
+    c.attack_speed
   FROM player_creatures pc
   JOIN creatures c ON c.id = pc.creature_id
   WHERE pc.player_id = ?
@@ -365,7 +1111,10 @@ const enemyStats: DerivedStats = {
   dodgeChance: clamp(Number(enemyRow.agility ?? 0) * 0.002, 0, 0.35),
   critDamageMult: 1.5,
   damageReduction: 0,
-  lifesteal: 0
+  lifesteal: 0,
+  healingReceivedMult: 1,
+  atbRateMult: 1,
+  damageTakenMult: 1
 };
 
   const session: CombatSession = {
@@ -373,6 +1122,7 @@ const enemyStats: DerivedStats = {
     enemyInstanceId: Number(enemyRow.id),
     createdAt: now,
     updatedAt: now,
+    nextPlayerAutoAttackAt: now + PLAYER_AUTO_ATTACK_MS,
     state: "active",
 
     player: {
@@ -386,6 +1136,7 @@ const enemyStats: DerivedStats = {
       gauge: 0,
       ready: false,
       recoveryUntil: 0,
+      atbRateMult: Number(player.atbRateMult ?? 1),
       cooldowns: {}
     },
 
@@ -400,7 +1151,8 @@ const enemyStats: DerivedStats = {
       maxSp: 0,
       gauge: 0,
       ready: false,
-      recoveryUntil: Date.now() + Number(enemyRow.attack_speed ?? 1500),
+      recoveryUntil: now + Number(enemyRow.attack_speed ?? 1500),
+      atbRateMult: 1,
       stats: enemyStats as any,
       cooldowns: {}
     },
@@ -440,8 +1192,22 @@ export async function advanceCombatSession(session: CombatSession) {
     if (now < actor.recoveryUntil) continue;
     if (actor.ready) continue;
 
-    const fillRate = getATBFillRate(actor.stats.agility);
-    actor.gauge = Math.min(100, actor.gauge + fillRate * elapsedSec);
+  const baseFillRate =
+    getATBFillRate(actor.stats.agility);
+
+  const atbRateMult = Math.max(
+    0.01,
+    Number(actor.atbRateMult) || 1
+  );
+
+  const finalFillRate =
+    baseFillRate * atbRateMult;
+
+  actor.gauge = Math.min(
+    100,
+    actor.gauge +
+    finalFillRate * elapsedSec
+  );
 
     if (actor.gauge >= 100) {
       actor.gauge = 100;
@@ -453,11 +1219,24 @@ export async function advanceCombatSession(session: CombatSession) {
 
   await processEnemyDots(session);
 
+  if (session.state !== "active") {
+    return session;
+  }
+
+  await processPlayerHots(session);
+
+  if (session.state !== "active") {
+    return session;
+  }
+
+  await processPlayerAutoAttack(session);
+
   if (session.state !== "active") return session;
 
   await processEnemyAction(session);
 
   return session;
+
 }
 
 export function consumeActorTurn(
@@ -485,16 +1264,18 @@ export function buildCombatSnapshot(session: CombatSession) {
   return {
     state: session.state,
     player: {
-      name: session.player.name,
-      hp: session.player.hp,
-      maxHp: session.player.maxHp,
-      sp: session.player.sp,
-      maxSp: session.player.maxSp,
-      gauge: session.player.gauge,
-      ready: session.player.ready,
-      recoveryMs: Math.max(0, session.player.recoveryUntil - now),
-      cooldowns: session.player.cooldowns
-    },
+    name: session.player.name,
+    hp: session.player.hp,
+    maxHp: session.player.maxHp,
+    sp: session.player.sp,
+    maxSp: session.player.maxSp,
+    gauge: session.player.gauge,
+    ready: session.player.ready,
+    recoveryMs: Math.max(0, session.player.recoveryUntil - now),
+    autoAttackMs: Math.max(0, session.nextPlayerAutoAttackAt - now),
+    autoAttackTotalMs: PLAYER_AUTO_ATTACK_MS,
+    cooldowns: session.player.cooldowns
+  },
     enemy: {
       name: session.enemy.name,
       level: session.enemy.level,

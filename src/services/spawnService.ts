@@ -45,41 +45,84 @@ export async function trySpawnEnemy(
 
   // 5) Candidates: terrain match + creature's min_level must be <= zoneLevel
   // (No creature.max_level needed. High-level players can still be in low zones and see low mobs.)
-const [candidates]: any = await db.query(
-  `
-  SELECT
-    c.*,
-    ca.img AS img
-  FROM creatures c
-  LEFT JOIN creature_archetypes ca ON ca.id = c.archetype_id
-  WHERE (c.terrain = ? OR c.terrain = 'any')
-    AND c.min_level <= ?
-  `,
-  [terrain, zoneLevel]
-);
+  // Load player level
+  const [[player]]: any = await db.query(
+    `SELECT level FROM players WHERE id = ? LIMIT 1`,
+    [playerId]
+  );
+
+  const playerLevel = Math.max(1, Number(player?.level) || 1);
+
+  // Mostly match player level ±1, but don't break low-level zones for high-level players
+  let targetMin = Math.max(zoneMin, playerLevel - 1);
+  let targetMax = Math.min(zoneMax, playerLevel + 1);
+
+  // If the player's level is outside the zone band, fall back to the zone's creatures
+  if (targetMin > targetMax) {
+    targetMin = zoneMin;
+    targetMax = zoneMax;
+  }
+
+  const [candidates]: any = await db.query(
+    `
+    SELECT
+      c.*,
+      ca.img AS img
+    FROM creatures c
+    LEFT JOIN creature_archetypes ca ON ca.id = c.archetype_id
+    WHERE (c.terrain = ? OR c.terrain = 'any')
+      AND c.level BETWEEN ? AND ?
+      AND c.min_level <= ?
+      AND c.max_level >= ?
+    `,
+    [terrain, targetMin, targetMax, zoneLevel, zoneLevel]
+  );
 
   if (!candidates.length) return null;
 
-  // 6) Weighted selection by base_spawn_chance
-  const totalWeight = candidates.reduce(
-    (sum: number, c: any) => sum + Number(c.base_spawn_chance || 0),
+  // 6) Weighted selection by base_spawn_chance + level closeness
+  function getLevelWeight(creatureLevel: number) {
+    const diff = Math.abs(creatureLevel - playerLevel);
+
+    if (diff === 0) return 5;
+    if (diff === 1) return 3;
+    if (diff === 2) return 1;
+
+    return 0.25;
+  }
+
+  const weightedCandidates = candidates.map((c: any) => {
+    const baseWeight = Number(c.base_spawn_chance || 0.1);
+    const levelWeight = getLevelWeight(Number(c.level));
+
+    return {
+      ...c,
+      finalSpawnWeight: baseWeight * levelWeight
+    };
+  });
+
+  const totalWeight = weightedCandidates.reduce(
+    (sum: number, c: any) => sum + Number(c.finalSpawnWeight || 0),
     0
   );
 
   let chosen: any = null;
 
   if (totalWeight <= 0) {
-    chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    chosen = weightedCandidates[Math.floor(Math.random() * weightedCandidates.length)];
   } else {
     let roll = Math.random() * totalWeight;
-    for (const c of candidates) {
-      roll -= Number(c.base_spawn_chance || 0);
+
+    for (const c of weightedCandidates) {
+      roll -= Number(c.finalSpawnWeight || 0);
+
       if (roll <= 0) {
         chosen = c;
         break;
       }
     }
-    if (!chosen) chosen = candidates[candidates.length - 1];
+
+    if (!chosen) chosen = weightedCandidates[weightedCandidates.length - 1];
   }
 
   // 7) Roll affix

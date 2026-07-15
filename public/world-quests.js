@@ -156,6 +156,12 @@ if (qtMinBtn && questTracker) {
   });
 }
 
+window.addEventListener("guildforge:player-updated", () => {
+  refreshTrackedQuest().catch(err => {
+    console.error("Failed to refresh quest tracker:", err);
+  });
+});
+
 refreshTrackedQuest();
 
 window.refreshTrackedQuest = refreshTrackedQuest;

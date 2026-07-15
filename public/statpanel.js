@@ -25,18 +25,25 @@ function setText(id, val) {
 }
 
 function loadStatPanel() {
-  fetch("/me")
-    .then(res => res.json())
+  return fetch("/me")
+    .then(res => {
+      if (!res.ok) {
+        throw new Error(`Failed to load player data: ${res.status}`);
+      }
+
+      return res.json();
+    })
     .then(p => {
       if (!p) return;
-      // ✅ STAT POINTS GLOW (portrait)
+
+      // =======================
+      // STAT POINTS GLOW
+      // =======================
       const frame = document.querySelector(".portrait-frame");
+
       if (frame) {
         const hasPoints = Number(p.stat_points) > 0;
         frame.classList.toggle("portrait-glow", hasPoints);
-        console.log("🟡 portrait glow:", hasPoints, "stat_points:", p.stat_points);
-      } else {
-        console.warn("portrait-frame not found (HUD not injected yet?)");
       }
 
       // =======================
@@ -51,13 +58,19 @@ function loadStatPanel() {
       // PORTRAIT & GUILD
       // =======================
       const portrait = document.getElementById("player-portrait");
+
       if (portrait) {
-        portrait.src = p.portrait_url || "/images/portraits/default.png";
+        portrait.src =
+          p.portrait_url ||
+          "/images/portraits/default.png";
       }
 
       const banner = document.getElementById("guild-banner-img");
+
       if (banner) {
-        banner.src = p.guild_banner || "/images/guilds/default-banner.png";
+        banner.src =
+          p.guild_banner ||
+          "/images/guilds/default-banner.png";
       }
 
       setText(
@@ -68,25 +81,24 @@ function loadStatPanel() {
       );
 
       // =======================
-      // FINAL STATS (FROM ENGINE)
+      // HP / SP
       // =======================
-      const hp = Number(p.hpoints);
-      const maxhp = Number(p.maxhp);
-      const sp = Number(p.spoints);
-      const maxsp = Number(p.maxspoints);
-      
-
+      const hp = Number(p.hpoints || 0);
+      const maxhp = Number(p.maxhp || 0);
+      const sp = Number(p.spoints || 0);
+      const maxsp = Number(p.maxspoints || 0);
 
       renderBuffs(p.buffs || []);
 
+      const hpPct =
+        maxhp > 0
+          ? Math.max(0, Math.min(100, (hp / maxhp) * 100))
+          : 0;
 
-
-
-      // =======================
-      // BARS
-      // =======================
-      const hpPct = maxhp > 0 ? (hp / maxhp) * 100 : 0;
-      const spPct = maxsp > 0 ? (sp / maxsp) * 100 : 0;
+      const spPct =
+        maxsp > 0
+          ? Math.max(0, Math.min(100, (sp / maxsp) * 100))
+          : 0;
 
       const hpBar = document.getElementById("hp-bar");
       const spBar = document.getElementById("sp-bar");
@@ -98,25 +110,30 @@ function loadStatPanel() {
       setText("sp-text", `${sp} / ${maxsp}`);
 
       // =======================
-      // XP BAR (UNCHANGED)
+      // XP
       // =======================
+      const exper = Number(p.exper || 0);
       const xpNeed = Number(p.xpNeeded || 0);
-      const xpPct = xpNeed > 0 ? Math.min(100, (p.exper / xpNeed) * 100) : 0;
+
+      const xpPct =
+        xpNeed > 0
+          ? Math.max(0, Math.min(100, (exper / xpNeed) * 100))
+          : 0;
 
       const xpBar = document.getElementById("xp-bar");
-      if (xpBar) xpBar.style.width = `${xpPct}%`;
 
-      setText("xp-text", `${p.exper} / ${xpNeed}`);
+      if (xpBar) {
+        xpBar.style.width = `${xpPct}%`;
+      }
 
-      // =======================
-      // OPTIONAL: DEBUG / FUTURE
-      // =======================
-      // p.spellPower
-      // p.dodgeChance
+      setText("xp-text", `${exper} / ${xpNeed}`);
     })
-    .catch(err => console.error("Statpanel load failed:", err));
-    
+    .catch(err => {
+      console.error("Statpanel load failed:", err);
+      throw err;
+    });
 }
+
 
 
 // =======================
@@ -192,4 +209,12 @@ setInterval(updateBuffTimers, 1000);
 // =======================
 // AUTO LOAD
 // =======================
+
+window.addEventListener("guildforge:player-updated", () => {
+  loadStatPanel().catch(err => {
+    console.error("Failed to refresh stat panel:", err);
+  });
+});
+
 window.addEventListener("DOMContentLoaded", loadHUD);
+
