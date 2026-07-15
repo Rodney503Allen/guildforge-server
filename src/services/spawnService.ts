@@ -76,11 +76,15 @@ const [candidates]: any = await db.query(
 if (!candidates.length) return null;
 
 // Load creature IDs required by active, unfinished kill quests.
+// Load creatures relevant to the player's unfinished quest objectives.
+//
+// This includes:
+// 1. Creatures directly required by KILL objectives.
+// 2. Creatures that drop an item required by an objective.
 const [questCreatureRows]: any = await db.query(
   `
   SELECT DISTINCT relevant_creatures.creature_id
   FROM (
-    /* Creatures directly required by unfinished kill objectives */
     SELECT
       qo.target_creature_id AS creature_id
     FROM player_quests pq
@@ -95,16 +99,15 @@ const [questCreatureRows]: any = await db.query(
 
     UNION
 
-    /* Creatures that drop items required by unfinished objectives */
     SELECT
-      cl.creature_id
+      cli.creature_id
     FROM player_quests pq
     INNER JOIN player_quest_objectives pqo
       ON pqo.player_quest_id = pq.id
     INNER JOIN quest_objectives qo
       ON qo.id = pqo.objective_id
-    INNER JOIN creature_loot cl
-      ON cl.item_id = qo.target_item_id
+    INNER JOIN creature_loot_items cli
+      ON cli.item_id = qo.target_item_id
     WHERE pq.player_id = ?
       AND qo.target_item_id IS NOT NULL
       AND pqo.is_complete = 0
