@@ -194,12 +194,12 @@ async function renderRestContent(pid: number, isModal = false) {
             </div>
           </div>
 
-          <div class="activity-grid">
-            <a class="activity-card" href="/inventory">
-              <div class="activity-icon">🧪</div>
-              <h3>Use Items</h3>
-              <p>Use potions and future camp consumables.</p>
-            </a>
+          <div class="activity-card locked">
+            <div class="activity-icon">🧪</div>
+            <h3>Use Items</h3>
+            <p>Use potions and future camp consumables.</p>
+            <span>Coming Soon</span>
+          </div>
 
             <div class="activity-card locked">
               <div class="activity-icon">🍖</div>
