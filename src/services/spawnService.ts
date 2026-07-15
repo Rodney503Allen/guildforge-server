@@ -59,47 +59,74 @@ export async function trySpawnEnemy(
   //
   // Player level does not exclude creatures. It only slightly influences
   // their final spawn weight below.
-  const [candidates]: any = await db.query(
-    `
-    SELECT
-      c.*,
-      ca.img AS img
-    FROM creatures c
-    LEFT JOIN creature_archetypes ca
-      ON ca.id = c.archetype_id
-    WHERE (c.terrain = ? OR c.terrain = 'any')
-      AND c.level BETWEEN ? AND ?
-    `,
-    [terrain, zoneMin, zoneMax]
+const [candidates]: any = await db.query(
+  `
+  SELECT
+    c.*,
+    ca.img AS img
+  FROM creatures c
+  LEFT JOIN creature_archetypes ca
+    ON ca.id = c.archetype_id
+  WHERE (c.terrain = ? OR c.terrain = 'any')
+    AND c.level BETWEEN ? AND ?
+  `,
+  [terrain, zoneMin, zoneMax]
+);
+
+if (!candidates.length) return null;
+
+// Load creature IDs required by active, unfinished kill quests.
+const [questCreatureRows]: any = await db.query(
+  `
+  SELECT DISTINCT
+    qo.target_creature_id AS creature_id
+  FROM player_quests pq
+  INNER JOIN player_quest_objectives pqo
+    ON pqo.player_quest_id = pq.id
+  INNER JOIN quest_objectives qo
+    ON qo.id = pqo.objective_id
+  WHERE pq.player_id = ?
+    AND qo.type = 'KILL'
+    AND qo.target_creature_id IS NOT NULL
+    AND pqo.is_complete = 0
+  `,
+  [playerId]
+);
+
+const questCreatureIds = new Set<number>(
+  questCreatureRows.map((row: any) => Number(row.creature_id))
+);
+
+function getLevelWeight(creatureLevel: number) {
+  const diff = Math.abs(creatureLevel - playerLevel);
+
+  if (diff === 0) return 1.25;
+  if (diff === 1) return 1.15;
+  if (diff === 2) return 1.0;
+  if (diff === 3) return 0.85;
+
+  return 0.7;
+}
+
+const QUEST_SPAWN_MULTIPLIER = 1.5;
+
+const weightedCandidates = candidates.map((creature: any) => {
+  const baseWeight = Math.max(
+    0.01,
+    Number(creature.base_spawn_chance) || 0.1
   );
 
-  if (!candidates.length) return null;
+  const levelWeight = getLevelWeight(Number(creature.level));
 
-  // 5) Apply a soft preference toward creatures near the player's level.
-  function getLevelWeight(creatureLevel: number) {
-    const diff = Math.abs(creatureLevel - playerLevel);
+  const questWeight = questCreatureIds.has(Number(creature.id))
+    ? QUEST_SPAWN_MULTIPLIER
+    : 1;
 
-    if (diff === 0) return 1.25;
-    if (diff === 1) return 1.15;
-    if (diff === 2) return 1.0;
-    if (diff === 3) return 0.85;
-
-    return 0.7;
-  }
-
-  const weightedCandidates = candidates.map((creature: any) => {
-    const baseWeight = Math.max(
-      0.01,
-      Number(creature.base_spawn_chance) || 0.1
-    );
-
-    const levelWeight = getLevelWeight(Number(creature.level));
-
-    return {
-      ...creature,
-      finalSpawnWeight: baseWeight * levelWeight
-    };
-  });
+  return {
+    ...creature,
+    finalSpawnWeight: baseWeight * levelWeight * questWeight
+  };
+});
 
   const totalWeight = weightedCandidates.reduce(
     (sum: number, creature: any) =>
