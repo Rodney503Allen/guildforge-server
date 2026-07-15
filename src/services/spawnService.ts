@@ -1,13 +1,7 @@
-//services/spawnService.ts
+// services/spawnService.ts
 
 import { db } from "../db";
 import { recordCreatureSeen } from "./bestiaryService";
-
-function randInt(min: number, max: number) {
-  const a = Math.ceil(min);
-  const b = Math.floor(max);
-  return Math.floor(Math.random() * (b - a + 1)) + a;
-}
 
 export async function trySpawnEnemy(
   playerId: number,
@@ -15,14 +9,20 @@ export async function trySpawnEnemy(
   mapY: number,
   terrain: string
 ) {
-  // 1) If player already has an active creature, don't spawn another
+  // 1) Do not spawn another creature while the player has an active encounter.
   const [[existing]]: any = await db.query(
-    "SELECT id FROM player_creatures WHERE player_id = ? LIMIT 1",
+    `
+    SELECT id
+    FROM player_creatures
+    WHERE player_id = ?
+    LIMIT 1
+    `,
     [playerId]
   );
+
   if (existing) return null;
 
-  // 3) Load zone level band from tile -> region
+  // 2) Load the region's level range from the player's current tile.
   const [[tile]]: any = await db.query(
     `
     SELECT
@@ -30,105 +30,110 @@ export async function trySpawnEnemy(
       COALESCE(r.level_max, 1) AS level_max
     FROM world_map wm
     LEFT JOIN regions r ON r.id = wm.region_id
-    WHERE wm.x = ? AND wm.y = ?
+    WHERE wm.x = ?
+      AND wm.y = ?
     LIMIT 1
     `,
     [mapX, mapY]
   );
+
   if (!tile) return null;
 
   const zoneMin = Math.max(1, Number(tile.level_min) || 1);
   const zoneMax = Math.max(zoneMin, Number(tile.level_max) || zoneMin);
 
-  // 4) Pick an effective zone level (this is what you use to prevent mythics at level 1)
-  const zoneLevel = randInt(zoneMin, zoneMax);
-
-  // 5) Candidates: terrain match + creature's min_level must be <= zoneLevel
-  // (No creature.max_level needed. High-level players can still be in low zones and see low mobs.)
-  // Load player level
+  // 3) Load the player's level for soft spawn weighting.
   const [[player]]: any = await db.query(
-    `SELECT level FROM players WHERE id = ? LIMIT 1`,
+    `
+    SELECT level
+    FROM players
+    WHERE id = ?
+    LIMIT 1
+    `,
     [playerId]
   );
 
   const playerLevel = Math.max(1, Number(player?.level) || 1);
 
-  // Mostly match player level ±1, but don't break low-level zones for high-level players
-  let targetMin = Math.max(zoneMin, playerLevel - 1);
-  let targetMax = Math.min(zoneMax, playerLevel + 1);
-
-  // If the player's level is outside the zone band, fall back to the zone's creatures
-  if (targetMin > targetMax) {
-    targetMin = zoneMin;
-    targetMax = zoneMax;
-  }
-
+  // 4) Load every terrain-compatible creature within the region's level band.
+  //
+  // Player level does not exclude creatures. It only slightly influences
+  // their final spawn weight below.
   const [candidates]: any = await db.query(
     `
     SELECT
       c.*,
       ca.img AS img
     FROM creatures c
-    LEFT JOIN creature_archetypes ca ON ca.id = c.archetype_id
+    LEFT JOIN creature_archetypes ca
+      ON ca.id = c.archetype_id
     WHERE (c.terrain = ? OR c.terrain = 'any')
       AND c.level BETWEEN ? AND ?
-      AND c.min_level <= ?
-      AND c.max_level >= ?
     `,
-    [terrain, targetMin, targetMax, zoneLevel, zoneLevel]
+    [terrain, zoneMin, zoneMax]
   );
 
   if (!candidates.length) return null;
 
-  // 6) Weighted selection by base_spawn_chance + level closeness
+  // 5) Apply a soft preference toward creatures near the player's level.
   function getLevelWeight(creatureLevel: number) {
     const diff = Math.abs(creatureLevel - playerLevel);
 
-    if (diff === 0) return 5;
-    if (diff === 1) return 3;
-    if (diff === 2) return 1;
+    if (diff === 0) return 1.25;
+    if (diff === 1) return 1.15;
+    if (diff === 2) return 1.0;
+    if (diff === 3) return 0.85;
 
-    return 0.25;
+    return 0.7;
   }
 
-  const weightedCandidates = candidates.map((c: any) => {
-    const baseWeight = Number(c.base_spawn_chance || 0.1);
-    const levelWeight = getLevelWeight(Number(c.level));
+  const weightedCandidates = candidates.map((creature: any) => {
+    const baseWeight = Math.max(
+      0.01,
+      Number(creature.base_spawn_chance) || 0.1
+    );
+
+    const levelWeight = getLevelWeight(Number(creature.level));
 
     return {
-      ...c,
+      ...creature,
       finalSpawnWeight: baseWeight * levelWeight
     };
   });
 
   const totalWeight = weightedCandidates.reduce(
-    (sum: number, c: any) => sum + Number(c.finalSpawnWeight || 0),
+    (sum: number, creature: any) =>
+      sum + Number(creature.finalSpawnWeight || 0),
     0
   );
 
   let chosen: any = null;
 
   if (totalWeight <= 0) {
-    chosen = weightedCandidates[Math.floor(Math.random() * weightedCandidates.length)];
+    chosen =
+      weightedCandidates[
+        Math.floor(Math.random() * weightedCandidates.length)
+      ];
   } else {
     let roll = Math.random() * totalWeight;
 
-    for (const c of weightedCandidates) {
-      roll -= Number(c.finalSpawnWeight || 0);
+    for (const creature of weightedCandidates) {
+      roll -= Number(creature.finalSpawnWeight || 0);
 
       if (roll <= 0) {
-        chosen = c;
+        chosen = creature;
         break;
       }
     }
 
-    if (!chosen) chosen = weightedCandidates[weightedCandidates.length - 1];
+    if (!chosen) {
+      chosen = weightedCandidates[weightedCandidates.length - 1];
+    }
   }
 
-  // 7) Roll affix
+  // 6) Roll a creature affix.
   let affix: any = null;
-
-  const affixSpawnChance = 0.12; // 12% chance for now
+  const affixSpawnChance = 0.12;
 
   if (Math.random() < affixSpawnChance) {
     const [affixes]: any = await db.query(
@@ -144,33 +149,41 @@ export async function trySpawnEnemy(
   }
 
   const hpMult = affix ? Number(affix.hp_mult || 1) : 1;
+  const attackMult = affix ? Number(affix.attack_mult || 1) : 1;
+  const defenseMult = affix ? Number(affix.defense_mult || 1) : 1;
+  const speedMult = affix ? Number(affix.speed_mult || 1) : 1;
+
   const spawnedHp = Math.floor(Number(chosen.maxhp) * hpMult);
+  const finalAttack = Math.floor(Number(chosen.attack) * attackMult);
+  const finalDefense = Math.floor(Number(chosen.defense) * defenseMult);
+  const finalAgility = Math.floor(Number(chosen.agility) * speedMult);
 
-const finalAttack = Math.floor(
-  Number(chosen.attack) * (affix ? Number(affix.attack_mult || 1) : 1)
-);
-
-const finalDefense = Math.floor(
-  Number(chosen.defense) * (affix ? Number(affix.defense_mult || 1) : 1)
-);
-
-const finalAgility = Math.floor(
-  Number(chosen.agility) * (affix ? Number(affix.speed_mult || 1) : 1)
-);
-
-  // 8) Spawn it
+  // 7) Create the player's active encounter.
   await db.query(
     `
-    INSERT INTO player_creatures 
+    INSERT INTO player_creatures
       (player_id, creature_id, affix_id, hp, map_x, map_y)
     VALUES (?, ?, ?, ?, ?, ?)
     `,
-    [playerId, chosen.id, affix?.id || null, spawnedHp, mapX, mapY]
+    [
+      playerId,
+      chosen.id,
+      affix?.id || null,
+      spawnedHp,
+      mapX,
+      mapY
+    ]
   );
 
-  await recordCreatureSeen(playerId, chosen.id, affix?.id || null);
+  await recordCreatureSeen(
+    playerId,
+    chosen.id,
+    affix?.id || null
+  );
 
-  const displayName = affix ? `${affix.name} ${chosen.name}` : chosen.name;
+  const displayName = affix
+    ? `${affix.name} ${chosen.name}`
+    : chosen.name;
 
   return {
     id: chosen.id,
@@ -184,10 +197,11 @@ const finalAgility = Math.floor(
           rarity: affix.rarity,
           description: affix.description,
 
-          hpMult: Number(affix.hp_mult || 1),
-          attackMult: Number(affix.attack_mult || 1),
-          defenseMult: Number(affix.defense_mult || 1),
-          speedMult: Number(affix.speed_mult || 1),
+          hpMult,
+          attackMult,
+          defenseMult,
+          speedMult,
+
           xpMult: Number(affix.xp_mult || 1),
           goldMult: Number(affix.gold_mult || 1),
           lootMult: Number(affix.loot_mult || 1)
@@ -201,19 +215,21 @@ const finalAgility = Math.floor(
     maxHP: spawnedHp,
     maxhp: spawnedHp,
 
-    img: chosen.img || chosen.creatureimage || chosen.image || "images/default_creature.png",
+    img:
+      chosen.img ||
+      chosen.creatureimage ||
+      chosen.image ||
+      "/images/default_creature.png",
 
-    attack: Math.floor(Number(chosen.attack) * (affix ? Number(affix.attack_mult || 1) : 1)),
-    defense: Math.floor(Number(chosen.defense) * (affix ? Number(affix.defense_mult || 1) : 1)),
-    agility: Math.floor(Number(chosen.agility) * (affix ? Number(affix.speed_mult || 1) : 1)),
+    attack: finalAttack,
+    defense: finalDefense,
+    agility: finalAgility,
     crit: chosen.crit,
 
     creatureId: chosen.id,
     affixId: affix?.id || null,
 
-    zoneLevel,
     zoneMin,
     zoneMax
   };
 }
-
