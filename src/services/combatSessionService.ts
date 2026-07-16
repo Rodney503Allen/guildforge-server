@@ -261,23 +261,69 @@ async function processEnemyDots(session: CombatSession) {
   let reward: any = null;
 
   for (const dot of dots) {
-    enemyHP = Math.max(0, enemyHP - Number(dot.damage || 0));
+    const totalDamage = Number(dot.total_damage || dot.damage || 1);
+    const totalTicks = Math.max(
+      1,
+      Number(dot.total_ticks || 1)
+    );
 
-    await db.query(
-      `UPDATE player_creatures SET hp = ? WHERE id = ?`,
-      [enemyHP, session.enemyInstanceId]
+    const ticksApplied = Number(dot.ticks_applied || 0);
+
+    const damageBefore = Math.floor(
+      (totalDamage * ticksApplied) / totalTicks
+    );
+
+    const damageAfter = Math.floor(
+      (totalDamage * (ticksApplied + 1)) / totalTicks
+    );
+
+    const tickDamage = Math.max(
+      0,
+      damageAfter - damageBefore
+    );
+
+    enemyHP = Math.max(
+      0,
+      enemyHP - tickDamage
     );
 
     await db.query(
       `
-      UPDATE player_creature_dots
-      SET next_tick_at = DATE_ADD(next_tick_at, INTERVAL tick_interval SECOND)
+      UPDATE player_creatures
+      SET hp = ?
       WHERE id = ?
       `,
-      [dot.id]
+      [enemyHP, session.enemyInstanceId]
     );
 
-    pushLog(session, `🔥 Enemy takes ${dot.damage} damage.`);
+    if (ticksApplied + 1 >= totalTicks) {
+      await db.query(
+        `
+        DELETE FROM player_creature_dots
+        WHERE id = ?
+        `,
+        [dot.id]
+      );
+    } else {
+      await db.query(
+        `
+        UPDATE player_creature_dots
+        SET
+          ticks_applied = ticks_applied + 1,
+          next_tick_at = DATE_ADD(
+            next_tick_at,
+            INTERVAL tick_interval SECOND
+          )
+        WHERE id = ?
+        `,
+        [dot.id]
+      );
+    }
+
+    pushLog(
+      session,
+      `🔥 Enemy takes ${tickDamage} damage.`
+    );
   }
 
   await db.query(

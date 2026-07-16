@@ -286,7 +286,7 @@ export const dotHandler: SpellHandlerDefinition = {
       Math.floor(dotDuration / tickRate)
     );
 
-    const damagePerTick = Math.max(
+    const initialTickDamage = Math.max(
       1,
       Math.floor(totalDotDamage / totalTicks)
     );
@@ -297,6 +297,9 @@ export const dotHandler: SpellHandlerDefinition = {
         (
           player_creature_id,
           damage,
+          total_damage,
+          total_ticks,
+          ticks_applied,
           tick_interval,
           next_tick_at,
           expires_at,
@@ -307,6 +310,9 @@ export const dotHandler: SpellHandlerDefinition = {
           ?,
           ?,
           ?,
+          ?,
+          0,
+          ?,
           NOW(),
           DATE_ADD(NOW(), INTERVAL ? SECOND),
           ?
@@ -314,13 +320,14 @@ export const dotHandler: SpellHandlerDefinition = {
       `,
       [
         enemy.id,
-        damagePerTick,
+        initialTickDamage,
+        totalDotDamage,
+        totalTicks,
         tickRate,
         dotDuration,
         `spell:${spell.id}`
       ]
     );
-
     const appliedStatus = await applySpellDebuff(
       enemy.id,
       spell
@@ -486,7 +493,7 @@ export const damageDotHandler: SpellHandlerDefinition = {
       Math.floor(dotDuration / tickRate)
     );
 
-    const damagePerTick = Math.max(
+    const initialTickDamage = Math.max(
       1,
       Math.floor(totalDotDamage / totalTicks)
     );
@@ -497,6 +504,9 @@ export const damageDotHandler: SpellHandlerDefinition = {
         (
           player_creature_id,
           damage,
+          total_damage,
+          total_ticks,
+          ticks_applied,
           tick_interval,
           next_tick_at,
           expires_at,
@@ -507,6 +517,9 @@ export const damageDotHandler: SpellHandlerDefinition = {
           ?,
           ?,
           ?,
+          ?,
+          0,
+          ?,
           NOW(),
           DATE_ADD(NOW(), INTERVAL ? SECOND),
           ?
@@ -514,7 +527,9 @@ export const damageDotHandler: SpellHandlerDefinition = {
       `,
       [
         enemy.id,
-        damagePerTick,
+        initialTickDamage,
+        totalDotDamage,
+        totalTicks,
         tickRate,
         dotDuration,
         `spell:${spell.id}`
