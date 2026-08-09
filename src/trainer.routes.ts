@@ -298,11 +298,17 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
   }).join("");
 
   return `
-    <section class="discipline-section" data-discipline="${esc(group.slug)}">
+    <section
+      class="discipline-section frame-host"
+      data-discipline="${esc(group.slug)}"
+    >
+      <span class="frame-border sub" aria-hidden="true"></span>
+
       <div class="discipline-heading">
         <h3>${esc(group.name)}</h3>
         <span>${group.spells.length}/6 Skills</span>
       </div>
+
       <div class="discipline-spells">
         ${cards}
       </div>
@@ -334,7 +340,8 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
   <div id="statpanel-root"></div>
 
   <main class="trainer-page">
-    <section class="trainer-shell">
+    <section class="trainer-shell frame-host">
+  <span class="frame-border main" aria-hidden="true"></span>
       <header class="trainer-hero">
         <div class="hero-title">
           <div class="hero-icon">📖</div>
@@ -343,6 +350,7 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
             <p>Skills available to the ${esc(pclass)} • Level ${playerLevel} • ${playerSkillPoints} Skill Point${playerSkillPoints === 1 ? "" : "s"}</p>
           </div>
         </div>
+        <span class="hero-divider-center" aria-hidden="true"></span>
         <div class="hero-actions">
           <span class="pill">Class: <strong>${esc(pclass)}</strong></span>
           <span class="pill">Skill Points: <strong>${playerSkillPoints}</strong></span>
@@ -351,7 +359,8 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
       </header>
 
       <div class="trainer-grid">
-        <section class="card spellbook-card">
+        <section class="card spellbook-card frame-host">
+        <span class="frame-border panel" aria-hidden="true"></span>
           <div class="cardHeader">
             <div class="cardTitle">
               <h2>📖 Spellbook</h2>
@@ -383,12 +392,14 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
         </section>
 
         <aside class="right-stack">
-          <section class="card details-card">
+          <section class="card details-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
             <div class="cardHeader compact">
               <div class="cardTitle"><h2>Spell Details</h2></div>
             </div>
             <div class="cardBody">
-              <div class="spell-detail-box">
+              <div class="spell-detail-box frame-host">
+              <span class="frame-border sub" aria-hidden="true"></span>
                 <div class="detail-icon-wrap">
                   <img id="detailIcon" src="${esc(firstIcon)}" alt="${esc(firstName)} icon" onerror="this.src='/icons/default.png'; this.onerror=null;">
                 </div>
@@ -403,7 +414,8 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
             </div>
           </section>
 
-          <section class="card talent-card">
+          <section class="card talent-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Talent Tree</h2>

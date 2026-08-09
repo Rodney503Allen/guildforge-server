@@ -231,6 +231,8 @@ function showLootToast(title, message, type = "error") {
     }
   }
 
+  
+
 async function showIndicator(chestId, rarity = null) {
   pendingChestId = chestId;
 
@@ -281,3 +283,6 @@ function close() {
     refreshPendingChest
   };
 })();
+
+window.LootChestModal =
+  LootChestModal;

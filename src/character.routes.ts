@@ -601,250 +601,419 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
 </head>
 
 <body>
+  <div id="statpanel-root"></div>
 
-<div id="statpanel-root"></div>
+  <main class="character-page">
+    <section class="page-wrap frame-host">
+      <span class="frame-border main" aria-hidden="true"></span>
 
-<div class="page-wrap">
+      <header class="character-hero">
+        <div class="character-hero-title">
+          <div class="character-hero-icon">⚔️</div>
 
-  <div class="left-panel">
-
-    <div class="char-box">
-      <h2>${p.name}</h2>
-      <p>Class: ${p.class_name}</p>
-      <p>Level: ${p.level}</p>
-      <p>XP: ${p.exper} / ${expToNext}</p>
-
-      <div style="background:#222;border:1px solid gold;height:14px;border-radius:6px;overflow:hidden">
-        <div style="width:${expPercent}%;height:100%;background:linear-gradient(to right,#d4af37,#aa8c3c)"></div>
-      </div>
-
-      <p style="font-size:12px">${expPercent}% to next level</p>
-
-      <p>Gold: ${p.gold}</p>
-      <p class="tooltip-container">
-        HP: ${p.hpoints} / ${p.maxhp}
-        <span class="tooltip">
-          <strong>Max HP</strong>
-          Base + Gear + Buffs
-        </span>
-      </p>
-
-      <p>SP: ${p.spoints} / ${p.maxspoints}</p>
-      <p>Crit Chance: ${(p.crit * 100).toFixed(1)}%</p>
-      <p class="tooltip-container">
-        Dodge Chance: ${(p.dodgeChance * 100).toFixed(1)}%
-
-        <span class="tooltip">
-          <strong>Dodge Chance</strong>
-          Chance to completely avoid an incoming attack.
-        </span>
-      </p>
-    </div>
-
-    <div class="char-box">
-      <h3>Stats</h3>
-      <p>Unspent Points: <span id="statPoints">${p.stat_points}</span></p>
-
-      ${(STAT_KEYS.filter(s => s !== "crit") as Exclude<StatKey, "crit">[])
-        .map((stat) => `
-          <div class="stat-row">
-            <span>${stat.charAt(0).toUpperCase() + stat.slice(1)}:</span>
-
-            <span class="stat-value tooltip-container" id="${stat}">
-              ${(p as any)[stat]}
-              <div class="tooltip">
-                <strong>${stat.toUpperCase()}</strong>
-                <div>Base: ${statBreakdown[stat].base}</div>
-                <div>Gear: +${statBreakdown[stat].gear}</div>
-                <div>Buffs: +${statBreakdown[stat].buff}</div>
-                <hr>
-                <div><b>Total: ${statBreakdown[stat].total}</b></div>
-              </div>
-            </span>
-
-            ${p.stat_points > 0 ? `<button onclick="addStat('${stat}')">+</button>` : ``}
+          <div>
+            <h1>Character</h1>
+            <p>${p.name} • ${p.class_name} • Level ${p.level}</p>
           </div>
-        `).join("")}
-
-      <div style="text-align:center">
-        <button class="return-btn" onclick="goBack()">⬅ Return</button>
-      </div>
-    </div>
-
-  </div>
-
-  <div class="center-panel">
-    <div class="char-box">
-      <h3>Equipped Gear</h3>
-
-      <div class="paperdoll">
-        ${renderEquipSlot("head", "Head")}
-        ${renderEquipSlot("chest", "Chest")}
-        ${renderEquipSlot("weapon", "Weapon")}
-        ${renderEquipSlot("offhand", "Offhand")}
-        ${renderEquipSlot("legs", "Legs")}
-        ${renderEquipSlot("feet", "Feet")}
-        ${renderEquipSlot("hands", "Hands")}
-      </div>
-
-<div class="quickbelt">
-
-  <div class="potion-slot tooltip-container">
-    <div class="potion-title">Health</div>
-    ${
-      hpPotion
-        ? `
-          <div class="potion-inner" ondblclick="unequipPotion('health')">
-            <img class="potion-img" src="${resolveIcon(hpPotion.icon)}" onerror="this.style.display='none'">
-            <div class="stack-count">${hpPotion.qty}</div>
-            <div class="tooltip">
-              <strong>${hpPotion.name}</strong>
-              <div class="rarity">EQUIPPED</div>
-              <div>Slot: Health</div>
-            </div>
-          </div>
-        `
-        : `<div class="potion-empty">Empty</div>`
-    }
-  </div>
-
-  ${renderToolSlot("Mining", miningTool, "mining")}
-  ${renderToolSlot("Herbalism", herbalismTool, "herbalism")}
-  ${renderToolSlot("Woodcutting", woodcuttingTool, "woodcutting")}
-
-  <div class="potion-slot tooltip-container">
-    <div class="potion-title">Mana</div>
-    ${
-      spPotion
-        ? `
-          <div class="potion-inner" ondblclick="unequipPotion('mana')">
-            <img class="potion-img" src="${resolveIcon(spPotion.icon)}" onerror="this.style.display='none'">
-            <div class="stack-count">${spPotion.qty}</div>
-            <div class="tooltip">
-              <strong>${spPotion.name}</strong>
-              <div class="rarity">EQUIPPED</div>
-              <div>Slot: Mana</div>
-            </div>
-          </div>
-        `
-        : `<div class="potion-empty">Empty</div>`
-    }
-  </div>
-
-</div>
-    </div>
-  </div>
-
-  <div class="right-panel">
-    <div class="char-box">
-      <div class="inventory-header">
-        <h3>Inventory</h3>
-        <span class="inventory-space">
-          ${inventoryUsed} / ${inventoryCapacity}
-        </span>
-      </div>
-
-      <input id="invSearch" class="inv-search" placeholder="Search items..." autocomplete="off" />
-
-      <div class="inv-grid"
-           ondragover="event.preventDefault()"
-           ondrop="dropUnequip(event)">
-
-      ${normalizedInv
-        .filter((g: any) => !g.equipped)
-        .map((g: any) => {
-          const baseAttrs = buildTooltipAttrs({
-            ...g,
-            quantity: g.quantity
-          });
-
-          return `
-            <div class="inv-item"
-              ${baseAttrs}
-              data-id="${g.instance_id}"
-              data-slot="${g.slot || ""}"
-              data-item-type="${g.item_type || ""}"
-              data-search="${escapeHtml((g.name || "").toLowerCase())}"
-              data-qty="${Number(g.quantity || 1)}"
-
-              draggable="true"
-              ondblclick="${
-                ["weapon","offhand","head","chest","legs","feet","hands"].includes(g.slot)
-                  ? `equipItem(${g.instance_id})`
-                  : (String(g.type) === "potion" && String(g.effect_target).toLowerCase() === "hp")
-                      ? `equipPotion(${g.instance_id}, 'health')`
-                      : (String(g.type) === "potion" && String(g.effect_target).toLowerCase() === "sp")
-                          ? `equipPotion(${g.instance_id}, 'mana')`
-                          : (String(g.type) === "tool" && String(g.item_type) === "mining_tool")
-                              ? `equipTool(${g.instance_id}, 'mining')`
-                              : (String(g.type) === "tool" && String(g.item_type) === "herbalism_tool")
-                                  ? `equipTool(${g.instance_id}, 'herbalism')`
-                                  : (String(g.type) === "tool" && String(g.item_type) === "woodcutting_tool")
-                                      ? `equipTool(${g.instance_id}, 'woodcutting')`
-                                      : ``
-              }"
-            >
-              <img src="${resolveIcon(g.icon)}" alt=""
-                   onerror="this.style.display='none'">
-
-              ${g.quantity > 1 ? `<div class="stack-count">${g.quantity}</div>` : ``}
-            </div>
-          `;
-        }).join("")}
-      </div>
-    </div>
-  </div>
-
-    <section class="char-box skill-loadout-panel">
-    <div class="skill-panel-header">
-      <div>
-        <h3>Combat Skills</h3>
-        <p>
-          Choose up to six learned skills for your combat hotbar.
-          Click a skill, then choose a slot.
-        </p>
-      </div>
-
-      <div class="skill-loadout-count">
-        <span id="equippedSkillCount">0</span> / 6 Equipped
-      </div>
-    </div>
-
-    <div class="skill-loadout-layout">
-
-    <div class="skill-library-section">
-      <div class="skill-section-title">Learned Skills</div>
-
-      <div
-        id="disciplineSkillLibrary"
-        class="discipline-skill-library"
-      >
-        <div class="skills-loading">
-          Loading learned skills...
         </div>
+
+        <div class="character-hero-actions">
+          <span class="character-gold-pill">
+            Gold: <strong>${Number(p.gold || 0)}g</strong>
+          </span>
+
+          <button
+            type="button"
+            class="character-return-btn"
+            onclick="goBack()"
+          >
+            Return
+          </button>
+        </div>
+
+        <span class="character-hero-divider" aria-hidden="true"></span>
+      </header>
+
+      <div class="left-panel">
+        <section class="char-box frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
+
+          <h2>${p.name}</h2>
+
+          <div class="character-summary">
+            <div class="summary-row">
+              <span>Class</span>
+              <strong>${p.class_name}</strong>
+            </div>
+
+            <div class="summary-row">
+              <span>Level</span>
+              <strong>${p.level}</strong>
+            </div>
+
+            <div class="summary-row">
+              <span>Experience</span>
+              <strong>${p.exper} / ${expToNext}</strong>
+            </div>
+
+            <div class="experience-bar">
+              <div
+                class="experience-bar-fill"
+                style="width:${expPercent}%"
+              ></div>
+            </div>
+
+            <p class="experience-caption">
+              ${expPercent}% to next level
+            </p>
+
+            <div class="summary-divider"></div>
+
+            <div class="summary-row">
+              <span>Health</span>
+
+              <strong class="tooltip-container">
+                ${p.hpoints} / ${p.maxhp}
+
+                <span class="tooltip">
+                  <strong>Maximum Health</strong>
+                  Base + Gear + Buffs
+                </span>
+              </strong>
+            </div>
+
+            <div class="summary-row">
+              <span>Skill Points</span>
+              <strong>${p.spoints} / ${p.maxspoints}</strong>
+            </div>
+
+            <div class="summary-row">
+              <span>Critical Chance</span>
+              <strong>${(p.crit * 100).toFixed(1)}%</strong>
+            </div>
+
+            <div class="summary-row">
+              <span>Dodge Chance</span>
+
+              <strong class="tooltip-container">
+                ${(p.dodgeChance * 100).toFixed(1)}%
+
+                <span class="tooltip">
+                  <strong>Dodge Chance</strong>
+                  Chance to completely avoid an incoming attack.
+                </span>
+              </strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="char-box frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
+
+          <div class="character-card-header">
+            <h3>Attributes</h3>
+
+            <span class="stat-points-pill">
+              <span id="statPoints">${p.stat_points}</span> Available
+            </span>
+          </div>
+
+          <div class="stats-list">
+            ${(STAT_KEYS.filter(
+              (s) => s !== "crit"
+            ) as Exclude<StatKey, "crit">[])
+              .map(
+                (stat) => `
+                  <div class="stat-row">
+                    <span class="stat-label">
+                      ${stat.charAt(0).toUpperCase() + stat.slice(1)}
+                    </span>
+
+                    <span
+                      class="stat-value tooltip-container"
+                      id="${stat}"
+                    >
+                      ${(p as any)[stat]}
+
+                      <span class="tooltip">
+                        <strong>${stat.toUpperCase()}</strong>
+                        <div>Base: ${statBreakdown[stat].base}</div>
+                        <div>Gear: +${statBreakdown[stat].gear}</div>
+                        <div>Buffs: +${statBreakdown[stat].buff}</div>
+                        <hr>
+                        <div>
+                          <b>Total: ${statBreakdown[stat].total}</b>
+                        </div>
+                      </span>
+                    </span>
+
+                    ${
+                      p.stat_points > 0
+                        ? `
+                          <button
+                            type="button"
+                            class="stat-add-btn"
+                            aria-label="Add one point to ${stat}"
+                            onclick="addStat('${stat}')"
+                          >
+                            +
+                          </button>
+                        `
+                        : `<span class="stat-button-placeholder"></span>`
+                    }
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        </section>
       </div>
-    </div>
 
-      <div class="skill-hotbar-section">
-        <div class="skill-section-title">Combat Hotbar</div>
+      <div class="center-panel">
+        <section class="char-box equipment-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
 
-        <div
-          id="skillHotbar"
-          class="skill-hotbar"
-        ></div>
+          <div class="character-card-header">
+            <div>
+              <h3>Equipped Gear</h3>
+              <p>Your currently equipped combat equipment.</p>
+            </div>
+          </div>
 
-        <p class="skill-help">
-          Drag slots to reorder. Double-click an equipped skill to remove it.
-        </p>
+          <div class="paperdoll frame-host">
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            ${renderEquipSlot("head", "Head")}
+            ${renderEquipSlot("chest", "Chest")}
+            ${renderEquipSlot("weapon", "Weapon")}
+            ${renderEquipSlot("offhand", "Offhand")}
+            ${renderEquipSlot("legs", "Legs")}
+            ${renderEquipSlot("feet", "Feet")}
+            ${renderEquipSlot("hands", "Hands")}
+          </div>
+
+          <div class="quickbelt">
+            <div class="potion-slot tooltip-container">
+              <div class="potion-title">Health</div>
+
+              ${
+                hpPotion
+                  ? `
+                    <div
+                      class="potion-inner"
+                      ondblclick="unequipPotion('health')"
+                    >
+                      <img
+                        class="potion-img"
+                        src="${resolveIcon(hpPotion.icon)}"
+                        alt="${escapeHtml(hpPotion.name || "Health potion")}"
+                        onerror="this.style.display='none'"
+                      >
+
+                      <div class="stack-count">${hpPotion.qty}</div>
+
+                      <div class="tooltip">
+                        <strong>${hpPotion.name}</strong>
+                        <div class="rarity">Equipped</div>
+                        <div>Slot: Health</div>
+                      </div>
+                    </div>
+                  `
+                  : `<div class="potion-empty">Empty</div>`
+              }
+            </div>
+
+            ${renderToolSlot("Mining", miningTool, "mining")}
+            ${renderToolSlot("Herbalism", herbalismTool, "herbalism")}
+            ${renderToolSlot("Woodcutting", woodcuttingTool, "woodcutting")}
+
+            <div class="potion-slot tooltip-container">
+              <div class="potion-title">Mana</div>
+
+              ${
+                spPotion
+                  ? `
+                    <div
+                      class="potion-inner"
+                      ondblclick="unequipPotion('mana')"
+                    >
+                      <img
+                        class="potion-img"
+                        src="${resolveIcon(spPotion.icon)}"
+                        alt="${escapeHtml(spPotion.name || "Mana potion")}"
+                        onerror="this.style.display='none'"
+                      >
+
+                      <div class="stack-count">${spPotion.qty}</div>
+
+                      <div class="tooltip">
+                        <strong>${spPotion.name}</strong>
+                        <div class="rarity">Equipped</div>
+                        <div>Slot: Mana</div>
+                      </div>
+                    </div>
+                  `
+                  : `<div class="potion-empty">Empty</div>`
+              }
+            </div>
+          </div>
+        </section>
       </div>
 
-    </div>
-  </section>
+      <div class="right-panel">
+        <section class="char-box inventory-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
 
-</div>
+          <div class="inventory-header">
+            <div>
+              <h3>Inventory</h3>
+              <p>Double-click an item to equip it.</p>
+            </div>
 
-</body>
-</html>
+            <span class="inventory-space">
+              ${inventoryUsed} / ${inventoryCapacity}
+            </span>
+          </div>
+
+          <input
+            id="invSearch"
+            class="inv-search"
+            type="search"
+            placeholder="Search items..."
+            autocomplete="off"
+            aria-label="Search inventory"
+          >
+
+          <div
+            class="inv-grid"
+            ondragover="event.preventDefault()"
+            ondrop="dropUnequip(event)"
+          >
+            ${normalizedInv
+              .filter((g: any) => !g.equipped)
+              .map((g: any) => {
+                const baseAttrs = buildTooltipAttrs({
+                  ...g,
+                  quantity: g.quantity
+                });
+
+                const doubleClickAction =
+                  [
+                    "weapon",
+                    "offhand",
+                    "head",
+                    "chest",
+                    "legs",
+                    "feet",
+                    "hands"
+                  ].includes(g.slot)
+                    ? `equipItem(${g.instance_id})`
+                    : String(g.type) === "potion" &&
+                        String(g.effect_target).toLowerCase() === "hp"
+                      ? `equipPotion(${g.instance_id}, 'health')`
+                      : String(g.type) === "potion" &&
+                          String(g.effect_target).toLowerCase() === "sp"
+                        ? `equipPotion(${g.instance_id}, 'mana')`
+                        : String(g.type) === "tool" &&
+                            String(g.item_type) === "mining_tool"
+                          ? `equipTool(${g.instance_id}, 'mining')`
+                          : String(g.type) === "tool" &&
+                              String(g.item_type) === "herbalism_tool"
+                            ? `equipTool(${g.instance_id}, 'herbalism')`
+                            : String(g.type) === "tool" &&
+                                String(g.item_type) === "woodcutting_tool"
+                              ? `equipTool(${g.instance_id}, 'woodcutting')`
+                              : "";
+
+                return `
+                  <div
+                    class="inv-item"
+                    ${baseAttrs}
+                    data-id="${g.instance_id}"
+                    data-slot="${g.slot || ""}"
+                    data-item-type="${g.item_type || ""}"
+                    data-search="${escapeHtml(
+                      (g.name || "").toLowerCase()
+                    )}"
+                    data-qty="${Number(g.quantity || 1)}"
+                    draggable="true"
+                    ${
+                      doubleClickAction
+                        ? `ondblclick="${doubleClickAction}"`
+                        : ""
+                    }
+                  >
+                    <img
+                      src="${resolveIcon(g.icon)}"
+                      alt="${escapeHtml(g.name || "")}"
+                      onerror="this.style.display='none'"
+                    >
+
+                    ${
+                      g.quantity > 1
+                        ? `<div class="stack-count">${g.quantity}</div>`
+                        : ""
+                    }
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        </section>
+      </div>
+
+      <section class="char-box skill-loadout-panel frame-host">
+        <span class="frame-border panel" aria-hidden="true"></span>
+
+        <div class="skill-panel-header">
+          <div>
+            <h3>Combat Skills</h3>
+            <p>
+              Choose up to six learned skills for your combat hotbar.
+              Select a skill and then choose a slot.
+            </p>
+          </div>
+
+          <div class="skill-loadout-count">
+            <span id="equippedSkillCount">0</span> / 6 Equipped
+          </div>
+        </div>
+
+        <div class="skill-loadout-layout">
+          <div class="skill-library-section frame-host">
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <div class="skill-section-title">Learned Skills</div>
+
+            <div
+              id="disciplineSkillLibrary"
+              class="discipline-skill-library"
+            >
+              <div class="skills-loading">
+                Loading learned skills...
+              </div>
+            </div>
+          </div>
+
+          <div class="skill-hotbar-section frame-host">
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <div class="skill-section-title">Combat Hotbar</div>
+
+            <div
+              id="skillHotbar"
+              class="skill-hotbar"
+            ></div>
+
+            <p class="skill-help">
+              Drag slots to reorder. Double-click an equipped skill to remove it.
+            </p>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+</body></html>
 `);
 });
 

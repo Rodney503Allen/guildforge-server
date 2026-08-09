@@ -4,6 +4,7 @@ import { db } from "./db";
 import { trySpawnEnemy } from "./services/spawnService";
 import { applyInteractProgress, applyEnterAreaProgress } from "./services/questService";
 import { maybeSpawnResourceNodeForPlayer } from "./services/gatheringSpawnService";
+import { advanceHuntObjective } from "./huntService";
 
 
 const router = express.Router();
@@ -109,6 +110,155 @@ async function getResourceNodesInRange(playerId: number, centerX: number, center
   );
 
   return rows;
+}
+
+async function getHuntTargetsInRange(
+  playerId: number,
+  centerX: number,
+  centerY: number,
+  range = 3
+) {
+  const [rows]: any =
+    await db.query(
+      `
+        SELECT
+          ph.id AS party_hunt_id,
+          ph.target_map_x,
+          ph.target_map_y,
+          ph.status,
+
+          h.name AS hunt_name,
+
+          ht.id AS hunt_target_id,
+          ht.name AS target_name,
+          ht.description,
+          ht.image
+
+          FROM party_members pm
+
+          JOIN party_hunts ph
+            ON ph.party_id =
+              pm.party_id
+
+          JOIN hunt_participants hp
+            ON hp.party_hunt_id =
+              ph.id
+          AND hp.player_id =
+              pm.player_id
+
+          JOIN hunts h
+            ON h.id =
+              ph.hunt_id
+        JOIN hunt_targets ht
+          ON ht.hunt_id =
+             h.id
+
+        WHERE pm.player_id = ?
+
+          AND ph.target_revealed = 1
+
+          AND ph.status IN (
+            'revealed',
+            'engaged'
+          )
+
+          AND ph.target_map_x
+            BETWEEN ? AND ?
+
+          AND ph.target_map_y
+            BETWEEN ? AND ?
+
+        ORDER BY
+          ph.accepted_at DESC
+
+        LIMIT 1
+      `,
+      [
+        playerId,
+
+        centerX - range,
+        centerX + range,
+
+        centerY - range,
+        centerY + range
+      ]
+    );
+
+  return (rows || []).map(
+    (row: any) => {
+
+      const x =
+        Number(
+          row.target_map_x
+        );
+
+      const y =
+        Number(
+          row.target_map_y
+        );
+
+      const distance =
+        Math.abs(
+          centerX - x
+        ) +
+        Math.abs(
+          centerY - y
+        );
+
+      return {
+        id:
+          Number(
+            row.party_hunt_id
+          ),
+
+        partyHuntId:
+          Number(
+            row.party_hunt_id
+          ),
+
+        huntTargetId:
+          Number(
+            row.hunt_target_id
+          ),
+
+        name:
+          String(
+            row.target_name ||
+            "Hunt Target"
+          ),
+
+        huntName:
+          String(
+            row.hunt_name ||
+            "Hunt"
+          ),
+
+        description:
+          row.description ?? null,
+
+        image:
+          row.image ?? null,
+
+        object_type:
+          "hunt_target",
+
+        x,
+        y,
+
+        interaction_radius: 0,
+
+        distance,
+
+        inRange:
+          distance === 0,
+
+        status:
+          String(
+            row.status
+          )
+      };
+    }
+  );
 }
 
 
@@ -224,6 +374,14 @@ router.get("/world", async (req, res) => {
 
   const resourceNodes = await getResourceNodesInRange(Number(pid), player.map_x, player.map_y, 3);
 
+  const huntTargets =
+  await getHuntTargetsInRange(
+    Number(pid),
+    Number(player.map_x),
+    Number(player.map_y),
+    3
+  );
+
   // Guild ownership
   const [guilds]: any = await db.query("SELECT id,name FROM guilds");
   const guildMap: any = {};
@@ -245,253 +403,616 @@ res.send(`
   <link rel="stylesheet" href="/world.css">
   <link rel="stylesheet" href="/rest.css">
   <link rel="stylesheet" href="/ui/itemTooltip.css">
+  <link rel="stylesheet" href="/hunt-combat.css">
 </head>
 
 <body>
-<div class="world-frame">
-  <!-- TOP: Zone Name -->
-  <div class="world-head">
-    <div class="world-head-inner">
-      <div id="world-title" class="world-title">World Map</div>
+  <div class="world-frame">
+    <span class="frame-border main" aria-hidden="true"></span>
 
-      <!-- Coordinates -->
-      <div class="coords">Position: (${player.map_x}, ${player.map_y})</div>
+    <!-- TOP: Zone Name -->
+    <header class="world-head">
+      <div class="world-head-inner">
+        <div class="world-head-copy">
+          <div id="world-title" class="world-title">World Map</div>
 
-      <!-- Enter Town Button -->
-    <div class="world-actions">
-
-        <button
-            id="rest-btn"
-            class="world-action-btn"
-            onclick="openRest()">
-            Rest
-        </button>
-
-        <button
-            id="enter-town-btn"
-            class="world-action-btn"
-            style="display:none"
-            onclick="enterTown()">
-            Enter Town
-        </button>
-
-    </div>
-    </div>
-  </div>
-
-  <!-- Responsive World Layout -->
-  <div class="world-layout">
-    <!-- LEFT: Tile map -->
-    <section class="world-map-panel" aria-label="World map">
-      <div class="map-stage">
-        <div class="map-wrapper">
-          <button class="move-btn up" onclick="moveWorld('north')">⬆</button>
-          <button class="move-btn left" onclick="moveWorld('west')">⬅</button>
-
-          <div class="grid" id="Grid">
-            ${
-              Array.from({ length: 7 }).map((_, r) => {
-                const y = minY + r;
-                return Array.from({ length: 7 }).map((_, c) => {
-                  const x = minX + c;
-                  const t = tileMap[x + "," + y];
-                  if (!t) return '<div class="tile"></div>';
-
-                  const isPlayer = x === player.map_x && y === player.map_y;
-
-                  const { replaceSprite, overlays } = getTileVisualData(t, x, y, objectMap);
-
-                  const baseStyle = replaceSprite
-                    ? `style="background-image: url('${replaceSprite}');"`
-                    : "";
-
-                  return `
-                    <div
-                      class="tile ${replaceSprite ? "" : t.terrain} ${isPlayer ? "player" : ""}"
-                      data-x="${x}"
-                      data-y="${y}"
-                      ${baseStyle}
-                    >
-                      ${
-                        overlays.map((src) => `
-                          <img class="tile-overlay" src="${src}" alt="" />
-                        `).join("")
-                      }
-                    </div>
-                  `;
-                }).join("");
-              }).join("")
-            }
+          <div class="coords">
+            Position: (${player.map_x}, ${player.map_y})
           </div>
-
-          <button class="move-btn right" onclick="moveWorld('east')">➡</button>
-          <button class="move-btn down" onclick="moveWorld('south')">⬇</button>
         </div>
-      </div>
-    </section>
 
-    <!-- RIGHT: Always-visible world info -->
-    <aside class="world-sidebar" id="nav-hud" aria-label="Nearby world information">
-      <!-- Travel Log -->
-      <div class="flavor-card travel-log-card world-sidebar-card">
-        <div class="flavor-title">Travel Log</div>
-        <div class="flavor-text" id="movement-flavor">You press onward.</div>
+      <div class="world-actions">
+        <button
+          id="enter-town-btn"
+          class="world-action-btn"
+          type="button"
+          hidden
+          onclick="enterTown()"
+        >
+          Enter Town
+        </button>
+      </div>
       </div>
 
-      <!-- Current Resource -->
-      <div id="currentResourcePanel"
+      <span class="world-head-divider" aria-hidden="true"></span>
+    </header>
+
+    <!-- Responsive World Layout -->
+    <div class="world-layout">
+      <!-- LEFT: Tile Map -->
+      <section class="world-map-panel" aria-label="World map">
+        <span class="frame-border panel" aria-hidden="true"></span>
+
+        <div class="map-stage">
+          <div class="map-wrapper">
+            <button
+              class="move-btn up"
+              type="button"
+              aria-label="Move north"
+              onclick="moveWorld('north')"
+            >
+              ⬆
+            </button>
+
+            <button
+              class="move-btn left"
+              type="button"
+              aria-label="Move west"
+              onclick="moveWorld('west')"
+            >
+              ⬅
+            </button>
+
+            <div class="grid" id="Grid">
+              ${
+                Array.from({ length: 7 }).map((_, r) => {
+                  const y = minY + r;
+
+                  return Array.from({ length: 7 }).map((_, c) => {
+                    const x = minX + c;
+                    const t = tileMap[x + "," + y];
+
+                    if (!t) {
+                      return `
+                        <div
+                          class="tile"
+                          data-x="${x}"
+                          data-y="${y}"
+                        ></div>
+                      `;
+                    }
+
+                    const isPlayer =
+                      x === player.map_x &&
+                      y === player.map_y;
+
+                    const {
+                      replaceSprite,
+                      overlays
+                    } = getTileVisualData(t, x, y, objectMap);
+
+                    const baseStyle = replaceSprite
+                      ? `style="background-image: url('${replaceSprite}');"`
+                      : "";
+
+                    return `
+                      <div
+                        class="tile ${replaceSprite ? "" : t.terrain} ${
+                          isPlayer ? "player" : ""
+                        }"
+                        data-x="${x}"
+                        data-y="${y}"
+                        ${baseStyle}
+                      >
+                        ${
+                          overlays.map((src) => `
+                            <img
+                              class="tile-overlay"
+                              src="${src}"
+                              alt=""
+                              aria-hidden="true"
+                            />
+                          `).join("")
+                        }
+                      </div>
+                    `;
+                  }).join("");
+                }).join("")
+              }
+            </div>
+
+            <button
+              class="move-btn right"
+              type="button"
+              aria-label="Move east"
+              onclick="moveWorld('east')"
+            >
+              ➡
+            </button>
+
+            <button
+              class="move-btn down"
+              type="button"
+              aria-label="Move south"
+              onclick="moveWorld('south')"
+            >
+              ⬇
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Always-visible World Information -->
+      <aside
+        class="world-sidebar"
+        id="nav-hud"
+        aria-label="Nearby world information"
+      >
+<section class="field-actions-card world-sidebar-card">
+  <div class="field-actions-grid">
+
+    <button
+      id="rest-btn"
+      class="field-action frame-host"
+      type="button"
+      onclick="openRest()"
+    >
+      <span class="frame-border sub" aria-hidden="true"></span>
+
+      <span class="field-action__icon" aria-hidden="true">
+        🔥
+      </span>
+
+      <span class="field-action__copy">
+        <strong>Rest</strong>
+        <small>Recover health and spirit</small>
+      </span>
+
+      <span class="field-action__arrow" aria-hidden="true">
+        ›
+      </span>
+    </button>
+
+
+    <button
+      id="partyQuickBtn"
+      class="field-action frame-host"
+      type="button"
+      onclick="openPartyQuickView()"
+    >
+      <span class="frame-border sub" aria-hidden="true"></span>
+
+      <span class="field-action__icon" aria-hidden="true">
+        ⚔
+      </span>
+
+      <span class="field-action__copy">
+        <strong>Party</strong>
+
+        <small id="partyQuickStatus">
+          Checking company...
+        </small>
+      </span>
+
+      <span class="field-action__arrow" aria-hidden="true">
+        ›
+      </span>
+    </button>
+
+  </div>
+</section>
+
+        <!-- Travel Log -->
+        <section class="flavor-card travel-log-card world-sidebar-card">
+          <span class="frame-border sub" aria-hidden="true"></span>
+
+          <div class="flavor-title">Travel Log</div>
+
+          <div class="flavor-text" id="movement-flavor">
+            You press onward.
+          </div>
+        </section>
+        <!-- Field Actions -->
+
+        <!-- Current Resource -->
+        <!--
+          This panel is populated dynamically. Do not add a frame-border
+          child unless the rendering script preserves existing children.
+        -->
+        <section
+          id="currentResourcePanel"
           class="resource-panel world-sidebar-card"
-          hidden>
-      </div>
+          hidden
+        ></section>
 
-      <!-- Nearby -->
-      <div class="nav-card nearby-card world-sidebar-card world-sidebar-card-grow">
-        <div class="nav-top">
-          <div class="nav-title">
-            <span class="nav-icon">✦</span>
-            <span class="nav-label">Nearby</span>
-          </div>
-          <span class="nav-badge" id="nav-nearby-count">0</span>
-        </div>
+        <!-- Nearby -->
+<!-- Nearby -->
+<section class="nav-card nearby-card world-sidebar-card">
+  <span class="frame-border sub" aria-hidden="true"></span>
 
-        <div class="world-interact__list" id="worldInteractList">
-          <div class="world-interact__empty">
-            Nothing to interact with nearby.
-          </div>
-        </div>
-      </div>
+  <div class="nav-top">
+    <div class="nav-title">
+      <span class="nav-icon" aria-hidden="true">✦</span>
+      <span class="nav-label">Nearby</span>
+    </div>
 
-      <div class="world-sidebar-two">
-        <!-- Nearest Haven -->
-        <div class="nav-card world-sidebar-card">
-          <div class="nav-top">
-            <div class="nav-title">
-              <span class="nav-icon">🏠</span>
-              <span class="nav-label">Nearest Haven</span>
-            </div>
-            <span class="nav-badge" id="nav-haven-arrow">•</span>
-          </div>
-
-          <div class="nav-main">
-            <div class="nav-name" id="nav-haven-name">—</div>
-            <div class="nav-meta">
-              <span class="nav-pill" id="nav-haven-dist">— tiles</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Nearest Dungeon -->
-        <div class="nav-card world-sidebar-card">
-          <div class="nav-top">
-            <div class="nav-title">
-              <span class="nav-icon">🕳</span>
-              <span class="nav-label">Nearest Dungeon</span>
-            </div>
-            <span class="nav-badge" id="nav-dungeon-arrow">•</span>
-          </div>
-
-          <div class="nav-main">
-            <div class="nav-name" id="nav-dungeon-name">—</div>
-            <div class="nav-meta">
-              <span class="nav-pill" id="nav-dungeon-dist">—</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </aside>
+    <span class="nav-badge" id="nav-nearby-count">0</span>
   </div>
-  <!-- keep these outside the frame -->
+
+  <!-- Permanent navigation entries -->
+  <div class="nearby-destinations">
+    <div class="nearby-destination">
+      <span
+        class="nearby-destination__icon"
+        aria-hidden="true"
+      >
+        🏠
+      </span>
+
+      <div class="nearby-destination__details">
+        <div class="nearby-destination__label">
+          Nearest Haven
+        </div>
+
+        <div
+          class="nearby-destination__name"
+          id="nav-haven-name"
+        >
+          —
+        </div>
+      </div>
+
+      <div class="nearby-destination__location">
+        <span
+          class="nearby-destination__arrow"
+          id="nav-haven-arrow"
+          aria-hidden="true"
+        >
+          •
+        </span>
+
+        <span
+          class="nearby-destination__distance"
+          id="nav-haven-dist"
+        >
+          — tiles
+        </span>
+      </div>
+    </div>
+
+    <div class="nearby-destination">
+      <span
+        class="nearby-destination__icon"
+        aria-hidden="true"
+      >
+        🕳
+      </span>
+
+      <div class="nearby-destination__details">
+        <div class="nearby-destination__label">
+          Nearest Dungeon
+        </div>
+
+        <div
+          class="nearby-destination__name"
+          id="nav-dungeon-name"
+        >
+          —
+        </div>
+      </div>
+
+      <div class="nearby-destination__location">
+        <span
+          class="nearby-destination__arrow"
+          id="nav-dungeon-arrow"
+          aria-hidden="true"
+        >
+          •
+        </span>
+
+        <span
+          class="nearby-destination__distance"
+          id="nav-dungeon-dist"
+        >
+          —
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dynamic nearby objects -->
+  <div class="nearby-interactions">
+    <div class="nearby-interactions__heading">
+      Interactions
+    </div>
+
+    <div
+      class="world-interact__list"
+      id="worldInteractList"
+    >
+      <div class="world-interact__empty">
+        Nothing to interact with nearby.
+      </div>
+    </div>
+  </div>
+</section>
+
+  <!-- Keep these outside the world frame -->
   <div class="world-right">
     <div id="statpanel-root"></div>
   </div>
 
+  <!-- Party Quick View -->
+<div
+  id="partyQuickModal"
+  class="party-quick-modal hidden"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="partyQuickTitle"
+>
+  <div
+    class="party-quick-backdrop"
+    onclick="closePartyQuickView()"
+  ></div>
+
+  <section class="party-quick-card frame-host">
+    <span class="frame-border panel" aria-hidden="true"></span>
+
+    <header class="party-quick-header">
+
+      <div>
+        <div class="party-quick-kicker">
+          Adventuring Company
+        </div>
+
+        <h2 id="partyQuickTitle">
+          Your Party
+        </h2>
+      </div>
+
+      <button
+        class="party-quick-close"
+        type="button"
+        onclick="closePartyQuickView()"
+        aria-label="Close party view"
+      >
+        ✕
+      </button>
+
+    </header>
+
+
+    <div
+      id="partyQuickBody"
+      class="party-quick-body"
+    >
+      <div class="party-quick-loading">
+        Gathering your company...
+      </div>
+    </div>
+
+
+    <footer class="party-quick-footer">
+
+      <a
+        href="/party.html"
+        class="party-quick-manage"
+      >
+        Manage Party
+      </a>
+
+      <button
+        class="party-quick-dismiss"
+        type="button"
+        onclick="closePartyQuickView()"
+      >
+        Close
+      </button>
+
+    </footer>
+
+  </section>
+</div>
+
   <div id="combat-root"></div>
+  <!-- Shared Party Hunt Combat -->
+  <div id="hunt-combat-root"></div>
   <div id="rest-root"></div>
 
-  <!-- GATHERING MODAL -->
-<div id="gatheringModal" class="gathering-modal hidden">
-  <div class="gathering-modal__card">
-    <div class="gathering-modal__icon" id="gatheringModalIcon">⛏️</div>
-    <div class="gathering-modal__title" id="gatheringModalTitle">Mining...</div>
-    <div class="gathering-modal__sub" id="gatheringModalSub">Gathering resources</div>
 
-    <div class="gathering-progress">
-      <div id="gatheringProgressFill" class="gathering-progress__fill"></div>
+  <!-- Gathering Modal -->
+  <div
+    id="gatheringModal"
+    class="gathering-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="gatheringModalTitle"
+  >
+    <div class="gathering-modal__card">
+      <div
+        class="gathering-modal__icon"
+        id="gatheringModalIcon"
+        aria-hidden="true"
+      >
+        ⛏️
+      </div>
+
+      <div
+        class="gathering-modal__title"
+        id="gatheringModalTitle"
+      >
+        Mining...
+      </div>
+
+      <div
+        class="gathering-modal__sub"
+        id="gatheringModalSub"
+      >
+        Gathering resources
+      </div>
+
+      <div
+        class="gathering-progress"
+        role="progressbar"
+        aria-label="Gathering progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div
+          id="gatheringProgressFill"
+          class="gathering-progress__fill"
+        ></div>
+      </div>
     </div>
   </div>
-</div>
 
+  <!-- Loot Chest Modal -->
+  <div
+    id="lootChestModal"
+    class="loot-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Loot chest"
+  >
+    <div class="loot-panel">
+      <div id="lootChestSealed" class="loot-sealed">
+        <img
+          src="/images/chest.png"
+          id="lootChestIcon"
+          alt="Sealed loot chest"
+        />
 
-  <!-- LOOT CHEST MODAL -->
-<div id="lootChestModal" class="loot-modal hidden">
-  <div class="loot-panel">
-    <div id="lootChestSealed" class="loot-sealed">
-      <img src="/images/chest.png" id="lootChestIcon" />
-      <p>Click the chest to open</p>
+        <p>Click the chest to open</p>
+      </div>
+
+      <div id="lootChestOpened" class="loot-opened hidden">
+        <h3>Loot</h3>
+
+        <div id="lootItems"></div>
+
+        <div class="loot-actions">
+          <button
+            id="lootClaimBtn"
+            class="loot-btn primary"
+            type="button"
+          >
+            Collect
+          </button>
+
+          <button
+            id="lootCloseBtn"
+            class="loot-btn secondary"
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
-
-<div id="lootChestOpened" class="loot-opened hidden">
-  <h3>Loot</h3>
-
-  <div id="lootItems"></div>
-
-  <div class="loot-actions">
-    <button id="lootClaimBtn" class="loot-btn primary">Collect</button>
-    <button id="lootCloseBtn" class="loot-btn secondary">Close</button>
   </div>
-</div>  </div>
-</div>
 
-<div id="loreModal" class="lore-modal hidden">
-  <div class="lore-backdrop"></div>
+  <!-- Lore Modal -->
+  <div
+    id="loreModal"
+    class="lore-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="loreTitle"
+  >
+    <div class="lore-backdrop"></div>
 
-  <div class="lore-card">
-    <div class="lore-header">
-      <div id="loreTitle" class="lore-title">Discovery</div>
-      <button id="loreCloseBtn" class="lore-close-btn" type="button">✕</button>
-    </div>
+    <div class="lore-card">
+      <div class="lore-header">
+        <div id="loreTitle" class="lore-title">
+          Discovery
+        </div>
 
-    <div id="loreBody" class="lore-body"></div>
+        <button
+          id="loreCloseBtn"
+          class="lore-close-btn"
+          type="button"
+          aria-label="Close discovery"
+        >
+          ✕
+        </button>
+      </div>
 
-    <div class="lore-footer">
-      <button id="loreOkBtn" class="lore-ok-btn" type="button">Close</button>
+      <div id="loreBody" class="lore-body"></div>
+
+      <div class="lore-footer">
+        <button
+          id="loreOkBtn"
+          class="lore-ok-btn"
+          type="button"
+        >
+          Close
+        </button>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- PENDING CHEST INDICATOR -->
-<button id="pendingChestBtn" class="pending-chest hidden" title="You have unclaimed loot">
-  <img src="/images/chest.png" alt="Chest">
-  <span class="pending-chest-dot"></span>
-</button>
+  <!-- Pending Chest Indicator -->
+  <button
+    id="pendingChestBtn"
+    class="pending-chest hidden"
+    type="button"
+    title="You have unclaimed loot"
+    aria-label="Open unclaimed loot"
+  >
+    <img src="/images/chest.png" alt="" aria-hidden="true" />
+    <span class="pending-chest-dot" aria-hidden="true"></span>
+  </button>
+
+  <!-- Quest Tracker -->
+  <aside
+    id="questTracker"
+    class="qtracker hidden"
+    aria-label="Tracked quest"
+  >
+    <div class="qtrackerHead">
+      <div class="qtrackerTitle" id="qtTitle">
+        Tracking
+      </div>
+
+      <div class="qtrackerBtns">
+        <button
+          id="qtMinBtn"
+          class="qtrackerBtn"
+          type="button"
+          title="Minimize"
+          aria-label="Minimize quest tracker"
+        >
+          —
+        </button>
+      </div>
+    </div>
+
+    <div class="qtrackerBody" id="qtBody">—</div>
+  </aside>
+
+  <link rel="stylesheet" href="/statpanel.css" />
+  <link rel="stylesheet" href="/ui/toast.css" />
+
   <script src="/ui/itemTooltip.js"></script>
   <script src="/lootChest.js"></script>
-  <link rel="stylesheet" href="/statpanel.css">
-  <link rel="stylesheet" href="/ui/toast.css">
+
   <script>
-    window.__RESOURCE_NODES__ = ${JSON.stringify(resourceNodes)};
+    window.__RESOURCE_NODES__ =
+      ${JSON.stringify(resourceNodes)};
+
+    window.__HUNT_TARGETS__ =
+      ${JSON.stringify(huntTargets)};
   </script>
+
   <script src="/ui/toast.js"></script>
   <script src="/statpanel.js"></script>
   <script src="/world.page.js" defer></script>
-
-<!-- QUEST TRACKER (hidden until a quest is tracked) -->
-<div id="questTracker" class="qtracker hidden">
-  <div class="qtrackerHead">
-    <div class="qtrackerTitle" id="qtTitle">Tracking</div>
-    <div class="qtrackerBtns">
-      <button id="qtMinBtn" class="qtrackerBtn" title="Minimize">—</button>
-    </div>
-  </div>
-  <div class="qtrackerBody" id="qtBody">—</div>
-</div>
-
   <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>
-  <script defer src="/rest.js"></script>
+  <script src="/hunt-combat.js"></script>
+  <script src="/rest.js" defer></script>
 </body>
-
 
 
 </html>
@@ -634,6 +1155,73 @@ const [dx, dy] = directions[dir];
 const newX = Number(player.map_x) + dx;
 const newY = Number(player.map_y) + dy;
 
+const [huntClueRows]: any =
+  await db.query(
+    `
+      SELECT
+        phc.id,
+        phc.map_x,
+        phc.map_y,
+
+        hc.name,
+        hc.description,
+        hc.icon,
+
+        ph.id AS party_hunt_id,
+        h.name AS hunt_name
+
+      FROM party_members pm
+
+      JOIN party_hunts ph
+        ON ph.party_id =
+           pm.party_id
+
+      JOIN hunt_participants hp
+        ON hp.party_hunt_id =
+           ph.id
+       AND hp.player_id =
+           pm.player_id
+
+      JOIN party_hunt_clues phc
+        ON phc.party_hunt_id =
+           ph.id
+
+      JOIN hunt_clues hc
+        ON hc.id =
+           phc.hunt_clue_id
+
+      JOIN hunts h
+        ON h.id =
+           ph.hunt_id
+
+      WHERE pm.player_id = ?
+
+        AND ph.status IN (
+          'tracking',
+          'revealed',
+          'engaged'
+        )
+
+        AND phc.is_investigated = 0
+
+        AND phc.map_x
+          BETWEEN ? AND ?
+
+        AND phc.map_y
+          BETWEEN ? AND ?
+
+      ORDER BY
+        phc.id ASC
+    `,
+    [
+      pid,
+      newX - 3,
+      newX + 3,
+      newY - 3,
+      newY + 3
+    ]
+  );
+
 const [[tile]]: any = await db.query(
   `
   SELECT
@@ -660,12 +1248,58 @@ await db.query(
   [newX, newY, pid]
 );
 
-const spawnedResourceNode = await maybeSpawnResourceNodeForPlayer(pid);
-const resourceNodes = await getResourceNodesInRange(pid, newX, newY, 3);
-const enterAreaResult = await applyEnterAreaProgress(pid, tile.region_id ?? null);
+const spawnedResourceNode =
+  await maybeSpawnResourceNodeForPlayer(
+    pid
+  );
+
+const resourceNodes =
+  await getResourceNodesInRange(
+    pid,
+    newX,
+    newY,
+    3
+  );
+
+const huntTargets =
+  await getHuntTargetsInRange(
+    Number(pid),
+    newX,
+    newY,
+    3
+  );
+
+const enterAreaResult =
+  await applyEnterAreaProgress(
+    pid,
+    tile.region_id ?? null
+  );
+let huntProgress = null;
+
+try {
+  huntProgress =
+    await advanceHuntObjective(
+      Number(pid),
+      {
+        type: "ENTER_REGION",
+        regionId:
+          tile.region_id !== null &&
+          tile.region_id !== undefined
+            ? Number(tile.region_id)
+            : undefined
+      }
+    );
+} catch (err) {
+  console.warn(
+    "Hunt ENTER_REGION progress failed",
+    err
+  );
+}
 const playerLevel = Number(player.level ?? 1);
 const levelMin = Number(tile.level_min ?? 1);
 const levelMax = Number(tile.level_max ?? levelMin);
+
+
 
 const difficulty =
   playerLevel < levelMin ? "hard" :
@@ -783,6 +1417,70 @@ const nearbyObjects = worldObjects.map((r: any) => {
   };
 });
 
+const nearbyHuntClues =
+  (huntClueRows || []).map(
+    (r: any) => {
+
+      const distance =
+        Math.abs(
+          newX -
+          Number(r.map_x)
+        ) +
+        Math.abs(
+          newY -
+          Number(r.map_y)
+        );
+
+      return {
+        id:
+          Number(r.id),
+
+        name:
+          String(
+            r.name ||
+            "Unknown Clue"
+          ),
+
+        object_type:
+          "hunt_clue",
+
+        region_name:
+          null,
+
+        x:
+          Number(r.map_x),
+
+        y:
+          Number(r.map_y),
+
+        interaction_radius:
+          0,
+
+        inRange:
+          distance === 0,
+
+        distance,
+
+        icon:
+          r.icon || "🐾",
+
+        description:
+          r.description ?? null,
+
+        partyHuntId:
+          Number(
+            r.party_hunt_id
+          ),
+
+        huntName:
+          String(
+            r.hunt_name ||
+            "Hunt"
+          )
+      };
+    }
+  );
+
   return res.json({
     success: true,
     pos: { x: newX, y: newY },
@@ -801,19 +1499,32 @@ const nearbyObjects = worldObjects.map((r: any) => {
       enterArea: enterAreaResult
     },
 
+    huntProgress,
+
     inCombat: !!enemy,
     enemy,
 
     // Bundled — replaces separate /world/partial fetch
-    world: {
-      player: { map_x: newX, map_y: newY },
-      tiles,
-      worldObjects,
-      resourceNodes
-    },
+world: {
+  player: {
+    map_x: newX,
+    map_y: newY
+  },
+
+  tiles,
+  worldObjects,
+  resourceNodes,
+
+  huntClues: nearbyHuntClues,
+  huntTargets
+},
 
     // Bundled — replaces separate /api/world/nearby-objects fetch
-    nearbyObjects,
+nearbyObjects: [
+  ...nearbyObjects,
+  ...nearbyHuntClues,
+  ...huntTargets
+],
 
     // Bundled — replaces separate /world/current-region fetch
     regionData: tile.region_id ? {
@@ -833,119 +1544,601 @@ const nearbyObjects = worldObjects.map((r: any) => {
 
 router.get("/api/world/nearby-objects", async (req, res) => {
   try {
-    const pid = (req.session as any)?.playerId;
-    if (!pid) return res.status(401).json({ error: "not_logged_in" });
+    const pid =
+      (req.session as any)?.playerId;
 
-    const [[player]]: any = await db.query(
+    if (!pid) {
+      return res
+        .status(401)
+        .json({
+          error: "not_logged_in"
+        });
+    }
+
+    const [[player]]: any =
+      await db.query(
+        `
+          SELECT
+            map_x,
+            map_y
+
+          FROM players
+
+          WHERE id = ?
+
+          LIMIT 1
+        `,
+        [pid]
+      );
+
+    if (!player) {
+      return res
+        .status(404)
+        .json({
+          error: "player_not_found"
+        });
+    }
+
+    const px =
+      Number(player.map_x);
+
+    const py =
+      Number(player.map_y);
+
+
+    /* =========================================
+       NORMAL WORLD OBJECTS
+    ========================================= */
+
+    const [rows]: any =
+      await db.query(
+        `
+          SELECT
+            id,
+            name,
+            object_type,
+            region_name,
+            x,
+            y,
+            interaction_radius,
+            is_active,
+            icon,
+            lore_title,
+            lore_text
+
+          FROM world_objects
+
+          WHERE is_active = 1
+            AND x BETWEEN ? AND ?
+            AND y BETWEEN ? AND ?
+
+          ORDER BY id ASC
+        `,
+        [
+          px - 3,
+          px + 3,
+          py - 3,
+          py + 3
+        ]
+      );
+
+
+    const objects =
+      (rows || []).map(
+        (r: any) => {
+
+          const dist =
+            Math.abs(
+              px - Number(r.x)
+            ) +
+            Math.abs(
+              py - Number(r.y)
+            );
+
+          const radius =
+            Math.max(
+              0,
+              Number(
+                r.interaction_radius
+              ) || 1
+            );
+
+          return {
+            id:
+              Number(r.id),
+
+            name:
+              String(
+                r.name ||
+                "Unknown Object"
+              ),
+
+            object_type:
+              String(
+                r.object_type ||
+                "quest"
+              ),
+
+            region_name:
+              r.region_name ?? null,
+
+            x:
+              Number(r.x),
+
+            y:
+              Number(r.y),
+
+            interaction_radius:
+              radius,
+
+            inRange:
+              dist <= radius,
+
+            distance:
+              dist,
+
+            icon:
+              r.icon ?? null
+          };
+        }
+      );
+
+
+    /* =========================================
+       ACTIVE HUNT CLUES
+    ========================================= */
+
+    const [huntClueRows]: any =
+      await db.query(
+        `
+          SELECT
+            phc.id,
+            phc.map_x,
+            phc.map_y,
+
+            hc.name,
+            hc.description,
+            hc.icon,
+
+            ph.id AS party_hunt_id,
+            h.name AS hunt_name
+
+          FROM party_members pm
+
+          JOIN party_hunts ph
+            ON ph.party_id =
+               pm.party_id
+
+          JOIN hunt_participants hp
+            ON hp.party_hunt_id =
+               ph.id
+           AND hp.player_id =
+               pm.player_id
+
+          JOIN party_hunt_clues phc
+            ON phc.party_hunt_id =
+               ph.id
+
+          JOIN hunt_clues hc
+            ON hc.id =
+               phc.hunt_clue_id
+
+          JOIN hunts h
+            ON h.id =
+               ph.hunt_id
+
+          WHERE pm.player_id = ?
+
+            AND ph.status IN (
+              'tracking',
+              'revealed',
+              'engaged'
+            )
+
+            AND phc.is_investigated = 0
+
+            AND phc.map_x
+              BETWEEN ? AND ?
+
+            AND phc.map_y
+              BETWEEN ? AND ?
+
+          ORDER BY
+            phc.id ASC
+        `,
+        [
+          pid,
+          px - 3,
+          px + 3,
+          py - 3,
+          py + 3
+        ]
+      );
+
+
+    const huntClues =
+      (huntClueRows || []).map(
+        (r: any) => {
+
+          const dist =
+            Math.abs(
+              px -
+              Number(r.map_x)
+            ) +
+            Math.abs(
+              py -
+              Number(r.map_y)
+            );
+
+          return {
+            id:
+              Number(r.id),
+
+            name:
+              String(
+                r.name ||
+                "Unknown Clue"
+              ),
+
+            object_type:
+              "hunt_clue",
+
+            region_name:
+              null,
+
+            x:
+              Number(r.map_x),
+
+            y:
+              Number(r.map_y),
+
+            /*
+             * Player must stand directly
+             * on the clue.
+             */
+            interaction_radius:
+              0,
+
+            inRange:
+              dist === 0,
+
+            distance:
+              dist,
+
+            icon:
+              r.icon ?? "🐾",
+
+            description:
+              r.description ?? null,
+
+            partyHuntId:
+              Number(
+                r.party_hunt_id
+              ),
+
+            huntName:
+              String(
+                r.hunt_name ||
+                "Hunt"
+              )
+          };
+        }
+      );
+
+      const huntTargets =
+  await getHuntTargetsInRange(
+    Number(pid),
+    px,
+    py,
+    3
+  );
+
+
+    /* =========================================
+       RESPONSE
+    ========================================= */
+
+    return res.json({
+      success: true,
+
+      player: {
+        x: px,
+        y: py
+      },
+
+      objects: [
+      ...objects,
+      ...huntClues,
+      ...huntTargets
+    ]
+    });
+
+  } catch (err) {
+
+    console.error(
+      "🔥 GET /api/world/nearby-objects ERROR:",
+      err
+    );
+
+    return res
+      .status(500)
+      .json({
+        error: "server_error"
+      });
+  }
+});
+
+// =======================
+// WORLD PARTIAL
+// =======================
+
+router.get("/world/partial", async (req, res) => {
+  const pid =
+    (req.session as any).playerId;
+
+  if (!pid) {
+    return res.status(401).json({
+      error: "Not logged in"
+    });
+  }
+
+  const [[player]]: any =
+    await db.query(
       `
-      SELECT map_x, map_y
-      FROM players
-      WHERE id=?
-      LIMIT 1
+        SELECT
+          map_x,
+          map_y
+
+        FROM players
+
+        WHERE id = ?
+
+        LIMIT 1
       `,
       [pid]
     );
 
-    if (!player) return res.status(404).json({ error: "player_not_found" });
+  if (!player) {
+    return res.status(404).json({
+      error: "Player not found"
+    });
+  }
 
-    const px = Number(player.map_x);
-    const py = Number(player.map_y);
+  const px =
+    Number(player.map_x);
 
-    const [rows]: any = await db.query(
+  const py =
+    Number(player.map_y);
+
+  const minX = px - 3;
+  const maxX = px + 3;
+  const minY = py - 3;
+  const maxY = py + 3;
+
+
+  /* =========================================
+     WORLD OBJECTS
+  ========================================= */
+
+  const [worldObjects]: any =
+    await db.query(
       `
-      SELECT
-        id,
-        name,
-        object_type,
-        region_name,
-        x,
-        y,
-        interaction_radius,
-        is_active,
-        icon,
-        lore_title,
-        lore_text
-      FROM world_objects
-      WHERE is_active = 1
-        AND x BETWEEN ? AND ?
-        AND y BETWEEN ? AND ?
-      ORDER BY id ASC
+        SELECT
+          id,
+          name,
+          x,
+          y,
+          tile_sprite,
+          tile_visual_type,
+          z_index
+
+        FROM world_objects
+
+        WHERE is_active = 1
+          AND x BETWEEN ? AND ?
+          AND y BETWEEN ? AND ?
+
+        ORDER BY
+          z_index ASC,
+          id ASC
       `,
-      [px - 3, px + 3, py - 3, py + 3]
+      [
+        minX,
+        maxX,
+        minY,
+        maxY
+      ]
     );
 
-    const objects = (rows || []).map((r: any) => {
-      const dist = Math.abs(px - Number(r.x)) + Math.abs(py - Number(r.y));
-      const radius = Math.max(0, Number(r.interaction_radius) || 1);
 
-      return {
-        id: Number(r.id),
-        name: String(r.name || "Unknown Object"),
-        object_type: String(r.object_type || "quest"),
-        region_name: r.region_name ?? null,
-        x: Number(r.x),
-        y: Number(r.y),
-        interaction_radius: radius,
-        inRange: dist <= radius,
-        distance: dist,
-        icon: r.icon ?? null
-      };
-    });
+  /* =========================================
+     WORLD TILES
+  ========================================= */
 
-    res.json({
-      success: true,
-      player: { x: px, y: py },
-      objects
-    });
-  } catch (err) {
-    console.error("🔥 GET /api/world/nearby-objects ERROR:", err);
-    res.status(500).json({ error: "server_error" });
-  }
-});
+  const [tiles]: any =
+    await db.query(
+      `
+        SELECT *
 
-//WORLD PARTIAL
+        FROM world_map
 
-router.get("/world/partial", async (req, res) => {
-  const pid = (req.session as any).playerId;
-  if (!pid) return res.status(401).json({ error: "Not logged in" });
+        WHERE x BETWEEN ? AND ?
+          AND y BETWEEN ? AND ?
+      `,
+      [
+        minX,
+        maxX,
+        minY,
+        maxY
+      ]
+    );
 
-  const [[player]]: any = await db.query(
-    "SELECT map_x, map_y FROM players WHERE id=?",
-    [pid]
+
+  /* =========================================
+     RESOURCE NODES
+  ========================================= */
+
+  const resourceNodes =
+    await getResourceNodesInRange(
+      Number(pid),
+      px,
+      py,
+      3
+    );
+
+const huntTargets =
+  await getHuntTargetsInRange(
+    Number(pid),
+    px,
+    py,
+    3
   );
 
-  const minX = player.map_x - 3;
-  const minY = player.map_y - 3;
+  /* =========================================
+     ACTIVE HUNT CLUES
+  ========================================= */
 
-    const [worldObjects]: any = await db.query(`
-    SELECT
-      id,
-      name,
-      x,
-      y,
-      tile_sprite,
-      tile_visual_type,
-      z_index
-    FROM world_objects
-    WHERE is_active = 1
-      AND x BETWEEN ? AND ?
-      AND y BETWEEN ? AND ?
-  `, [minX, player.map_x + 3, minY, player.map_y + 3]);
+  const [huntClueRows]: any =
+    await db.query(
+      `
+        SELECT
+          phc.id,
+          phc.map_x,
+          phc.map_y,
 
-  const [tiles]: any = await db.query(`
-    SELECT *
-    FROM world_map
-    WHERE x BETWEEN ? AND ?
-      AND y BETWEEN ? AND ?
-  `, [minX, player.map_x + 3, minY, player.map_y + 3]);
+          hc.name,
+          hc.description,
+          hc.icon,
 
-  const resourceNodes = await getResourceNodesInRange(Number(pid), player.map_x, player.map_y, 3);
+          ph.id AS party_hunt_id,
+          h.name AS hunt_name
 
-  res.json({
+        FROM party_members pm
+
+        JOIN party_hunts ph
+          ON ph.party_id =
+             pm.party_id
+
+        JOIN hunt_participants hp
+          ON hp.party_hunt_id =
+             ph.id
+         AND hp.player_id =
+             pm.player_id
+
+        JOIN party_hunt_clues phc
+          ON phc.party_hunt_id =
+             ph.id
+
+        JOIN hunt_clues hc
+          ON hc.id =
+             phc.hunt_clue_id
+
+        JOIN hunts h
+          ON h.id =
+             ph.hunt_id
+
+        WHERE pm.player_id = ?
+
+          AND ph.status IN (
+            'tracking',
+            'revealed',
+            'engaged'
+          )
+
+          AND phc.is_investigated = 0
+
+          AND phc.map_x
+            BETWEEN ? AND ?
+
+          AND phc.map_y
+            BETWEEN ? AND ?
+
+        ORDER BY
+          phc.id ASC
+      `,
+      [
+        pid,
+        minX,
+        maxX,
+        minY,
+        maxY
+      ]
+    );
+
+
+  const huntClues =
+    (huntClueRows || []).map(
+      (row: any) => {
+
+        const distance =
+          Math.abs(
+            px -
+            Number(row.map_x)
+          ) +
+          Math.abs(
+            py -
+            Number(row.map_y)
+          );
+
+        return {
+          id:
+            Number(row.id),
+
+          name:
+            String(
+              row.name ||
+              "Unknown Clue"
+            ),
+
+          object_type:
+            "hunt_clue",
+
+          x:
+            Number(row.map_x),
+
+          y:
+            Number(row.map_y),
+
+          distance,
+
+          inRange:
+            distance === 0,
+
+          interaction_radius:
+            0,
+
+          icon:
+            row.icon || "🐾",
+
+          description:
+            row.description ?? null,
+
+          partyHuntId:
+            Number(
+              row.party_hunt_id
+            ),
+
+          huntName:
+            String(
+              row.hunt_name ||
+              "Hunt"
+            )
+        };
+      }
+    );
+
+
+  /* =========================================
+     RESPONSE
+  ========================================= */
+
+  return res.json({
     player,
     tiles,
     worldObjects,
-    resourceNodes
+    resourceNodes,
+    huntClues,
+    huntTargets
   });
 });
 

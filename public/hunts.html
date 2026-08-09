@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <link
+    rel="preconnect"
+    href="https://fonts.googleapis.com"
+  >
+
+  <link
+    rel="preconnect"
+    href="https://fonts.gstatic.com"
+    crossorigin
+  >
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap"
+    rel="stylesheet"
+  >
+
+  <title>Guildforge | Hunt Board</title>
+
+  <link
+    rel="stylesheet"
+    href="/hunts.css"
+  >
+
+  <link
+    rel="stylesheet"
+    href="/statpanel.css"
+  >
+</head>
+
+<body>
+
+  <main class="hunts-page">
+
+    <section class="hunts-shell main-frame">
+
+      <!-- =========================================
+           HERO
+      ========================================== -->
+
+      <section class="hunts-hero panel-frame">
+
+        <div class="hunts-hero__content">
+
+          <div class="hunts-kicker">
+            <span></span>
+            Contracts & Quarry
+            <span></span>
+          </div>
+
+          <h1>Hunt Board</h1>
+
+          <p>
+            Dangerous creatures stalk the wilds beyond the havens.
+            Gather your company, take up a contract, and follow the trail.
+          </p>
+
+          <div
+            id="hunt-party-summary"
+            class="hunt-party-summary"
+          >
+            Checking your company...
+          </div>
+
+        </div>
+
+        <a
+          href="/town"
+          class="hunts-return-btn button-frame"
+        >
+          Return to Town
+          <span>›</span>
+        </a>
+
+      </section>
+
+
+      <!-- =========================================
+           MAIN LAYOUT
+      ========================================== -->
+
+      <div class="hunts-layout">
+
+
+        <!-- =========================================
+             AVAILABLE HUNTS
+        ========================================== -->
+
+        <section class="hunt-board panel-frame">
+
+          <div class="section-heading">
+
+            <div>
+              <h2>Available Contracts</h2>
+
+              <p>
+                Choose a quarry worthy of your company.
+              </p>
+            </div>
+
+            <span
+              id="available-hunt-count"
+              class="section-badge"
+            >
+              —
+            </span>
+
+          </div>
+
+          <div
+            id="hunt-list"
+            class="hunt-list"
+          >
+            <div class="hunt-loading">
+              Reading the board...
+            </div>
+          </div>
+
+        </section>
+
+
+        <!-- =========================================
+             RIGHT COLUMN
+        ========================================== -->
+
+        <aside class="hunts-side">
+
+
+          <!-- ACTIVE HUNT -->
+
+          <section class="active-hunt-panel panel-frame">
+
+            <div class="section-heading">
+
+              <div>
+                <h2>Active Hunt</h2>
+
+                <p>
+                  Your party's current quarry.
+                </p>
+              </div>
+
+            </div>
+
+            <div id="active-hunt">
+
+              <div class="active-hunt-empty">
+                <div class="active-hunt-empty__icon">
+                  🐾
+                </div>
+
+                <strong>No Active Hunt</strong>
+
+                <p>
+                  No quarry currently bears your party's mark.
+                  Choose a contract from the Hunt Board to begin the pursuit.
+                </p>
+              </div>
+
+            </div>
+
+          </section>
+
+
+          <!-- HUNT RULES -->
+
+          <section class="hunt-rules panel-frame">
+
+            <div class="section-heading">
+
+              <div>
+                <h2>Huntmaster's Notes</h2>
+
+                <p>
+                  Before taking up a contract.
+                </p>
+              </div>
+
+            </div>
+
+            <div class="hunt-rule-list">
+
+              <div class="hunt-rule">
+                <span>⚔</span>
+
+                <div>
+                  <strong>Party Hunt</strong>
+                  <p>
+                    A Hunt belongs to your entire adventuring company.
+                  </p>
+                </div>
+              </div>
+
+              <div class="hunt-rule">
+                <span>👑</span>
+
+                <div>
+                  <strong>Leader's Authority</strong>
+                  <p>
+                    Only the party leader may accept or abandon a contract.
+                  </p>
+                </div>
+              </div>
+
+              <div class="hunt-rule">
+                <span>🐾</span>
+
+                <div>
+                  <strong>Track the Quarry</strong>
+                  <p>
+                    Complete objectives in the wild to uncover the target.
+                  </p>
+                </div>
+              </div>
+
+            </div>
+
+          </section>
+
+        </aside>
+
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <!-- =========================================
+       GLOBAL STAT PANEL
+  ========================================== -->
+
+  <div class="hunts-right">
+    <div id="statpanel-root"></div>
+  </div>
+
+
+  <script src="/statpanel.js"></script>
+  <script src="/hunts.js"></script>
+
+</body>
+
+</html>

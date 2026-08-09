@@ -53,10 +53,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("en-US").format(Number(n || 0));
-}
-
 function getHealCost(level: number) {
   if (level <= 3) return 5;
   return Math.max(10, Math.floor(level * 4));
@@ -175,16 +171,20 @@ res.send(`
   </audio>
 
   <main class="sanctuary-page">
-    <div class="sanctuary-shell">
+    <div class="sanctuary-shell frame-host">
+  <span class="frame-border main" aria-hidden="true"></span>
 
       <section class="sanctuary-hero">
         <div class="hero-title">
           <div class="hero-icon">⛪</div>
+
           <div>
             <h1>Sanctuary of Light</h1>
             <p>A place where the dying linger, and the faithful are restored.</p>
           </div>
         </div>
+
+        <span class="hero-divider-center" aria-hidden="true"></span>
 
         <div class="hero-actions">
           <a class="btn danger" href="/town">Return to Town</a>
@@ -193,7 +193,8 @@ res.send(`
 
       <section class="sanctuary-grid">
 
-        <div class="card">
+        <div class="card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
           <div class="cardHeader">
             <div class="cardTitle">
               <h2>Church Services</h2>
@@ -204,7 +205,9 @@ res.send(`
 
           <div class="cardBody">
 
-            <div class="storyBox">
+            <div class="storyBox frame-host">
+              <span class="frame-border sub" aria-hidden="true"></span>
+
               <p class="storyText">
                 <i>"Kneel, and let the ember-lanterns burn your wounds away. The Sanctuary asks only a coin... or your patience."</i>
               </p>
@@ -214,56 +217,82 @@ res.send(`
 
             <div class="serviceList">
 
-              <div class="serviceTile">
+              <div class="serviceTile frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="serviceIcon">❤️</div>
+
                 <div class="serviceLabel">
                   <strong>Restore Health</strong>
                   <span>${healHint}</span>
                 </div>
+
                 <form method="POST" action="/church/heal">
-                  <button class="btn ${healDisabled ? "disabled" : "primary"}" ${healDisabled ? "disabled" : ""}>
+                  <button
+                    class="btn ${healDisabled ? "disabled" : "primary"}"
+                    ${healDisabled ? "disabled" : ""}
+                  >
                     Heal (${healCost}g)
                   </button>
                 </form>
               </div>
 
-              <div class="serviceTile">
+              <div class="serviceTile frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="serviceIcon">✨</div>
+
                 <div class="serviceLabel">
                   <strong>Restore Spirit</strong>
                   <span>${restoreHint}</span>
                 </div>
+
                 <form method="POST" action="/church/restore">
-                  <button class="btn ${restoreDisabled ? "disabled" : "primary"}" ${restoreDisabled ? "disabled" : ""}>
+                  <button
+                    class="btn ${restoreDisabled ? "disabled" : "primary"}"
+                    ${restoreDisabled ? "disabled" : ""}
+                  >
                     Restore (${restoreCost}g)
                   </button>
                 </form>
               </div>
 
-              <div class="serviceTile isLocked">
+              <div class="serviceTile isLocked frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="serviceIcon">🕊️</div>
+
                 <div class="serviceLabel">
                   <strong>Blessings</strong>
                   <span>Temporary boons for your next venture.</span>
                 </div>
+
                 <button class="btn disabled" disabled>Coming Soon</button>
               </div>
 
-              <div class="serviceTile isLocked">
+              <div class="serviceTile isLocked frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="serviceIcon">🧿</div>
+
                 <div class="serviceLabel">
                   <strong>Purification</strong>
                   <span>Cleanse curses and corruption.</span>
                 </div>
+
                 <button class="btn disabled" disabled>Coming Soon</button>
               </div>
 
-              <div class="serviceTile isLocked">
+              <div class="serviceTile isLocked frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="serviceIcon">📿</div>
+
                 <div class="serviceLabel">
                   <strong>Donate</strong>
                   <span>Support the Sanctuary. Unlock favor later.</span>
                 </div>
+
                 <button class="btn disabled" disabled>Coming Soon</button>
               </div>
 
@@ -277,7 +306,8 @@ res.send(`
         </div>
 
         <aside class="right-stack">
-          <div class="card ${isDead ? "isDanger" : "isMuted"}">
+          <div class="card ${isDead ? "isDanger" : "isMuted"} frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Revival</h2>
@@ -287,7 +317,8 @@ res.send(`
             </div>
 
             <div class="cardBody">
-              <div class="reviveBox">
+              <div class="reviveBox frame-host">
+              <span class="frame-border sub" aria-hidden="true"></span>
                 <div class="reviveRow">
                   <div>
                     <div class="reviveTitle">🕯️ Revival Blessing</div>
@@ -334,7 +365,8 @@ res.send(`
             </div>
           </div>
 
-                    <div class="card reputation-card">
+          <div class="card reputation-card frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Sanctuary Reputation</h2>
@@ -364,42 +396,50 @@ res.send(`
               <div class="divider"></div>
 
               <div class="repRanks">
-                <div class="repRankRow active">
+                <div class="repRankRow active frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Pilgrim</span>
                   <small>Entry rank. Sanctuary services unlocked.</small>
                 </div>
 
-                <div class="repRankRow">
+                <div class="repRankRow frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Acolyte</span>
                   <small>Minor healing discounts.</small>
                 </div>
 
-                <div class="repRankRow">
+                <div class="repRankRow frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Disciple</span>
                   <small>Basic blessings become available.</small>
                 </div>
 
-                <div class="repRankRow">
+                <div class="repRankRow frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Devotee</span>
                   <small>Improved discounts and stronger boons.</small>
                 </div>
 
-                <div class="repRankRow">
+                <div class="repRankRow frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Oathbound</span>
                   <small>Unlocks purification services.</small>
                 </div>
 
-                <div class="repRankRow">
+                <div class="repRankRow frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Anointed</span>
                   <small>Reduced revival cost.</small>
                 </div>
 
-                <div class="repRankRow">
+                <div class="repRankRow frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Radiant</span>
                   <small>Advanced Sanctuary blessings.</small>
                 </div>
 
-                <div class="repRankRow">
+                <div class="repRankRow frame-host">
+                  <span class="frame-border sub" aria-hidden="true"></span>
                   <span>Ascendant</span>
                   <small>Highest favor with the Sanctuary.</small>
                 </div>

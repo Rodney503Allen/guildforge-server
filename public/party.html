@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Party | Guildforge</title>
+
+  <!-- =========================================
+       GLOBAL STYLES
+  ========================================== -->
+
+  <link
+    rel="stylesheet"
+    href="/statpanel.css"
+  >
+
+  <!-- =========================================
+       PARTY STYLES
+  ========================================== -->
+
+  <link
+    rel="stylesheet"
+    href="/party.css"
+  >
+</head>
+
+
+<body>
+
+  <!-- =========================================
+       GLOBAL STAT PANEL
+  ========================================== -->
+
+  <div id="statpanel-root"></div>
+
+
+  <!-- =========================================
+       PARTY PAGE
+  ========================================== -->
+
+  <main class="party-page">
+
+    <section class="party-shell main-frame">
+
+
+      <!-- =========================================
+           HERO
+      ========================================== -->
+
+<section class="party-hero panel-frame">
+
+  <div class="party-hero__content">
+
+    <div class="party-kicker">
+      <span></span>
+      Adventuring Company
+      <span></span>
+    </div>
+
+    <h1>Party</h1>
+
+    <p>
+      Steel holds stronger when carried together.
+      Gather your companions before facing the wilds.
+    </p>
+
+    <div
+      id="party-summary"
+      class="party-summary"
+    >
+    </div>
+
+  </div>
+
+  <a
+    href="/tavern.html"
+    class="party-return-btn button-frame"
+  >
+    Return to Tavern
+    <span>›</span>
+  </a>
+
+</section>
+
+
+      <!-- =========================================
+           INVITES
+      ========================================== -->
+
+      <section
+        id="party-invites-section"
+        class="party-invites-section panel-frame hidden"
+      >
+
+        <div class="section-heading">
+
+          <div>
+            <h2>Pending Invitations</h2>
+
+            <p>
+              Adventurers seeking your company.
+            </p>
+          </div>
+
+        </div>
+
+        <div
+          id="party-invites"
+          class="invite-list"
+        ></div>
+
+      </section>
+
+
+      <!-- =========================================
+           MAIN GRID
+      ========================================== -->
+
+      <div class="party-layout">
+
+
+        <!-- =========================================
+             LEFT COLUMN
+        ========================================== -->
+
+        <section class="party-main panel-frame">
+
+          <div class="section-heading">
+
+            <div>
+              <h2>Party Roster</h2>
+
+              <p>
+                Those currently bound to your company.
+              </p>
+            </div>
+
+          </div>
+
+
+          <!-- =========================================
+               EMPTY STATE
+          ========================================== -->
+
+          <div
+            id="party-empty"
+            class="party-empty hidden"
+          >
+
+            <div class="empty-emblem">
+              ⚔
+            </div>
+
+            <h3>No Active Party</h3>
+
+            <p>
+              The road is dangerous alone.
+              Form a party and gather fellow adventurers
+              before venturing into dangerous territory.
+            </p>
+
+            <button
+              id="create-party-btn"
+              class="primary-btn button-frame"
+              type="button"
+            >
+              Create Party
+            </button>
+
+          </div>
+
+
+          <!-- =========================================
+               PARTY ROSTER
+          ========================================== -->
+
+          <div
+            id="party-roster"
+            class="party-roster"
+          ></div>
+
+        </section>
+
+
+        <!-- =========================================
+             RIGHT COLUMN
+        ========================================== -->
+
+        <aside class="party-side">
+
+
+          <!-- =========================================
+               INVITE PLAYER
+          ========================================== -->
+
+          <section
+            id="invite-panel"
+            class="side-panel panel-frame hidden"
+          >
+
+            <div class="side-heading">
+
+              <div>
+                <h2>Invite Adventurer</h2>
+
+                <p>
+                  Search for another player.
+                </p>
+              </div>
+
+            </div>
+
+            <div class="player-search">
+
+              <input
+                id="party-player-search"
+                type="text"
+                maxlength="32"
+                autocomplete="off"
+                placeholder="Search player name..."
+              >
+
+            </div>
+
+            <div
+              id="party-search-results"
+              class="search-results"
+            >
+
+              <div class="search-hint">
+                Enter at least two characters.
+              </div>
+
+            </div>
+
+          </section>
+
+
+          <!-- =========================================
+               PARTY LEDGER
+          ========================================== -->
+
+          <section class="side-panel panel-frame">
+
+            <div class="side-heading">
+
+              <div>
+                <h2>📖 Party Ledger</h2>
+
+                <p>
+                  Your current company.
+                </p>
+              </div>
+
+            </div>
+
+            <div
+              id="party-ledger"
+              class="ledger-card"
+            >
+
+              <div class="ledger-empty">
+                No company has been formed.
+              </div>
+
+            </div>
+
+          </section>
+
+
+          <!-- =========================================
+               PARTY ACTIONS
+          ========================================== -->
+
+          <section
+            id="party-actions"
+            class="side-panel panel-frame hidden"
+          >
+
+            <div class="side-heading">
+
+              <div>
+                <h2>Party Actions</h2>
+
+                <p>
+                  Manage your company.
+                </p>
+              </div>
+
+            </div>
+
+            <div class="party-actions">
+
+              <button
+                id="leave-party-btn"
+                class="secondary-btn button-frame"
+                type="button"
+              >
+                Leave Party
+              </button>
+
+              <button
+                id="disband-party-btn"
+                class="danger-btn button-frame hidden"
+                type="button"
+              >
+                Disband Party
+              </button>
+
+            </div>
+
+          </section>
+
+        </aside>
+
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <!-- =========================================
+       GLOBAL STAT PANEL
+  ========================================== -->
+
+  <script src="/statpanel.js"></script>
+
+
+  <!-- =========================================
+       PARTY SYSTEM
+  ========================================== -->
+
+  <script src="/party.js"></script>
+
+</body>
+
+</html>

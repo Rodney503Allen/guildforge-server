@@ -55,6 +55,9 @@ export async function getEquippedSpells(playerId: number) {
       s.mana_cost,
       s.cooldown,
       s.type,
+      s.target_type,
+      s.effect_type,
+      s.handler_key,
 
       s.damage,
       s.heal,
@@ -114,6 +117,15 @@ export async function getEquippedSpells(playerId: number) {
           manaCost: Number(row.mana_cost || 0),
           cooldown: Number(row.cooldown || 0),
           type: row.type,
+
+          target_type:
+            row.target_type,
+
+          effect_type:
+            row.effect_type,
+
+          handler_key:
+            row.handler_key,
 
           damage: Number(row.damage || 0),
           heal: Number(row.heal || 0),

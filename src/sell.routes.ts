@@ -238,32 +238,44 @@ res.send(`
   <div id="statpanel-root"></div>
 
   <main class="sell-page">
-    <div class="sell-shell">
+    <div class="sell-shell frame-host">
+      <span class="frame-border main" aria-hidden="true"></span>
 
       <section class="sell-hero">
         <div class="hero-title">
           <div class="hero-icon">💰</div>
+
           <div>
             <div class="eyebrow">Collector</div>
             <h1>Sell Items</h1>
-            <p>Trade off what you do not need. Sell rate: ${Math.round(SELL_RATE * 100)}%.</p>
+            <p>
+              Trade off what you do not need. Sell rate:
+              ${Math.round(SELL_RATE * 100)}%.
+            </p>
           </div>
         </div>
 
         <div class="hero-actions">
-          <span class="pill">Gold <strong>${goldFmt}g</strong></span>
+          <span class="pill">
+            Gold <strong>${goldFmt}g</strong>
+          </span>
+
           <a class="btn danger" href="/town">Return to Town</a>
         </div>
+
+        <span class="sell-hero-divider" aria-hidden="true"></span>
       </section>
 
       <section class="sell-grid">
+        <section class="card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
 
-        <section class="card">
           <div class="cardHeader">
             <div class="cardTitle">
               <h2>Sellable Items</h2>
               <p>Not equipped. Select an item to preview the sale.</p>
             </div>
+
             <span class="badge">Inventory</span>
           </div>
 
@@ -271,40 +283,106 @@ res.send(`
             ${
               cards
                 ? `<div class="items" id="items">${cards}</div>`
-                : `<div class="empty">No sellable items.</div>`
+                : `
+                  <div class="empty-inventory">
+                    <div class="empty-icon">📦</div>
+                    <strong>No sellable items</strong>
+                    <span>
+                      Equipped gear is protected. Return when you have items
+                      you no longer need.
+                    </span>
+                  </div>
+                `
             }
           </div>
         </section>
 
         <aside class="right-stack">
+          <section class="card frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
 
-          <section class="card">
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Sell Panel</h2>
                 <p>Confirm the sale and choose quantity.</p>
               </div>
+
               <span class="badge good">Safe</span>
             </div>
 
             <div class="cardBody">
-              <div class="sellbox" id="sellbox">
-                <div class="empty" id="emptyState">Select an item to begin.</div>
+              <div class="sellbox frame-host" id="sellbox">
+                <span class="frame-border sub" aria-hidden="true"></span>
 
-                <div id="details" style="display:none">
-                  <div class="line"><span class="k">Name</span><span class="v" id="dName">—</span></div>
-                  <div class="line"><span class="k">Value</span><span class="v" id="dValue">0g</span></div>
-                  <div class="line"><span class="k">Rate</span><span class="v">${Math.round(SELL_RATE * 100)}%</span></div>
-                  <div class="line"><span class="k">Per Item</span><span class="v" id="dUnit">0g</span></div>
-                  <div class="line"><span class="k">You Gain</span><span class="v" id="dTotal">0g</span></div>
+                <div class="empty" id="emptyState">
+                  Select an item to begin.
+                </div>
 
-                  <div class="qty" id="qtyRow" style="display:none">
-                    <button type="button" class="qtyBtn" id="minus">−</button>
-                    <input id="qty" type="number" min="1" value="1" />
-                    <button type="button" class="qtyBtn" id="plus">+</button>
+                <div id="details" hidden>
+                  <div class="line">
+                    <span class="k">Name</span>
+                    <span class="v" id="dName">—</span>
                   </div>
 
-                  <button class="btn primary full" id="sellBtn" disabled>Sell</button>
+                  <div class="line">
+                    <span class="k">Value</span>
+                    <span class="v" id="dValue">0g</span>
+                  </div>
+
+                  <div class="line">
+                    <span class="k">Rate</span>
+                    <span class="v">
+                      ${Math.round(SELL_RATE * 100)}%
+                    </span>
+                  </div>
+
+                  <div class="line">
+                    <span class="k">Per Item</span>
+                    <span class="v" id="dUnit">0g</span>
+                  </div>
+
+                  <div class="line">
+                    <span class="k">You Gain</span>
+                    <span class="v gain" id="dTotal">0g</span>
+                  </div>
+
+                  <div class="qty" id="qtyRow" hidden>
+                    <button
+                      type="button"
+                      class="qtyBtn"
+                      id="minus"
+                      aria-label="Decrease quantity"
+                    >
+                      −
+                    </button>
+
+                    <input
+                      id="qty"
+                      type="number"
+                      min="1"
+                      value="1"
+                      inputmode="numeric"
+                      aria-label="Quantity to sell"
+                    />
+
+                    <button
+                      type="button"
+                      class="qtyBtn"
+                      id="plus"
+                      aria-label="Increase quantity"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <button
+                    class="btn primary full"
+                    id="sellBtn"
+                    type="button"
+                    disabled
+                  >
+                    Sell
+                  </button>
                 </div>
               </div>
 
@@ -314,7 +392,9 @@ res.send(`
             </div>
           </section>
 
-          <section class="card">
+          <section class="card frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Collector Notes</h2>
@@ -323,30 +403,45 @@ res.send(`
             </div>
 
             <div class="cardBody">
-              <div class="collectorInfo">
+              <div class="collectorInfo frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="infoRow">
                   <strong>Sell Rate</strong>
-                  <span>Items sell for ${Math.round(SELL_RATE * 100)}% of their base value.</span>
+                  <span>
+                    Items sell for ${Math.round(SELL_RATE * 100)}% of their
+                    base value.
+                  </span>
                 </div>
+
                 <div class="infoRow">
                   <strong>Equipped Gear</strong>
-                  <span>Equipped items are protected and cannot be sold here.</span>
+                  <span>
+                    Equipped items are protected and cannot be sold here.
+                  </span>
                 </div>
+
                 <div class="infoRow">
                   <strong>Future System</strong>
-                  <span>Collector reputation and bulk-selling filters can be added later.</span>
+                  <span>
+                    Collector reputation and bulk-selling filters can be
+                    added later.
+                  </span>
                 </div>
               </div>
             </div>
           </section>
-
         </aside>
-
       </section>
     </div>
   </main>
 
-  <div class="toast-wrap" id="toastWrap"></div>
+  <div
+    class="toast-wrap"
+    id="toastWrap"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
 </body>
 </html>
 `);

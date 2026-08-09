@@ -161,11 +161,13 @@ const refiningCards = refiningStations.map((s: any) => {
   <div id="statpanel-root"></div>
 
   <main class="workshop-page">
-    <section class="workshop-shell">
+    <section class="workshop-shell frame-host">
+      <span class="frame-border main" aria-hidden="true"></span>
 
       <header class="workshop-hero">
         <div class="hero-title">
           <div class="hero-icon">⚒️</div>
+
           <div>
             <h1>Workshop</h1>
             <p>Tools, commissions, and profession services for working adventurers.</p>
@@ -173,91 +175,133 @@ const refiningCards = refiningStations.map((s: any) => {
         </div>
 
         <div class="hero-actions">
-          <span class="pill">Gold: <strong>${Number(player.gold || 0)}g</strong></span>
+          <span class="pill">
+            Gold: <strong>${Number(player.gold || 0)}g</strong>
+          </span>
+
           <a class="btn danger" href="/town">Return to Town</a>
         </div>
+
+        <span class="hero-divider-center" aria-hidden="true"></span>
       </header>
 
       <div class="workshop-grid">
+        <!-- Artisan Supplier -->
+        <section class="card service-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
 
-        <section class="card service-card">
           <div class="cardHeader">
             <div class="cardTitle">
               <h2>🛒 Artisan Supplier</h2>
               <p>Purchase gathering tools and profession supplies.</p>
             </div>
+
             <span class="badge good">Available</span>
           </div>
 
           <div class="cardBody">
             <div class="supplier-list">
-                ${toolCards || `<div class="empty">No gathering tools are available in this town.</div>`}
+              ${
+                toolCards ||
+                `<div class="empty">No gathering tools are available in this town.</div>`
+              }
             </div>
+          </div>
+        </section>
+
+        <!-- Refining Stations -->
+        <section class="card service-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
+
+          <div class="cardHeader">
+            <div class="cardTitle">
+              <h2>🔥 Refining Stations</h2>
+              <p>Turn raw materials into usable crafting components.</p>
             </div>
-            </section>
 
-            <section class="card service-card">
-              <div class="cardHeader">
-                <div class="cardTitle">
-                  <h2>🔥 Refining Stations</h2>
-                  <p>Turn raw materials into usable crafting components.</p>
-                </div>
-                <span class="badge good">Available</span>
-              </div>
+            <span class="badge good">Available</span>
+          </div>
 
-              <div class="cardBody station-list">
-                ${refiningCards || `<div class="empty">No refining stations are available.</div>`}
-              </div>
-            </section>
+          <div class="cardBody">
+            <div class="station-list">
+              ${
+                refiningCards ||
+                `<div class="empty">No refining stations are available.</div>`
+              }
+            </div>
+          </div>
+        </section>
 
-        <section class="card service-card">
+        <!-- Commission Board -->
+        <section class="card service-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
+
           <div class="cardHeader">
             <div class="cardTitle">
               <h2>📜 Commission Board</h2>
               <p>Accept daily profession contracts and earn rewards.</p>
             </div>
+
             <span class="badge warn">Coming Soon</span>
           </div>
 
           <div class="cardBody">
             <div class="service-preview">
               <div class="service-icon">📋</div>
+
               <div>
                 <h3>Guild Commissions</h3>
-                <p>Complete gathering contracts for profession XP, gold, and future profession tokens.</p>
+                <p>
+                  Complete gathering contracts for profession XP, gold,
+                  and future profession tokens.
+                </p>
               </div>
             </div>
 
-            <button class="btn disabled" disabled>Contracts Coming Soon</button>
+            <button class="btn disabled" type="button" disabled>
+              Contracts Coming Soon
+            </button>
           </div>
         </section>
 
-        <section class="card service-card wide">
+        <!-- Future Services -->
+        <section class="card service-card wide frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
+
           <div class="cardHeader">
             <div class="cardTitle">
               <h2>Future Workshop Services</h2>
               <p>This hall will grow as professions expand.</p>
             </div>
+
+            <span class="badge warn">Planned</span>
           </div>
 
-          <div class="cardBody future-grid">
-            <div class="future-box">
-              <strong>Salvage Bench</strong>
-              <p>Break down items into crafting materials.</p>
-            </div>
+          <div class="cardBody">
+            <div class="future-grid">
+              <div class="future-box frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
 
-            <div class="future-box">
-              <strong>Profession Talents</strong>
-              <p>Unlock passive bonuses for gathering and crafting.</p>
-            </div>
+                <strong>Salvage Bench</strong>
+                <p>Break down items into crafting materials.</p>
+              </div>
 
-            <div class="future-box">
-              <strong>Crafting Stations</strong>
-              <p>Forge, alchemy table, workbench, and more.</p>
+              <div class="future-box frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
+                <strong>Profession Talents</strong>
+                <p>Unlock passive bonuses for gathering and crafting.</p>
+              </div>
+
+              <div class="future-box frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
+                <strong>Crafting Stations</strong>
+                <p>Forge, alchemy table, workbench, and more.</p>
+              </div>
             </div>
           </div>
         </section>
-
       </div>
     </section>
   </main>

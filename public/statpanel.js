@@ -36,15 +36,29 @@ function loadStatPanel() {
     .then(p => {
       if (!p) return;
 
-      // =======================
-      // STAT POINTS GLOW
-      // =======================
-      const frame = document.querySelector(".portrait-frame");
+// =======================
+// STAT POINTS GLOW
+// =======================
+const portraitFrame = document.querySelector(
+  "#statpanel .portrait-frame"
+);
 
-      if (frame) {
-        const hasPoints = Number(p.stat_points) > 0;
-        frame.classList.toggle("portrait-glow", hasPoints);
-      }
+const rawStatPoints =
+  p.stat_points ??
+  p.statPoints ??
+  p.statpoints ??
+  p.available_stat_points ??
+  p.availableStatPoints ??
+  0;
+
+const statPoints = Number(rawStatPoints);
+
+if (portraitFrame) {
+  portraitFrame.classList.toggle(
+    "portrait-glow",
+    Number.isFinite(statPoints) && statPoints > 0
+  );
+}
 
       // =======================
       // BASIC INFO
@@ -75,9 +89,7 @@ function loadStatPanel() {
 
       setText(
         "player-guild",
-        p.guild_name
-          ? `${p.guild_name} (${p.guild_rank || "Member"})`
-          : "No Guild"
+        p.guild_name || "No Guild"
       );
 
       // =======================

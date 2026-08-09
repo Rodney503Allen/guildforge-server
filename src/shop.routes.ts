@@ -490,11 +490,13 @@ res.send(`
   <div id="statpanel-root"></div>
 
   <main class="shop-page">
-    <div class="shop-shell">
+    <div class="shop-shell frame-host">
+      <span class="frame-border main" aria-hidden="true"></span>
 
       <section class="shop-hero">
         <div class="hero-title">
           <div class="hero-icon">⚖️</div>
+
           <div>
             <div class="eyebrow">Market</div>
             <h1>Market of ${escapeHtml(town.name)}</h1>
@@ -503,77 +505,151 @@ res.send(`
         </div>
 
         <div class="hero-actions">
-          <span class="pill">Gold <strong>${goldFmt}</strong></span>
-          <button class="btn danger" type="button" onclick="location.href='/town'">Return to Town</button>
+          <span class="pill">
+            Gold <strong>${goldFmt}</strong>
+          </span>
+
+          <button
+            class="btn danger"
+            type="button"
+            onclick="location.href='/town'"
+          >
+            Return to Town
+          </button>
         </div>
+
+        <span class="shop-hero-divider" aria-hidden="true"></span>
       </section>
 
       <section class="shop-grid">
+        <div class="card shop-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
 
-        <div class="card shop-card">
           <div class="cardHeader">
             <div class="cardTitle">
               <h2>Market Stalls</h2>
               <p>Choose a stall and browse available wares.</p>
             </div>
+
             <span class="badge good">Open</span>
           </div>
 
           <div class="cardBody">
-
-            <div class="marketTabs" role="tablist" aria-label="Market categories">
-              <button class="tab isActive" role="tab" aria-selected="true" data-tab="consumable">
+            <div
+              class="marketTabs"
+              role="tablist"
+              aria-label="Market categories"
+            >
+              <button
+                class="tab isActive"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                data-tab="consumable"
+              >
                 🧪 Consumables
               </button>
-              <button class="tab" role="tab" aria-selected="false" data-tab="weapon">
+
+              <button
+                class="tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                data-tab="weapon"
+              >
                 ⚔ Weapons
               </button>
-              <button class="tab" role="tab" aria-selected="false" data-tab="armor">
+
+              <button
+                class="tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                data-tab="armor"
+              >
                 🛡 Armor
               </button>
             </div>
 
             <div class="marketPanels">
-              <section class="marketPanel isActive" role="tabpanel" data-panel="consumable">
+              <section
+                class="marketPanel frame-host isActive"
+                role="tabpanel"
+                data-panel="consumable"
+              >
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="panelHead">
                   <div>
                     <div class="panelName">Apothecary Stall</div>
-                    <div class="panelNote">Restock before you step outside the walls.</div>
+                    <div class="panelNote">
+                      Restock before you step outside the walls.
+                    </div>
                   </div>
+
                   <span class="badge">Potions</span>
                 </div>
-                <div class="items">${renderCards(groups.consumable)}</div>
+
+                <div class="items">
+                  ${renderCards(groups.consumable)}
+                </div>
               </section>
 
-              <section class="marketPanel" role="tabpanel" data-panel="weapon">
+              <section
+                class="marketPanel frame-host"
+                role="tabpanel"
+                data-panel="weapon"
+                hidden
+              >
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="panelHead">
                   <div>
-                    <div class="panelName">Steel & Edge</div>
-                    <div class="panelNote">A few practical weapons and offhands suited to your class.</div>
+                    <div class="panelName">Steel &amp; Edge</div>
+                    <div class="panelNote">
+                      Practical weapons and offhands suited to your class.
+                    </div>
                   </div>
+
                   <span class="badge">Weapons</span>
                 </div>
-                <div class="items">${renderCards(groups.weapon)}</div>
+
+                <div class="items">
+                  ${renderCards(groups.weapon)}
+                </div>
               </section>
 
-              <section class="marketPanel" role="tabpanel" data-panel="armor">
+              <section
+                class="marketPanel frame-host"
+                role="tabpanel"
+                data-panel="armor"
+                hidden
+              >
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="panelHead">
                   <div>
                     <div class="panelName">Armorer’s Row</div>
-                    <div class="panelNote">Region-appropriate armor matched to your training.</div>
+                    <div class="panelNote">
+                      Region-appropriate armor matched to your training.
+                    </div>
                   </div>
+
                   <span class="badge">Armor</span>
                 </div>
-                <div class="items">${renderCards(groups.armor)}</div>
+
+                <div class="items">
+                  ${renderCards(groups.armor)}
+                </div>
               </section>
             </div>
-
           </div>
         </div>
 
         <aside class="right-stack">
+          <div class="card frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
 
-          <div class="card">
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Merchant Notice</h2>
@@ -582,42 +658,60 @@ res.send(`
             </div>
 
             <div class="cardBody">
-              <div class="noticeBox">
+              <div class="noticeBox frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <strong>Before you leave town</strong>
-                <p>Carry healing and spirit supplies before heading into dangerous regions. A cheap potion is better than a costly revival.</p>
+
+                <p>
+                  Carry healing and spirit supplies before heading into
+                  dangerous regions. A cheap potion is better than a costly
+                  revival.
+                </p>
               </div>
             </div>
           </div>
 
-          <div class="card">
+          <div class="card frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Market Rumors</h2>
                 <p>Talk around the stalls.</p>
               </div>
+
               <span class="badge warn">Coming Soon</span>
             </div>
 
             <div class="cardBody">
-              <div class="marketFutureList">
+              <div class="marketFutureList frame-host">
+                <span class="frame-border sub" aria-hidden="true"></span>
+
                 <div class="futureRow">
                   <strong>Trusted Buyers</strong>
-                  <span>Some merchants favor repeat customers with better rates.</span>
+                  <span>
+                    Some merchants favor repeat customers with better rates.
+                  </span>
                 </div>
+
                 <div class="futureRow">
                   <strong>Rotating Stock</strong>
-                  <span>Caravans bring different wares depending on the region.</span>
+                  <span>
+                    Caravans bring different wares depending on the region.
+                  </span>
                 </div>
+
                 <div class="futureRow">
                   <strong>Trade Contracts</strong>
-                <span>Guilds may soon broker supplies and rare materials.</span>
+                  <span>
+                    Guilds may soon broker supplies and rare materials.
+                  </span>
                 </div>
               </div>
             </div>
           </div>
-
         </aside>
-
       </section>
     </div>
   </main>

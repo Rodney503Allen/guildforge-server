@@ -17,12 +17,17 @@ import {
 // Large direct heal + temporary damage reduction
 // =====================================================
 
-export const divineInterventionHandler: SpellHandlerDefinition = {
+export const divineInterventionHandler:
+SpellHandlerDefinition = {
+
   requiresEnemy: false,
 
   validate(spell) {
-    const baseHeal = Number(spell.heal) || 0;
-    const buff = getConfiguredBuff(spell);
+    const baseHeal =
+      Number(spell.heal) || 0;
+
+    const buff =
+      getConfiguredBuff(spell);
 
     if (baseHeal <= 0) {
       return `${spell.name} has invalid healing configuration`;
@@ -47,70 +52,139 @@ export const divineInterventionHandler: SpellHandlerDefinition = {
     playerId,
     spell,
     player,
-    currentPlayerHP,
-    maxPlayerHP
-  }): Promise<SpellHandlerResult> {
-    const baseHeal = Number(spell.heal) || 0;
-    const buff = getConfiguredBuff(spell);
 
-    // Use the same scaling formula as generic direct healing.
+    currentPlayerHP,
+    maxPlayerHP,
+
+    targetPlayerId,
+    targetPlayer,
+    currentTargetHP,
+    maxTargetHP
+  }): Promise<SpellHandlerResult> {
+
+    const baseHeal =
+      Number(spell.heal) || 0;
+
+    const buff =
+      getConfiguredBuff(spell);
+
+    const targetId =
+      targetPlayerId ??
+      playerId;
+
+    const recipient =
+      targetPlayer ??
+      player;
+
+    const currentHP =
+      Math.max(
+        0,
+        Number(
+          currentTargetHP ??
+          currentPlayerHP ??
+          recipient?.hpoints ??
+          0
+        ) || 0
+      );
+
+    const maximumHP =
+      Math.max(
+        1,
+        Number(
+          maxTargetHP ??
+          maxPlayerHP ??
+          recipient?.maxhp ??
+          1
+        ) || 1
+      );
+
+    /*
+     * Healing power comes from caster.
+     */
     const baseScaledHealing =
       calculateScaledSpellAmount(
         player,
         baseHeal
       );
 
+    /*
+     * Healing-received modifiers belong
+     * to recipient.
+     */
     const scaledHealing =
       applyHealingReceivedMultiplier(
-        player,
+        recipient,
         baseScaledHealing
       );
 
-    const playerHP = Math.min(
-      maxPlayerHP,
-      currentPlayerHP + scaledHealing
-    );
+    const finalHP =
+      Math.min(
+        maximumHP,
+        currentHP +
+        scaledHealing
+      );
 
-    const actualHealing = Math.max(
-      0,
-      playerHP - currentPlayerHP
-    );
+    const actualHealing =
+      Math.max(
+        0,
+        finalHP -
+        currentHP
+      );
 
     await db.query(
       `
-      UPDATE players
-      SET hpoints = ?
-      WHERE id = ?
+        UPDATE players
+        SET hpoints = ?
+        WHERE id = ?
       `,
-      [playerHP, playerId]
+      [
+        finalHP,
+        targetId
+      ]
     );
 
     await applyBuff(
-      playerId,
+      targetId,
       buff.stat,
       buff.value,
       buff.duration,
       `spell:${spell.id}`
     );
 
-    let log: string;
+    const targetingSelf =
+      Number(targetId) ===
+      Number(playerId);
 
-    if (actualHealing > 0) {
-      log =
-        `✨ You cast ${spell.name}, restoring ` +
-        `${actualHealing} HP and gaining ` +
-        `${buff.value}% damage reduction for ` +
-        `${buff.duration}s!`;
-    } else {
-      log =
-        `✨ You cast ${spell.name}. You are already at full health, ` +
-        `but gain ${buff.value}% damage reduction for ` +
-        `${buff.duration}s!`;
-    }
+    const log =
+      actualHealing > 0
+        ? targetingSelf
+          ? (
+              `✨ You cast ${spell.name}, restoring ` +
+              `${actualHealing} HP and gaining ` +
+              `${buff.value}% damage reduction for ` +
+              `${buff.duration}s!`
+            )
+          : (
+              `✨ You cast ${spell.name}, restoring ` +
+              `${actualHealing} HP to your ally and granting ` +
+              `${buff.value}% damage reduction for ` +
+              `${buff.duration}s!`
+            )
+        : targetingSelf
+          ? (
+              `✨ You cast ${spell.name}. You are already at full health, ` +
+              `but gain ${buff.value}% damage reduction for ` +
+              `${buff.duration}s!`
+            )
+          : (
+              `✨ You cast ${spell.name}. Your ally is already at full health, ` +
+              `but gains ${buff.value}% damage reduction for ` +
+              `${buff.duration}s!`
+            );
 
     return {
       log,
-      playerHP,
+      healing: actualHealing,
       appliedStatus: true
     };
   }
@@ -119,11 +193,13 @@ export const divineInterventionHandler: SpellHandlerDefinition = {
 
 // =====================================================
 // RENEW
-// Applies healing over time to the player.
+// Applies healing over time to a friendly target.
 // spell.heal represents the base total healing.
 // =====================================================
 
-export const renewHandler: SpellHandlerDefinition = {
+export const renewHandler:
+SpellHandlerDefinition = {
+
   requiresEnemy: false,
 
   validate(spell) {
@@ -154,8 +230,12 @@ export const renewHandler: SpellHandlerDefinition = {
   async execute({
     playerId,
     spell,
-    player
+    player,
+
+    targetPlayerId,
+    targetPlayer
   }): Promise<SpellHandlerResult> {
+
     const baseTotalHealing =
       Number(spell.heal) || 0;
 
@@ -165,46 +245,76 @@ export const renewHandler: SpellHandlerDefinition = {
     const tickInterval =
       Number(spell.dot_tick_rate) || 1;
 
-    const totalTicks = Math.max(
-      1,
-      Math.floor(duration / tickInterval)
-    );
+    const targetId =
+      targetPlayerId ??
+      playerId;
 
+    const recipient =
+      targetPlayer ??
+      player;
+
+    const totalTicks =
+      Math.max(
+        1,
+        Math.floor(
+          duration /
+          tickInterval
+        )
+      );
+
+    /*
+     * Healing power comes from caster.
+     */
     const baseScaledHealing =
       calculateScaledSpellAmount(
         player,
         baseTotalHealing
       );
 
+    /*
+     * Healing-received modifier belongs
+     * to the target.
+     */
     const totalHealing =
       applyHealingReceivedMultiplier(
-        player,
+        recipient,
         baseScaledHealing
       );
 
-    const healingPerTick = Math.max(
-      1,
-      Math.floor(totalHealing / totalTicks)
-    );
+    const healingPerTick =
+      Math.max(
+        1,
+        Math.floor(
+          totalHealing /
+          totalTicks
+        )
+      );
 
     const expectedHealing =
-      healingPerTick * totalTicks;
+      healingPerTick *
+      totalTicks;
 
-    const source = `spell:${spell.id}`;
+    const source =
+      `spell:${spell.id}`;
 
-    // Renew refreshes instead of stacking with itself.
+    /*
+     * Same spell refreshes on the same target.
+     */
     await db.query(
       `
-      DELETE FROM player_hots
-      WHERE player_id = ?
-        AND source = ?
+        DELETE FROM player_hots
+        WHERE player_id = ?
+          AND source = ?
       `,
-      [playerId, source]
+      [
+        targetId,
+        source
+      ]
     );
 
     await db.query(
       `
-      INSERT INTO player_hots
+        INSERT INTO player_hots
         (
           player_id,
           healing,
@@ -214,7 +324,7 @@ export const renewHandler: SpellHandlerDefinition = {
           source,
           display_name
         )
-      VALUES
+        VALUES
         (
           ?,
           ?,
@@ -226,7 +336,7 @@ export const renewHandler: SpellHandlerDefinition = {
         )
       `,
       [
-        playerId,
+        targetId,
         healingPerTick,
         tickInterval,
         tickInterval,
@@ -236,21 +346,34 @@ export const renewHandler: SpellHandlerDefinition = {
       ]
     );
 
+    const targetingSelf =
+      Number(targetId) ===
+      Number(playerId);
+
     return {
       log:
-        `✨ You cast ${spell.name}, restoring up to ` +
-        `${expectedHealing} HP over ${duration}s!`,
+        targetingSelf
+          ? (
+              `✨ You cast ${spell.name}, restoring up to ` +
+              `${expectedHealing} HP over ${duration}s!`
+            )
+          : (
+              `✨ You cast ${spell.name} on your ally, restoring up to ` +
+              `${expectedHealing} HP over ${duration}s!`
+            ),
+
       appliedStatus: true
     };
   }
 };
-
 // =====================================================
 // PURIFY
-// Removes harmful timed stat effects from the player.
+// Removes harmful timed stat effects from a friendly target.
 // =====================================================
 
-export const purifyHandler: SpellHandlerDefinition = {
+export const purifyHandler:
+SpellHandlerDefinition = {
+
   requiresEnemy: false,
 
   validate() {
@@ -259,35 +382,63 @@ export const purifyHandler: SpellHandlerDefinition = {
 
   async execute({
     playerId,
-    spell
+    spell,
+    targetPlayerId
   }): Promise<SpellHandlerResult> {
-    const [result]: any = await db.query(
-      `
-      DELETE FROM player_buffs
-      WHERE player_id = ?
-        AND value < 0
-      `,
-      [playerId]
-    );
+
+    const targetId =
+      targetPlayerId ??
+      playerId;
+
+    const [result]: any =
+      await db.query(
+        `
+          DELETE FROM player_buffs
+          WHERE player_id = ?
+            AND value < 0
+        `,
+        [
+          targetId
+        ]
+      );
 
     const cleansedCount =
-      Number(result.affectedRows) || 0;
+      Number(
+        result.affectedRows
+      ) || 0;
+
+    const targetingSelf =
+      Number(targetId) ===
+      Number(playerId);
 
     const log =
       cleansedCount > 0
-        ? (
-            `✨ You cast ${spell.name} and cleanse ` +
-            `${cleansedCount} harmful ` +
-            `${cleansedCount === 1 ? "effect" : "effects"}!`
-          )
-        : (
-            `✨ You cast ${spell.name}, but there are ` +
-            `no harmful effects to cleanse.`
-          );
+        ? targetingSelf
+          ? (
+              `✨ You cast ${spell.name} and cleanse ` +
+              `${cleansedCount} harmful ` +
+              `${cleansedCount === 1 ? "effect" : "effects"}!`
+            )
+          : (
+              `✨ You cast ${spell.name} and cleanse ` +
+              `${cleansedCount} harmful ` +
+              `${cleansedCount === 1 ? "effect" : "effects"} ` +
+              `from your ally!`
+            )
+        : targetingSelf
+          ? (
+              `✨ You cast ${spell.name}, but there are ` +
+              `no harmful effects to cleanse.`
+            )
+          : (
+              `✨ You cast ${spell.name}, but your ally has ` +
+              `no harmful effects to cleanse.`
+            );
 
     return {
       log,
-      appliedStatus: cleansedCount > 0
+      appliedStatus:
+        cleansedCount > 0
     };
   }
 };

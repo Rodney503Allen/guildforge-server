@@ -1,0 +1,1575 @@
+/*hunt-combat.css*/
+/* =========================================================
+   HUNT COMBAT
+   Visual language matched to regular combat modal
+========================================================= */
+
+:root{
+  --bg0:#07090c;
+  --bg1:#0b0f14;
+  --panel:#0e131a;
+  --panel2:#0a0f15;
+
+  --ink:#d7dbe2;
+  --muted:#9aa3af;
+
+  --iron:#2b3440;
+  --ember:#b64b2e;
+  --blood:#7a1e1e;
+  --bone:#c9b89a;
+
+  --shadow:rgba(0,0,0,.60);
+  --frame:rgba(255,255,255,.04);
+  --glass:rgba(0,0,0,.18);
+}
+
+
+/* =========================================================
+   MODAL
+========================================================= */
+
+.hunt-combat-modal{
+  position:fixed;
+  inset:0;
+  z-index:99999;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  padding:30px;
+
+  background:rgba(0,0,0,.72);
+}
+
+.hunt-combat-modal.hidden{
+  display:none;
+}
+
+.hunt-combat-backdrop{
+  position:absolute;
+  inset:0;
+}
+
+
+/* =========================================================
+   MAIN WINDOW
+========================================================= */
+
+.hunt-combat-card{
+  position:relative;
+  z-index:1;
+
+  width:min(1040px, 94vw);
+
+  /*
+   * Give Hunt combat a little more vertical room,
+   * but never let it exceed the viewport.
+   */
+  max-height:min(860px, calc(100vh - 60px));
+
+  display:flex;
+  flex-direction:column;
+
+  /*
+   * Keep the outer frame clean.
+   * The inner layout becomes the scroll area.
+   */
+  overflow:hidden;
+
+  padding:0;
+
+  border:1px solid rgba(43,52,64,.95);
+  border-radius:14px;
+
+  background:
+    radial-gradient(
+      1100px 300px at 18% 0%,
+      rgba(182,75,46,.14),
+      transparent 60%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.03),
+      rgba(0,0,0,.22)
+    ),
+    linear-gradient(
+      180deg,
+      var(--panel),
+      var(--panel2)
+    );
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,.85),
+    inset 0 1px 0 rgba(255,255,255,.06);
+
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    Arial,
+    sans-serif;
+}
+
+
+/* =========================================================
+   MAIN CONTENT GRID
+========================================================= */
+
+.hunt-combat-layout::-webkit-scrollbar{
+  width:10px;
+}
+
+.hunt-combat-layout::-webkit-scrollbar-track{
+  background:
+    rgba(0,0,0,.25);
+}
+
+.hunt-combat-layout::-webkit-scrollbar-thumb{
+  border:
+    2px solid rgba(0,0,0,.35);
+
+  border-radius:999px;
+
+  background:
+    rgba(182,75,46,.95);
+}
+
+
+/* =========================================================
+   ACTION AREA
+========================================================= */
+
+.hunt-action-header{
+  grid-area:header;
+
+  min-width:0;
+}
+
+.hunt-action-header
+.hunt-section-title{
+  margin-bottom:2px;
+}
+
+.hunt-action-status{
+  font-size:11px;
+
+  color:var(--muted);
+}
+
+
+/*
+ * Explicit grid placement prevents the hotbar,
+ * result screen, and leave button from fighting
+ * for the same row.
+ */
+
+
+#huntLeaveBtn{
+  grid-area:leave;
+}
+
+
+/* =========================================================
+   HUNT RESULT / VICTORY STATE
+========================================================= */
+
+.hunt-result-panel{
+  grid-area:result;
+
+  /*
+   * Take the entire second row.
+   */
+  width:100%;
+  min-width:0;
+
+  box-sizing:border-box;
+
+  margin-top:2px;
+
+  padding:18px;
+
+  border:
+    1px solid rgba(210,171,92,.30);
+
+  border-radius:10px;
+
+  background:
+    radial-gradient(
+      700px 150px at 20% 0%,
+      rgba(210,171,92,.08),
+      transparent 70%
+    ),
+    linear-gradient(
+      135deg,
+      rgba(210,171,92,.08),
+      rgba(0,0,0,.24)
+    );
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.04),
+    0 12px 26px rgba(0,0,0,.25);
+}
+
+.hunt-result-panel.hidden{
+  display:none;
+}
+
+.hunt-result-header{
+  display:flex;
+  align-items:center;
+
+  gap:14px;
+
+  min-width:0;
+}
+
+.hunt-result-header > div:last-child{
+  min-width:0;
+}
+
+.hunt-result-emblem{
+  display:grid;
+  place-items:center;
+
+  width:48px;
+  height:48px;
+
+  flex:0 0 48px;
+
+  font-size:24px;
+
+  border:
+    1px solid rgba(210,171,92,.40);
+
+  border-radius:8px;
+
+  background:
+    rgba(210,171,92,.08);
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+.hunt-result-kicker{
+  margin-bottom:3px;
+
+  font-size:10px;
+
+  letter-spacing:.18em;
+
+  text-transform:uppercase;
+
+  color:
+    rgba(221,191,126,.72);
+}
+
+.hunt-result-title{
+  font-family:
+    Cinzel,
+    serif;
+
+  font-size:19px;
+  font-weight:700;
+
+  color:#ead6a5;
+}
+
+.hunt-result-subtitle{
+  margin-top:3px;
+
+  font-size:12px;
+  line-height:1.4;
+
+  color:
+    rgba(235,228,209,.70);
+}
+
+.hunt-result-rewards{
+  display:grid;
+
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+
+  gap:8px;
+
+  margin-top:16px;
+}
+
+.hunt-result-reward{
+  min-width:0;
+
+  display:flex;
+  align-items:center;
+
+  gap:10px;
+
+  padding:10px 12px;
+
+  border:
+    1px solid rgba(210,171,92,.18);
+
+  border-radius:8px;
+
+  background:
+    rgba(0,0,0,.18);
+}
+
+.hunt-result-reward__icon{
+  flex:0 0 auto;
+
+  font-size:18px;
+}
+
+.hunt-result-reward strong{
+  display:block;
+
+  font-family:
+    Cinzel,
+    serif;
+
+  font-size:13px;
+
+  color:#ead6a5;
+}
+
+.hunt-result-reward span:not(
+  .hunt-result-reward__icon
+){
+  display:block;
+
+  margin-top:2px;
+
+  font-size:10px;
+
+  color:
+    rgba(235,228,209,.55);
+}
+
+.hunt-result-message{
+  margin-top:14px;
+
+  padding:10px 12px;
+
+  border:
+    1px solid rgba(210,171,92,.15);
+
+  border-radius:8px;
+
+  background:
+    rgba(0,0,0,.16);
+
+  font-size:11px;
+
+  color:
+    rgba(235,228,209,.70);
+}
+
+.hunt-result-header--defeat
+.hunt-result-title{
+  color:#d9a09a;
+}
+
+.hunt-result-header--defeat
+.hunt-result-emblem{
+  border-color:
+    rgba(150,60,60,.40);
+
+  background:
+    rgba(120,30,30,.12);
+}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.hunt-combat-header{
+  position:relative;
+  z-index:1;
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  gap:16px;
+
+  padding:14px 16px;
+
+  border-bottom:
+    1px solid rgba(43,52,64,.85);
+
+  background:
+    rgba(0,0,0,.14);
+}
+
+.hunt-combat-kicker{
+  margin-bottom:2px;
+
+  font-size:10px;
+  font-weight:700;
+
+  text-transform:uppercase;
+
+  letter-spacing:1.6px;
+
+  color:var(--muted);
+}
+
+.hunt-combat-title{
+  margin:0;
+
+  font-family:
+    Cinzel,
+    ui-serif,
+    Georgia,
+    "Times New Roman",
+    serif;
+
+  font-size:18px;
+  font-weight:800;
+
+  letter-spacing:2px;
+
+  text-transform:uppercase;
+
+  color:var(--bone);
+
+  text-shadow:
+    0 0 10px rgba(182,75,46,.20),
+    0 10px 18px rgba(0,0,0,.85);
+}
+
+.hunt-combat-status{
+  padding:7px 10px;
+
+  border:
+    1px solid rgba(43,52,64,.95);
+
+  border-radius:10px;
+
+  background:
+    rgba(0,0,0,.18);
+
+  font-size:10px;
+  font-weight:900;
+
+  letter-spacing:.8px;
+
+  text-transform:uppercase;
+
+  color:#f3e7db;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+
+/* =========================================================
+   MAIN CONTENT GRID
+========================================================= */
+
+.hunt-combat-layout{
+  position:relative;
+  z-index:1;
+
+  /*
+   * Required because this lives inside
+   * the flex-column combat window.
+   */
+  min-height:0;
+
+  display:grid;
+
+  grid-template-columns:
+    minmax(0, 1.45fr)
+    minmax(300px, .85fr);
+
+  grid-template-areas:
+    "boss party"
+    "log  party"
+    "actions actions";
+
+  gap:12px;
+
+  padding:12px;
+
+  /*
+   * Victory rewards can make the Hunt
+   * window taller than normal combat.
+   */
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  scrollbar-width:thin;
+
+  scrollbar-color:
+    rgba(182,75,46,.95)
+    rgba(0,0,0,.25);
+}
+
+
+/* =========================================================
+   SHARED PANEL STYLE
+========================================================= */
+
+.hunt-boss-panel,
+.hunt-party-panel,
+.hunt-log-panel,
+.hunt-actions-panel{
+  position:relative;
+
+  border:
+    1px solid rgba(43,52,64,.95);
+
+  border-radius:12px;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.03),
+      rgba(0,0,0,.22)
+    ),
+    linear-gradient(
+      180deg,
+      var(--panel),
+      var(--panel2)
+    );
+
+  box-shadow:
+    0 16px 34px rgba(0,0,0,.60),
+    inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.hunt-boss-panel{
+  grid-area:boss;
+}
+
+.hunt-party-panel{
+  grid-area:party;
+}
+
+.hunt-log-panel{
+  grid-area:log;
+}
+
+.hunt-actions-panel{
+  grid-area:actions;
+}
+
+
+/* =========================================================
+   BOSS PANEL
+========================================================= */
+
+.hunt-boss-panel{
+  display:grid;
+
+  grid-template-columns:
+    150px
+    minmax(0, 1fr);
+
+  gap:14px;
+
+  padding:12px;
+}
+
+.hunt-boss-portrait-wrap{
+  width:150px;
+  height:150px;
+
+  align-self:start;
+
+  overflow:hidden;
+
+  border:
+    1px solid rgba(122,30,30,.70);
+
+  border-radius:12px;
+
+  background:
+    rgba(0,0,0,.22);
+
+  box-shadow:
+    0 0 0 1px rgba(122,30,30,.14),
+    0 0 18px rgba(122,30,30,.30),
+    inset 0 0 16px rgba(0,0,0,.85),
+    inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.hunt-boss-portrait{
+  width:100%;
+  height:100%;
+
+  display:block;
+
+  object-fit:cover;
+}
+
+.hunt-boss-copy{
+  min-width:0;
+}
+
+.hunt-boss-name{
+  margin-bottom:2px;
+
+  font-family:
+    Cinzel,
+    ui-serif,
+    Georgia,
+    "Times New Roman",
+    serif;
+
+  font-size:18px;
+  font-weight:800;
+
+  letter-spacing:1.2px;
+
+  text-transform:uppercase;
+
+  color:var(--bone);
+}
+
+.hunt-boss-meta{
+  margin-bottom:8px;
+
+  font-size:12px;
+  font-weight:600;
+
+  color:var(--muted);
+}
+
+.hunt-boss-description{
+  white-space:pre-line;
+
+  font-size:12px;
+  line-height:1.45;
+
+  color:rgba(215,219,226,.84);
+}
+
+.hunt-boss-health{
+  grid-column:1 / -1;
+
+  margin-top:4px;
+}
+
+.hunt-boss-health__top{
+  display:flex;
+  justify-content:space-between;
+
+  margin-bottom:4px;
+
+  font-size:11px;
+
+  letter-spacing:.6px;
+
+  text-transform:uppercase;
+
+  color:rgba(215,219,226,.88);
+}
+
+.hunt-boss-health__track{
+  position:relative;
+
+  height:18px;
+
+  overflow:hidden;
+
+  border:
+    1px solid rgba(43,52,64,.95);
+
+  border-radius:999px;
+
+  background:
+    rgba(0,0,0,.28);
+
+  box-shadow:
+    inset 0 0 10px rgba(0,0,0,.85);
+}
+
+.hunt-boss-health__fill{
+  height:100%;
+  width:0%;
+
+  border-radius:999px;
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(75,0,0,.95),
+      rgba(192,32,32,.90)
+    );
+
+  transition:
+    width .3s ease;
+}
+
+
+/* =========================================================
+   PARTY PANEL
+========================================================= */
+
+.hunt-party-panel{
+  padding:12px;
+}
+
+.hunt-section-title{
+  margin-bottom:10px;
+
+  font-family:
+    Cinzel,
+    ui-serif,
+    Georgia,
+    "Times New Roman",
+    serif;
+
+  font-size:13px;
+  font-weight:800;
+
+  letter-spacing:1.4px;
+
+  text-transform:uppercase;
+
+  color:var(--bone);
+}
+
+.hunt-party-list{
+  display:grid;
+  gap:10px;
+}
+
+.hunt-party-member{
+  padding:10px;
+
+  border:
+    1px solid rgba(43,52,64,.95);
+
+  border-radius:10px;
+
+  background:
+    rgba(0,0,0,.22);
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.hunt-party-member.is-self{
+  border-color:
+    rgba(182,75,46,.48);
+
+  box-shadow:
+    0 0 0 1px rgba(182,75,46,.10),
+    0 0 14px rgba(182,75,46,.08),
+    inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.hunt-party-member__top{
+  display:flex;
+
+  justify-content:space-between;
+  align-items:flex-start;
+
+  gap:8px;
+
+  margin-bottom:8px;
+}
+
+.hunt-party-member__name{
+  font-family:
+    Cinzel,
+    ui-serif,
+    Georgia,
+    serif;
+
+  font-size:12px;
+  font-weight:800;
+
+  color:var(--bone);
+}
+
+.hunt-party-member__meta{
+  margin-top:2px;
+
+  font-size:10px;
+
+  color:var(--muted);
+}
+
+.hunt-party-member__status{
+  font-size:9px;
+  font-weight:900;
+
+  letter-spacing:.8px;
+
+  text-transform:uppercase;
+
+  color:var(--muted);
+}
+
+.hunt-party-member__status.active{
+  color:#e6c967;
+}
+
+
+/* =========================================================
+   PARTY STAT BARS
+========================================================= */
+
+.hunt-party-stat{
+  display:grid;
+
+  grid-template-columns:
+    34px
+    minmax(0, 1fr)
+    auto;
+
+  align-items:center;
+
+  gap:7px;
+
+  margin-top:6px;
+
+  font-size:10px;
+
+  color:rgba(215,219,226,.82);
+}
+
+.hunt-party-track{
+  position:relative;
+
+  height:10px;
+
+  overflow:hidden;
+
+  border:
+    1px solid rgba(43,52,64,.95);
+
+  border-radius:999px;
+
+  background:
+    rgba(0,0,0,.28);
+
+  box-shadow:
+    inset 0 0 8px rgba(0,0,0,.75);
+}
+
+.hunt-party-fill{
+  height:100%;
+
+  border-radius:999px;
+
+  transition:
+    width .15s linear;
+}
+
+.hunt-party-fill.hp{
+  background:
+    linear-gradient(
+      90deg,
+      rgba(122,30,30,.95),
+      rgba(182,75,46,.92)
+    );
+}
+
+.hunt-party-fill.sp{
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0,51,170,.85),
+      rgba(0,174,255,.78)
+    );
+}
+
+.hunt-party-fill.atb{
+  background:
+    linear-gradient(
+      90deg,
+      rgba(180,140,40,.92),
+      rgba(255,210,90,.95)
+    );
+
+  box-shadow:
+    0 0 12px rgba(255,210,90,.18);
+}
+
+.hunt-party-fill.atb.ready{
+  filter:
+    brightness(1.12);
+
+  box-shadow:
+    0 0 14px rgba(255,210,90,.35);
+}
+
+.hunt-party-fill.auto{
+  background:
+    linear-gradient(
+      90deg,
+      rgba(110,90,45,.92),
+      rgba(210,165,65,.92)
+    );
+}
+
+
+/* =========================================================
+   COMBAT LOG
+========================================================= */
+
+.hunt-log-panel{
+  padding:10px;
+}
+
+.hunt-combat-log{
+  height:130px;
+
+  overflow-y:auto;
+
+  padding:4px;
+
+  font-size:12px;
+  line-height:1.35;
+
+  color:rgba(215,219,226,.92);
+}
+
+.hunt-combat-log > div + div{
+  margin-top:4px;
+}
+
+.hunt-combat-log::-webkit-scrollbar{
+  width:10px;
+}
+
+.hunt-combat-log::-webkit-scrollbar-track{
+  background:
+    rgba(0,0,0,.25);
+
+  border-left:
+    1px solid rgba(255,255,255,.06);
+}
+
+.hunt-combat-log::-webkit-scrollbar-thumb{
+  border:
+    2px solid rgba(0,0,0,.35);
+
+  border-radius:999px;
+
+  background:
+    rgba(182,75,46,.95);
+}
+
+.hunt-combat-log{
+  scrollbar-width:thin;
+
+  scrollbar-color:
+    rgba(182,75,46,.95)
+    rgba(0,0,0,.25);
+}
+
+
+/* =========================================================
+   ACTION AREA
+========================================================= */
+
+.hunt-actions-panel{
+  display:grid;
+
+  grid-template-columns:
+    150px
+    minmax(0, 1fr)
+    auto;
+
+  grid-template-areas:
+    "header hotbar leave"
+    "result result result";
+
+  align-items:center;
+
+  gap:12px;
+
+  padding:12px;
+
+  background:
+    rgba(0,0,0,.14);
+}
+
+.hunt-action-header{
+  min-width:0;
+}
+
+.hunt-action-header
+.hunt-section-title{
+  margin-bottom:2px;
+}
+
+.hunt-action-status{
+  font-size:11px;
+
+  color:var(--muted);
+}
+
+
+/* =========================================================
+   HUNT HOTBAR
+========================================================= */
+
+.hunt-spell-hotbar{
+  grid-area:hotbar;
+
+  display:grid;
+
+  grid-template-columns:
+    repeat(6, 64px);
+
+  justify-content:center;
+
+  gap:10px;
+}
+
+.hunt-spell-slot{
+  position:relative;
+
+  width:64px;
+  height:64px;
+
+  overflow:visible;
+
+  padding:0;
+
+  border:
+    1px solid rgba(43,52,64,.95);
+
+  border-radius:12px;
+
+  background:
+    radial-gradient(
+      circle at 50% 35%,
+      rgba(200,163,75,.14),
+      transparent 55%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.045),
+      rgba(0,0,0,.34)
+    ),
+    url("/images/ui/hotbar_background.webp")
+      center/cover no-repeat,
+    rgba(0,0,0,.28);
+
+  box-shadow:
+    inset 0 0 12px rgba(0,0,0,.85),
+    inset 0 1px 0 rgba(255,255,255,.05);
+
+  cursor:pointer;
+
+  transition:
+    transform .12s ease,
+    border-color .12s ease,
+    filter .12s ease;
+}
+
+.hunt-spell-slot img{
+  position:absolute;
+  inset:0;
+
+  width:100%;
+  height:100%;
+
+  display:block;
+
+  object-fit:contain;
+
+  border-radius:11px;
+
+  pointer-events:none;
+}
+
+.hunt-spell-slot:not(:disabled):hover{
+  border-color:
+    rgba(182,75,46,.45);
+
+  filter:
+    brightness(1.06);
+
+  transform:
+    translateY(-1px);
+}
+
+.hunt-spell-slot:not(:disabled):active{
+  transform:
+    translateY(0)
+    scale(.99);
+}
+
+.hunt-spell-slot:disabled{
+  cursor:default;
+}
+
+.hunt-spell-slot.is-ready{
+  border-color:
+    rgba(182,75,46,.70);
+
+  box-shadow:
+    inset 0 0 12px rgba(0,0,0,.85),
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 0 0 1px rgba(182,75,46,.12),
+    0 0 14px rgba(182,75,46,.18);
+}
+
+.hunt-spell-slot.is-cooldown img,
+.hunt-spell-slot.no-sp img{
+  filter:
+    grayscale(100%)
+    brightness(.55);
+}
+
+
+/* =========================================================
+   EMPTY HOTBAR SLOT
+========================================================= */
+
+.hunt-spell-slot.empty{
+  opacity:.45;
+
+  cursor:default;
+
+  filter:none !important;
+
+  transform:none !important;
+}
+
+.hunt-spell-empty{
+  position:absolute;
+  inset:0;
+
+  display:grid;
+  place-items:center;
+
+  font-size:22px;
+
+  color:
+    rgba(201,184,154,.28);
+
+  pointer-events:none;
+}
+
+
+/* =========================================================
+   HOTKEY BADGE
+========================================================= */
+
+.hunt-spell-key{
+  position:absolute;
+
+  left:6px;
+  bottom:6px;
+
+  z-index:5;
+
+  min-width:18px;
+  height:18px;
+
+  padding:0 6px;
+
+  display:inline-flex;
+
+  align-items:center;
+  justify-content:center;
+
+  border:
+    1px solid rgba(255,255,255,.08);
+
+  border-radius:999px;
+
+  background:
+    rgba(0,0,0,.65);
+
+  color:#f3e7db;
+
+  font-size:10px;
+  font-weight:900;
+}
+
+
+/* =========================================================
+   COOLDOWN
+========================================================= */
+
+.hunt-spell-cooldown{
+  position:absolute;
+  inset:0;
+
+  z-index:4;
+
+  display:flex;
+
+  align-items:center;
+  justify-content:center;
+
+  border-radius:11px;
+
+  background:
+    rgba(0,0,0,.72);
+
+  color:#f3e7db;
+
+  font-size:16px;
+  font-weight:900;
+
+  letter-spacing:1px;
+
+  pointer-events:none;
+}
+
+.hunt-spell-cooldown.hidden{
+  display:none;
+}
+
+
+/* =========================================================
+   TOOLTIP
+========================================================= */
+
+.hunt-spell-tooltip{
+  position:absolute;
+
+  left:50%;
+  bottom:calc(100% + 10px);
+
+  transform:
+    translateX(-50%);
+
+  min-width:200px;
+  max-width:260px;
+
+  padding:10px;
+
+  opacity:0;
+  pointer-events:none;
+
+  border:
+    1px solid rgba(43,52,64,.95);
+
+  border-radius:12px;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.03),
+      rgba(0,0,0,.22)
+    ),
+    linear-gradient(
+      180deg,
+      var(--panel),
+      var(--panel2)
+    );
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,.85),
+    inset 0 1px 0 rgba(255,255,255,.06);
+
+  color:
+    rgba(215,219,226,.92);
+
+  font-size:11px;
+  line-height:1.3;
+
+  transition:
+    opacity .12s ease;
+
+  z-index:50;
+}
+
+.hunt-spell-slot:hover
+.hunt-spell-tooltip{
+  opacity:1;
+}
+
+.hunt-spell-tooltip strong{
+  display:block;
+
+  margin-bottom:5px;
+
+  font-family:
+    Cinzel,
+    serif;
+
+  color:var(--bone);
+
+  font-size:11px;
+  font-weight:900;
+
+  letter-spacing:1px;
+
+  text-transform:uppercase;
+}
+
+.hunt-spell-tooltip span{
+  display:block;
+
+  color:var(--muted);
+}
+
+
+/* =========================================================
+   LEAVE VIEW BUTTON
+========================================================= */
+
+#huntLeaveBtn{
+  min-width:110px;
+
+  padding:10px 12px;
+
+  border:
+    1px solid rgba(122,30,30,.65);
+
+  border-radius:10px;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(122,30,30,.72),
+      rgba(0,0,0,.22)
+    );
+
+  color:#f3e7db;
+
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    Arial,
+    sans-serif;
+
+  font-size:11px;
+  font-weight:900;
+
+  letter-spacing:.7px;
+
+  text-transform:uppercase;
+
+  cursor:pointer;
+
+  box-shadow:
+    0 12px 24px rgba(0,0,0,.55),
+    inset 0 1px 0 rgba(255,255,255,.06);
+
+  transition:
+    transform .12s ease,
+    border-color .12s ease,
+    filter .12s ease;
+}
+
+#huntLeaveBtn:hover{
+  border-color:
+    rgba(182,75,46,.55);
+
+  filter:
+    brightness(1.06);
+
+  transform:
+    translateY(-1px);
+}
+
+#huntLeaveBtn:active{
+  transform:
+    translateY(0)
+    scale(.99);
+}
+/* =========================================================
+   TARGET ALLY STATE
+========================================================= */
+
+.hunt-party-member.is-targetable {
+  cursor: pointer;
+  border-color: rgba(226, 190, 112, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(226, 190, 112, 0.28),
+    0 0 18px rgba(226, 190, 112, 0.2);
+  transform: translateY(-1px);
+}
+
+.hunt-party-member.is-targetable:hover {
+  border-color: rgba(255, 220, 145, 1);
+  box-shadow:
+    0 0 0 1px rgba(255, 220, 145, 0.42),
+    0 0 24px rgba(226, 190, 112, 0.32);
+}
+
+.hunt-combat-modal.selecting-ally
+.hunt-party-member:not(.is-targetable) {
+  opacity: 0.5;
+}
+
+/* =========================================================
+   GENERIC STATES
+========================================================= */
+
+.hunt-combat-loading,
+.hunt-combat-empty{
+  padding:10px;
+
+  color:var(--muted);
+
+  font-size:11px;
+}
+
+.hunt-boss-atb {
+  margin-top: 10px;
+}
+
+.hunt-boss-atb__fill {
+  height: 100%;
+  width: 0%;
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(130, 90, 20, 0.92),
+      rgba(220, 170, 60, 0.95)
+    );
+
+  box-shadow:
+    0 0 12px
+    rgba(255, 210, 90, 0.18);
+
+  transition:
+    width 0.12s linear;
+}
+
+@media (
+  max-width: 700px
+) {
+  .hunt-result-rewards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media(max-width:900px){
+
+  .hunt-combat-modal{
+    padding:15px;
+  }
+
+  .hunt-combat-card{
+    width:min(760px, 100%);
+
+    max-height:
+      calc(100vh - 30px);
+  }
+
+  .hunt-combat-layout{
+    grid-template-columns:1fr;
+
+    grid-template-areas:
+      "boss"
+      "party"
+      "log"
+      "actions";
+  }
+
+  .hunt-party-panel{
+    max-height:none;
+  }
+
+  .hunt-actions-panel{
+    grid-template-columns:
+      1fr;
+
+    grid-template-areas:
+      "header"
+      "hotbar"
+      "result"
+      "leave";
+
+    align-items:stretch;
+  }
+
+  .hunt-action-header{
+    text-align:center;
+  }
+
+  #huntLeaveBtn{
+    justify-self:stretch;
+  }
+}
+
+
+@media(max-width:700px){
+
+  .hunt-result-rewards{
+    grid-template-columns:1fr;
+  }
+
+  .hunt-result-header{
+    align-items:flex-start;
+  }
+}
+
+
+@media(max-width:650px){
+
+  .hunt-combat-modal{
+    padding:10px;
+  }
+
+  .hunt-combat-card{
+    width:100%;
+
+    max-height:
+      calc(100vh - 20px);
+  }
+
+  .hunt-combat-header{
+    padding:
+      12px;
+  }
+
+  .hunt-combat-layout{
+    padding:10px;
+    gap:10px;
+  }
+
+  .hunt-boss-panel{
+    grid-template-columns:
+      96px
+      minmax(0, 1fr);
+  }
+
+  .hunt-boss-portrait-wrap{
+    width:96px;
+    height:96px;
+  }
+
+  .hunt-spell-hotbar{
+    grid-template-columns:
+      repeat(3, 64px);
+  }
+
+  .hunt-result-panel{
+    padding:14px;
+  }
+
+  .hunt-result-emblem{
+    width:42px;
+    height:42px;
+
+    flex-basis:42px;
+
+    font-size:20px;
+  }
+
+  .hunt-result-title{
+    font-size:16px;
+  }
+
+  #huntLeaveBtn{
+    width:100%;
+  }
+}

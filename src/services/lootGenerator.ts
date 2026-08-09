@@ -103,10 +103,10 @@ const RARITY_CONFIG: Record<LootRarity, { affixCount: number }> = {
 const TRANSCENDENT_RESONANCE_MULTIPLIER = 1.2;
 
 const DEFAULT_GEAR_DROP_CHANCES = {
-  common: 0.35,
-  uncommon: 0.55,
-  elite: 0.80,
-  boss: 1.0,
+  common: 0.25,
+  uncommon: 0.40,
+  elite: 0.50,
+  boss: 0.60,
 };
 
 const CATEGORY_WEIGHTS = [
@@ -194,7 +194,12 @@ function getAdjustedAffixRange(
 export async function generateLootForCreature(
   creature: Creature,
   player: Player,
-  lootMult: number = 1
+  lootMult: number = 1,
+  options?: {
+    sourceType?: string;
+    sourceId?: number | null;
+    conn?: any;
+  }
 ): Promise<SavedItem[]> {
   const results: SavedItem[] = [];
 
@@ -249,12 +254,13 @@ export async function generateLootForCreature(
     affixes,
   });
 
-  const saved = await saveItemInstance(
-    player.id,
-    item,
-    "combat",
-    creature.id
-  );
+const saved = await saveItemInstance(
+  player.id,
+  item,
+  options?.sourceType ?? "combat",
+  options?.sourceId ?? creature.id,
+  options?.conn
+);
 
   results.push(saved);
   return results;
@@ -536,38 +542,52 @@ async function saveItemInstance(
   playerId: number,
   item: GeneratedItem,
   sourceType: string = "combat",
-  sourceId?: number | null
+  sourceId?: number | null,
+  conn?: any
 ): Promise<SavedItem> {
-  const [result]: any = await db.query(
-    `
-    INSERT INTO player_items (
-      player_id,
-      item_base_id,
-      name,
-      item_level,
-      rarity,
-      is_equipped,
-      is_claimed,
-      roll_json,
-      source_type,
-      source_id
-    ) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
-    `,
-    [
-      playerId,
-      item.itemBaseId,
-      item.name,
-      item.itemLevel,
-      mapLootRarityToDb(item.rarity),
-      JSON.stringify(item.affixes),
-      sourceType,
-      sourceId ?? null
-    ]
-  );
+
+  const runner =
+    conn ?? db;
+
+  const [result]: any =
+    await runner.query(
+      `
+      INSERT INTO player_items (
+        player_id,
+        item_base_id,
+        name,
+        item_level,
+        rarity,
+        is_equipped,
+        is_claimed,
+        roll_json,
+        source_type,
+        source_id
+      )
+      VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+      `,
+      [
+        playerId,
+        item.itemBaseId,
+        item.name,
+        item.itemLevel,
+        mapLootRarityToDb(
+          item.rarity
+        ),
+        JSON.stringify(
+          item.affixes
+        ),
+        sourceType,
+        sourceId ?? null
+      ]
+    );
 
   return {
     ...item,
-    playerItemId: Number(result.insertId),
+    playerItemId:
+      Number(
+        result.insertId
+      )
   };
 }
 

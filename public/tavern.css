@@ -53,29 +53,119 @@ body::before{
 }
 
 .tavern-shell{
-  border:1px solid rgba(200,163,75,.16);
-  border-radius:18px;
-  padding:18px;
+  border:0;
+  border-radius:0;
+  padding:22px;
+
   background:
     radial-gradient(700px 320px at 16% 0%, rgba(182,75,46,.10), transparent 60%),
     linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.22)),
     rgba(7,10,14,.74);
-  box-shadow:0 30px 90px rgba(0,0,0,.70), inset 0 1px 0 rgba(255,255,255,.05);
+
+  box-shadow:
+    0 30px 90px rgba(0,0,0,.70),
+    inset 0 1px 0 rgba(255,255,255,.05);
+
+  overflow:visible;
 }
 
 .tavern-hero{
+  position:relative;
+  z-index:1;
+
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:16px;
-  margin-bottom:14px;
-  padding:16px 18px;
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:16px;
+
+  margin-bottom:24px;
+  padding:12px 18px 30px;
+
+  border:0 !important;
+  border-radius:0;
+  background:none !important;
+  box-shadow:none !important;
+}
+
+/* Keep header content above the divider */
+.tavern-hero > *{
+  position:relative;
+  z-index:3;
+}
+
+/* Left and right divider halves */
+.tavern-hero::before,
+.tavern-hero::after{
+  content:"";
+  position:absolute;
+  z-index:2;
+  bottom:0;
+
+  width:calc(50% - 34px);
+  height:2px;
+
+  box-shadow:
+    0 0 6px rgba(200,163,75,.18),
+    0 0 12px rgba(200,163,75,.07);
+
+  pointer-events:none;
+}
+
+.tavern-hero::before{
+  left:0;
+
+  background:linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(200,163,75,.25) 12%,
+    rgba(200,163,75,.88) 55%,
+    rgba(200,163,75,.32) 82%,
+    transparent 100%
+  );
+}
+
+.tavern-hero::after{
+  right:0;
+
+  background:linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(200,163,75,.32) 18%,
+    rgba(200,163,75,.88) 45%,
+    rgba(200,163,75,.25) 88%,
+    transparent 100%
+  );
+}
+
+.hero-divider-center{
+  position:absolute;
+  z-index:4;
+
+  left:50%;
+  bottom:-7px;
+
+  width:16px;
+  height:16px;
+
+  transform:
+    translateX(-50%)
+    rotate(45deg);
+
+  border:1px solid rgba(200,163,75,.72);
+
   background:
-    linear-gradient(90deg, rgba(182,75,46,.10), transparent 34%),
-    linear-gradient(180deg, rgba(14,19,26,.94), rgba(10,15,21,.90));
-  box-shadow:0 18px 42px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+    radial-gradient(
+      circle at center,
+      rgba(200,163,75,.40) 0%,
+      rgba(200,163,75,.14) 44%,
+      rgba(7,10,14,.96) 74%
+    );
+
+  box-shadow:
+    0 0 8px rgba(200,163,75,.24),
+    inset 0 0 0 2px rgba(7,10,14,.76);
+
+  pointer-events:none;
 }
 
 .hero-title{
@@ -137,23 +227,19 @@ body::before{
 
 .card{
   position:relative;
-  overflow:hidden;
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:16px;
+  overflow:visible;
+
+  border:0;
+  border-radius:0;
+
   background:
     radial-gradient(520px 240px at 20% 0%, rgba(182,75,46,.11), transparent 58%),
     radial-gradient(440px 220px at 92% 10%, rgba(200,163,75,.09), transparent 60%),
     linear-gradient(180deg, rgba(14,19,26,.90), rgba(8,12,17,.90));
-  box-shadow:0 22px 54px var(--shadow), inset 0 1px 0 rgba(255,255,255,.05);
-}
 
-.card::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  border-radius:16px;
-  box-shadow:inset 0 0 0 1px rgba(200,163,75,.045);
+  box-shadow:
+    0 22px 54px var(--shadow),
+    inset 0 1px 0 rgba(255,255,255,.05);
 }
 
 .card > *{
@@ -298,12 +384,16 @@ body::before{
 }
 
 .chatLog{
+  position:relative;
   flex:1;
-  border:1px solid rgba(255,255,255,.075);
-  border-radius:15px;
+
+  border:0;
+  border-radius:0;
+
   background:rgba(0,0,0,.24);
-  padding:14px;
+  padding:18px;
   overflow:auto;
+
   scrollbar-width:thin;
   scrollbar-color:rgba(182,75,46,.95) rgba(0,0,0,.25);
 }
@@ -393,9 +483,12 @@ body::before{
 /* RUMORS */
 
 .rumorBox{
-  padding:14px;
-  border:1px solid rgba(200,163,75,.13);
-  border-radius:15px;
+  position:relative;
+  padding:18px;
+
+  border:0;
+  border-radius:0;
+
   background:rgba(0,0,0,.22);
 }
 
@@ -538,10 +631,14 @@ body::before{
 }
 
 .qrow{
-  border:1px solid rgba(255,255,255,.075);
-  border-radius:15px;
+  position:relative;
+
+  border:0;
+  border-radius:0;
+
   background:rgba(0,0,0,.22);
-  padding:12px;
+  padding:16px;
+
   display:grid;
   grid-template-columns:1fr auto;
   gap:12px;
@@ -634,15 +731,21 @@ body::before{
 }
 
 .socialRow{
+  position:relative;
   display:grid;
   grid-template-columns:1fr auto;
   align-items:center;
   gap:12px;
+
   min-height:76px;
-  padding:12px;
-  border-radius:15px;
-  border:1px solid rgba(255,255,255,.075);
-  background:linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.18)), rgba(0,0,0,.18);
+  padding:16px;
+
+  border:0;
+  border-radius:0;
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.18)),
+    rgba(0,0,0,.18);
 }
 
 .socialRow strong{
@@ -751,6 +854,180 @@ body::before{
     inset 0 1px 0 rgba(255,255,255,.05);
 }
 
+/* =========================================
+   GUILDFORGE BORDER ELEMENT SYSTEM
+========================================= */
+
+.frame-host{
+  position:relative;
+  isolation:isolate;
+  border:0;
+  border-radius:0;
+}
+
+/* Keep actual content above backgrounds */
+.frame-host > *:not(.frame-border){
+  position:relative;
+  z-index:1;
+}
+
+/* Shared decorative overlay */
+.frame-border{
+  position:absolute;
+  inset:0;
+  z-index:5;
+  pointer-events:none;
+  box-sizing:border-box;
+
+  border:1px solid transparent;
+  border-image-repeat:stretch;
+  border-image-outset:0;
+}
+
+/* Outermost page container */
+.frame-border.main{
+  border-image-source:url("/images/ui/main_border.png");
+  border-image-slice:16;
+  border-image-width:18px;
+
+  filter:drop-shadow(0 18px 34px rgba(0,0,0,.55));
+}
+
+/* Normal panels and cards */
+.frame-border.panel{
+  border-image-source:url("/images/ui/panel_border.png");
+  border-image-slice:16;
+  border-image-width:13px;
+
+  filter:
+    brightness(.92)
+    drop-shadow(0 10px 22px rgba(0,0,0,.42));
+}
+
+/* Smaller boxes inside cards */
+.frame-border.sub{
+  border-image-source:url("/images/ui/panel_border.png");
+  border-image-slice:16;
+  border-image-width:8px;
+
+  filter:
+    brightness(.84)
+    drop-shadow(0 6px 14px rgba(0,0,0,.30));
+}
+
+.socialRow--active{
+  cursor:pointer;
+  transition:
+    transform .14s ease,
+    filter .14s ease,
+    box-shadow .14s ease;
+}
+
+.socialRow--active:hover{
+  transform:translateY(-2px);
+  filter:brightness(1.06);
+
+  box-shadow:
+    0 14px 26px rgba(0,0,0,.34),
+    0 0 20px rgba(200,163,75,.08);
+}
+
+.socialRowLink{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+
+  width:100%;
+
+  color:inherit;
+  text-decoration:none;
+}
+
+.socialRowLink strong{
+  display:block;
+}
+
+.socialRowLink p{
+  margin:4px 0 0;
+}
+
+.socialRow--active{
+  cursor:pointer;
+
+  transition:
+    transform .14s ease,
+    filter .14s ease,
+    box-shadow .14s ease,
+    background .14s ease;
+}
+
+.socialRow--active:hover,
+.socialRow--active:focus-visible{
+  transform:translateY(-3px);
+
+  filter:brightness(1.08);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.045),
+      rgba(0,0,0,.20)
+    ),
+    radial-gradient(
+      260px 120px at 18% 10%,
+      rgba(200,163,75,.10),
+      transparent 65%
+    ),
+    rgba(0,0,0,.20);
+
+  box-shadow:
+    0 8px 0 rgba(0,0,0,.22),
+    0 16px 28px rgba(0,0,0,.38),
+    0 0 22px rgba(200,163,75,.10);
+
+  outline:none;
+}
+
+.socialRow--active:hover .frame-border.panel,
+.socialRow--active:focus-visible .frame-border.panel{
+  filter:
+    brightness(1.08)
+    drop-shadow(
+      0 10px 22px
+      rgba(0,0,0,.42)
+    )
+    drop-shadow(
+      0 0 8px
+      rgba(200,163,75,.14)
+    );
+}
+
+.socialRow--active:hover strong,
+.socialRow--active:focus-visible strong{
+  color:#ead7ad;
+}
+
+.socialRow--active:hover .badge.good,
+.socialRow--active:focus-visible .badge.good{
+  border-color:rgba(59,209,138,.52);
+
+  background:rgba(20,80,52,.18);
+
+  box-shadow:
+    0 0 12px
+    rgba(59,209,138,.10);
+}
+
+.socialRow--active:active{
+  transform:translateY(0);
+
+  filter:brightness(.98);
+
+  box-shadow:
+    0 3px 0 rgba(0,0,0,.18),
+    0 8px 16px rgba(0,0,0,.28);
+}
 /* RESPONSIVE */
 
 @media (max-width:1120px){

@@ -1,4 +1,5 @@
-import { db } from "../../db";
+// src/services/spellHandlers/berserkerHandlers.ts
+
 import { applyBuff } from "../buffService";
 
 import {
@@ -9,11 +10,24 @@ import {
 
 import {
   calculateScaledSpellAmount,
-  resolveDamageAgainstEnemy
+  resolveDamageAgainstEnemy,
+  setSpellEnemyHP
 } from "./helpers";
+
 
 // =====================================================
 // SHARED BERSERKER DAMAGE
+//
+// Combat-mode agnostic.
+//
+// Normal combat:
+//   enemy.setHP -> player_creatures
+//
+// Hunt:
+//   enemy.setHP -> hunt encounter state
+//
+// Future dungeon / raid:
+//   adapter controls persistence
 // =====================================================
 
 async function dealBerserkerDamage(
@@ -22,8 +36,12 @@ async function dealBerserkerDamage(
   enemy: SpellEnemy,
   multiplier = 1
 ) {
+
   const baseDamage =
-    Number(spell.damage) || 0;
+    Number(
+      spell.damage
+    ) || 0;
+
 
   const scaledDamage =
     calculateScaledSpellAmount(
@@ -31,12 +49,16 @@ async function dealBerserkerDamage(
       baseDamage
     );
 
-  const modifiedDamage = Math.max(
-    1,
-    Math.floor(
-      scaledDamage * multiplier
-    )
-  );
+
+  const modifiedDamage =
+    Math.max(
+      1,
+      Math.floor(
+        scaledDamage *
+        multiplier
+      )
+    );
+
 
   const result =
     resolveDamageAgainstEnemy(
@@ -45,86 +67,152 @@ async function dealBerserkerDamage(
       modifiedDamage
     );
 
-  const damage = Math.max(
-    1,
-    Number(result.damage) || 1
+
+  const dodged =
+    Boolean(
+      result.dodged
+    );
+
+
+  const damage =
+    dodged
+      ? 0
+      : Math.max(
+          1,
+          Number(
+            result.damage
+          ) || 1
+        );
+
+
+  const enemyHP =
+    Math.max(
+      0,
+      Number(
+        enemy.hp
+      ) -
+      damage
+    );
+
+
+  /*
+   * IMPORTANT:
+   *
+   * Never directly update player_creatures here.
+   *
+   * SpellEnemy determines where this enemy's
+   * HP actually lives.
+   */
+  await setSpellEnemyHP(
+    enemy,
+    enemyHP
   );
 
-  const enemyHP = Math.max(
-    0,
-    Number(enemy.hp) - damage
-  );
-
-  await db.query(
-    `
-    UPDATE player_creatures
-    SET hp = ?
-    WHERE id = ?
-    `,
-    [enemyHP, enemy.id]
-  );
 
   return {
     damage,
+
     enemyHP,
-    critical: Boolean(result.crit)
+
+    critical:
+      Boolean(
+        result.crit
+      ),
+
+    dodged
   };
 }
 
+
 // =====================================================
 // SAVAGE BLOW
-// Gains up to 50% bonus damage from missing enemy HP.
+//
+// Deals 50% bonus damage when the enemy
+// is at or below 50% HP.
 // =====================================================
 
-export const savageBlowHandler: SpellHandlerDefinition = {
-  requiresEnemy: true,
+export const savageBlowHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    true,
+
 
   validate(spell) {
-    if ((Number(spell.damage) || 0) <= 0) {
-      return `${spell.name} has invalid damage configuration`;
+
+    if (
+      (
+        Number(
+          spell.damage
+        ) || 0
+      ) <= 0
+    ) {
+
+      return (
+        `${spell.name} has invalid damage configuration`
+      );
     }
+
 
     return null;
   },
+
 
   async execute({
     spell,
     player,
     enemy
   }): Promise<SpellHandlerResult> {
-    if (!enemy) {
+
+    if (
+      !enemy
+    ) {
+
       throw new Error(
         "Savage Blow handler received no enemy"
       );
     }
 
-    const currentHP = Math.max(
-      0,
-      Number(enemy.hp) || 0
-    );
 
-    const maxHP = Math.max(
-      1,
-      Number(enemy.maxhp) || 1
-    );
-
-    const missingHealthPercent =
-      1 -
+    const currentHP =
       Math.max(
         0,
-        Math.min(1, currentHP / maxHP)
+        Number(
+          enemy.hp
+        ) || 0
       );
 
+
+    const maxHP =
+      Math.max(
+        1,
+        Number(
+          enemy.maxhp
+        ) || 1
+      );
+
+
     const healthPercent =
-    Math.max(
+      Math.max(
         0,
-        Math.min(1, currentHP / maxHP)
-    );
+        Math.min(
+          1,
+          currentHP /
+          maxHP
+        )
+      );
+
+
+    const wounded =
+      healthPercent <=
+      0.5;
+
 
     const damageMultiplier =
-    healthPercent <= 0.5
+      wounded
         ? 1.5
         : 1;
+
 
     const result =
       await dealBerserkerDamage(
@@ -134,61 +222,118 @@ export const savageBlowHandler: SpellHandlerDefinition = {
         damageMultiplier
       );
 
-    const bonusPercent = Math.floor(
-      missingHealthPercent * 50
-    );
 
-    let log = result.critical
-      ? (
-          `🪓 Critical! ${spell.name} crushes the enemy ` +
-          `for ${result.damage} damage!`
-        )
-      : (
-          `🪓 ${spell.name} deals ` +
-          `${result.damage} damage!`
-        );
+    let log:
+      string;
 
-    if (healthPercent <= 0.5) {
-        log += " The wounded enemy takes 50% bonus damage!";
+
+    if (
+      result.dodged
+    ) {
+
+      log =
+        `🪓 ${spell.name} misses the enemy!`;
+
+    } else if (
+      result.critical
+    ) {
+
+      log =
+        `🪓 Critical! ${spell.name} crushes the enemy ` +
+        `for ${result.damage} damage!`;
+
+    } else {
+
+      log =
+        `🪓 ${spell.name} deals ` +
+        `${result.damage} damage!`;
     }
+
+
+    if (
+      wounded &&
+      !result.dodged
+    ) {
+
+      log +=
+        " The wounded enemy takes 50% bonus damage!";
+    }
+
 
     return {
       log,
-      enemyHP: result.enemyHP,
-      killedEnemy: result.enemyHP <= 0
+
+      enemyHP:
+        result.enemyHP,
+
+      killedEnemy:
+        result.enemyHP <= 0,
+
+      crit:
+        result.critical,
+
+      dodged:
+        result.dodged
     };
   }
 };
 
+
 // =====================================================
 // BATTLE FRENZY
-// Increases critical chance and ATB generation.
+//
+// Self buff:
+// - +10% critical chance
+// - +20% ATB generation
 // =====================================================
 
 export const battleFrenzyHandler:
-  SpellHandlerDefinition = {
-  requiresEnemy: false,
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    false,
+
 
   validate(spell) {
-    const duration =
-      Number(spell.buff_duration) || 0;
 
-    if (duration <= 0) {
-      return `${spell.name} has an invalid duration`;
+    const duration =
+      Number(
+        spell.buff_duration
+      ) || 0;
+
+
+    if (
+      duration <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid duration`
+      );
     }
+
 
     return null;
   },
+
 
   async execute({
     playerId,
     spell
   }): Promise<SpellHandlerResult> {
-    const duration =
-      Number(spell.buff_duration) || 8;
 
-    const critBonus = 10;
-    const atbRateBonus = 20;
+    const duration =
+      Number(
+        spell.buff_duration
+      ) || 8;
+
+
+    const critBonus =
+      10;
+
+
+    const atbRateBonus =
+      20;
+
 
     await applyBuff(
       playerId,
@@ -198,6 +343,7 @@ export const battleFrenzyHandler:
       `spell:${spell.id}:crit`
     );
 
+
     await applyBuff(
       playerId,
       "atb_rate_pct",
@@ -206,47 +352,79 @@ export const battleFrenzyHandler:
       `spell:${spell.id}:atb`
     );
 
+
     return {
       log:
         `🔥 You enter ${spell.name}, gaining ` +
         `${critBonus}% critical chance and ` +
-        `${atbRateBonus}% ATB speed for ${duration}s!`,
+        `${atbRateBonus}% ATB speed for ` +
+        `${duration}s!`,
 
-      appliedStatus: true
+      appliedStatus:
+        true
     };
   }
 };
 
+
 // =====================================================
 // BLOOD RAGE
-// Greatly increases attack, but makes the Berserker
-// more vulnerable to incoming damage.
+//
+// Self buff:
+// - +25% Attack
+// - -10% damage reduction
+//
+// Negative damage reduction effectively means
+// increased incoming damage.
 // =====================================================
 
 export const bloodRageHandler:
-  SpellHandlerDefinition = {
-  requiresEnemy: false,
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    false,
+
 
   validate(spell) {
-    const duration =
-      Number(spell.buff_duration) || 0;
 
-    if (duration <= 0) {
-      return `${spell.name} has an invalid duration`;
+    const duration =
+      Number(
+        spell.buff_duration
+      ) || 0;
+
+
+    if (
+      duration <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid duration`
+      );
     }
+
 
     return null;
   },
+
 
   async execute({
     playerId,
     spell
   }): Promise<SpellHandlerResult> {
-    const duration =
-      Number(spell.buff_duration) || 10;
 
-    const attackBonus = 25;
-    const damageReductionPenalty = -10;
+    const duration =
+      Number(
+        spell.buff_duration
+      ) || 10;
+
+
+    const attackBonus =
+      25;
+
+
+    const damageReductionPenalty =
+      -10;
+
 
     await applyBuff(
       playerId,
@@ -256,6 +434,7 @@ export const bloodRageHandler:
       `spell:${spell.id}:attack`
     );
 
+
     await applyBuff(
       playerId,
       "damage_reduction",
@@ -264,74 +443,114 @@ export const bloodRageHandler:
       `spell:${spell.id}:reckless`
     );
 
+
     return {
       log:
         `🩸 You enter ${spell.name}, gaining ` +
         `${attackBonus}% Attack but taking ` +
         `10% more damage for ${duration}s!`,
 
-      appliedStatus: true
+      appliedStatus:
+        true
     };
   }
 };
 
+
 // =====================================================
 // DECAPITATE
-// Execute damage with up to 125% bonus from missing HP.
+//
+// Execute:
+//
+// Enemy > 20% HP:
+//   normal damage
+//
+// Enemy <= 20% HP:
+//   2x damage
 // =====================================================
 
-export const decapitateHandler: SpellHandlerDefinition = {
-  requiresEnemy: true,
+export const decapitateHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    true,
+
 
   validate(spell) {
-    if ((Number(spell.damage) || 0) <= 0) {
-      return `${spell.name} has invalid damage configuration`;
+
+    if (
+      (
+        Number(
+          spell.damage
+        ) || 0
+      ) <= 0
+    ) {
+
+      return (
+        `${spell.name} has invalid damage configuration`
+      );
     }
+
 
     return null;
   },
+
 
   async execute({
     spell,
     player,
     enemy
   }): Promise<SpellHandlerResult> {
-    if (!enemy) {
+
+    if (
+      !enemy
+    ) {
+
       throw new Error(
         "Decapitate handler received no enemy"
       );
     }
 
-    const currentHP = Math.max(
-      0,
-      Number(enemy.hp) || 0
-    );
 
-    const maxHP = Math.max(
-      1,
-      Number(enemy.maxhp) || 1
-    );
-
-    const missingHealthPercent =
-      1 -
+    const currentHP =
       Math.max(
         0,
-        Math.min(1, currentHP / maxHP)
+        Number(
+          enemy.hp
+        ) || 0
       );
 
+
+    const maxHP =
+      Math.max(
+        1,
+        Number(
+          enemy.maxhp
+        ) || 1
+      );
+
+
     const healthPercent =
-    Math.max(
+      Math.max(
         0,
-        Math.min(1, currentHP / maxHP)
-    );
+        Math.min(
+          1,
+          currentHP /
+          maxHP
+        )
+      );
+
 
     const executeActive =
-    healthPercent <= 0.2;
+      healthPercent <=
+      0.2;
+
 
     const damageMultiplier =
-    executeActive
+      executeActive
         ? 2
         : 1;
+
 
     const result =
       await dealBerserkerDamage(
@@ -341,28 +560,58 @@ export const decapitateHandler: SpellHandlerDefinition = {
         damageMultiplier
       );
 
-    const bonusPercent = Math.floor(
-      missingHealthPercent * 125
-    );
 
-    let log = result.critical
-      ? (
-          `💀 Critical! ${spell.name} strikes for ` +
-          `${result.damage} damage!`
-        )
-      : (
-          `💀 ${spell.name} strikes for ` +
-          `${result.damage} damage!`
-        );
+    let log:
+      string;
 
-    if (executeActive) {
-    log += " 💀 Execute damage activated!";
+
+    if (
+      result.dodged
+    ) {
+
+      log =
+        `💀 ${spell.name} misses the enemy!`;
+
+    } else if (
+      result.critical
+    ) {
+
+      log =
+        `💀 Critical! ${spell.name} strikes for ` +
+        `${result.damage} damage!`;
+
+    } else {
+
+      log =
+        `💀 ${spell.name} strikes for ` +
+        `${result.damage} damage!`;
     }
+
+
+    if (
+      executeActive &&
+      !result.dodged
+    ) {
+
+      log +=
+        " 💀 Execute damage activated!";
+    }
+
 
     return {
       log,
-      enemyHP: result.enemyHP,
-      killedEnemy: result.enemyHP <= 0
+
+      enemyHP:
+        result.enemyHP,
+
+      killedEnemy:
+        result.enemyHP <= 0,
+
+      crit:
+        result.critical,
+
+      dodged:
+        result.dodged
     };
   }
 };

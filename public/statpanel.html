@@ -1,100 +1,117 @@
-<div id="statpanel">
+<header id="statpanel" aria-label="Character status and navigation">
+  
 
-  <div id="statpanel-logo">
-    <div class="logo-text">GUILDFORGE</div>
-    <div class="logo-slogan">Forged in Battle. Bound by Guild.</div>
-  </div>
+<section class="statpanel-character" aria-label="Character summary">
+  <a href="/character" class="portrait-link" aria-label="Open character sheet">
+    <div class="portrait-frame">
+      <img
+        id="player-portrait"
+        src="/images/portraits/default.png"
+        alt="Player portrait"
+      >
+    </div>
+  </a>
 
-  <div class="statpanel-grid">
-    <div class="left-section">
+<div class="player-info">
+  <div class="player-heading">
+    <div id="player-name" class="pi-name"></div>
 
-      <a href="/character" class="portrait-link">
-        <div class="portrait-frame">
-          <img id="player-portrait" src="/images/portraits/default.png">
-        </div>
-      </a>
-
-      <div class="player-info">
-        <div id="player-name" class="pi-name"></div>
-
-        <div class="pi-row">
-          <span id="player-class"></span>
-          • Lv. <span id="player-level"></span>
-        </div>
-
-        <a id="player-guild" class="guild-banner-bar guild-link" href="/guild"></a>
-
-        <img id="guild-banner-img" class="guild-banner-img" src="/images/guilds/default-banner.png">
-      </div>
-
-      <div class="bars">
-        <div class="bar-row">
-          <div class="bar-label">HP</div>
-          <div class="bar">
-            <div id="hp-bar" class="hp-inner"></div>
-            <div id="hp-text" class="bar-text"></div>
-          </div>
-        </div>
-
-        <div class="bar-row">
-          <div class="bar-label">SP</div>
-          <div class="bar">
-            <div id="sp-bar" class="sp-inner"></div>
-            <div id="sp-text" class="bar-text"></div>
-          </div>
-        </div>
-
-        <div class="bar-row">
-          <div class="bar-label">XP</div>
-          <div class="bar">
-            <div id="xp-bar" class="xp-inner"></div>
-            <div id="xp-text" class="bar-text"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="statpanel-side-stack">
-        
-        <div class="statpanel-gold">
-          <img src="/icons/ui/coins.webp" class="gold-icon" alt="Gold">
-          <span id="player-gold">0</span>
-        </div>
-        <div id="buff-container">
-          <div id="buff-icon">
-            <div class="buff-icon-symbol">✨</div>
-            <div class="buff-icon-label">BUFFS</div>
-            <div id="buff-tooltip"></div>
-          </div>
-
-          
-        </div>
-
-
-
-      </div>
-
+    <div class="pi-row">
+      <span id="player-class"></span>
+      <span class="pi-divider" aria-hidden="true">◆</span>
+      Level <span id="player-level"></span>
     </div>
   </div>
 
-  <div class="right-actions">
-  <a id="quest-journal-btn" class="nav-action-btn" href="/journal">
-    <span class="nav-action-icon"><img src="/icons/ui/quest_log.webp"></span>
-    <span>Quest Log</span>
-  </a>
+  <div class="character-resources">
+    <div class="statpanel-gold" title="Gold">
+      <img src="/icons/ui/coins.webp" class="gold-icon" alt="">
+      <span id="player-gold">0</span>
+    </div>
 
-  <a id="professions-btn" class="nav-action-btn" href="/professions">
-    <span class="nav-action-icon">
-      <img src="/icons/ui/professions.webp">
-    </span>
-    <span>Professions</span>
-  </a>
+    <span class="resource-divider" aria-hidden="true"></span>
 
-  <a id="bestiary-btn" class="nav-action-btn" href="/codex">
-    <span class="nav-action-icon"><img src="/icons/ui/bestiary.webp"></span>
-    <span>Bestiary</span>
-  </a>
+    <div id="buff-container">
+      <div id="buff-icon" tabindex="0" aria-label="Active buffs">
+        <span class="buff-icon-symbol">✦</span>
+        <span class="buff-icon-label">Buffs</span>
+        <div id="buff-tooltip" role="tooltip"></div>
+      </div>
+    </div>
+  </div>
 
-  <a id="logout-btn" class="action-btn" href="/logout">Logout</a>
+  <a
+    id="player-guild"
+    class="guild-banner-bar guild-link"
+    href="/guild"
+  ></a>
 </div>
 
-</div>
+  <div class="bars" aria-label="Character resources">
+    <div class="bar-row bar-row-hp">
+      <div class="bar-label">
+        <span class="bar-rune">♥</span> HP
+      </div>
+
+      <div class="bar">
+        <div id="hp-bar" class="hp-inner"></div>
+        <div id="hp-text" class="bar-text"></div>
+      </div>
+    </div>
+
+    <div class="bar-row bar-row-sp">
+      <div class="bar-label">
+        <span class="bar-rune">✦</span> SP
+      </div>
+
+      <div class="bar">
+        <div id="sp-bar" class="sp-inner"></div>
+        <div id="sp-text" class="bar-text"></div>
+      </div>
+    </div>
+
+    <div class="bar-row bar-row-xp">
+      <div class="bar-label">
+        <span class="bar-rune">◆</span> XP
+      </div>
+
+      <div class="bar">
+        <div id="xp-bar" class="xp-inner"></div>
+        <div id="xp-text" class="bar-text"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="statpanel-vitals" aria-label="Guildforge branding">
+  <div id="statpanel-logo" aria-label="Guildforge">
+    <div class="logo-text">Guildforge</div>
+    <div class="logo-slogan">
+      Forged in Battle <span>◆</span> Bound by Guild
+    </div>
+  </div>
+</section>
+
+  <nav class="right-actions" aria-label="Game navigation">
+    <div class="nav-primary">
+      <a id="quest-journal-btn" class="nav-action-btn" href="/journal">
+        <span class="nav-action-icon"><img src="/icons/ui/quest_log.webp" alt=""></span>
+        <span>Quest Log</span>
+      </a>
+
+      <a id="professions-btn" class="nav-action-btn" href="/professions">
+        <span class="nav-action-icon"><img src="/icons/ui/professions.webp" alt=""></span>
+        <span>Professions</span>
+      </a>
+
+      <a id="bestiary-btn" class="nav-action-btn" href="/codex">
+        <span class="nav-action-icon"><img src="/icons/ui/bestiary.webp" alt=""></span>
+        <span>Bestiary</span>
+      </a>
+    </div>
+
+    <div class="statpanel-utilities">
+      <a id="logout-btn" class="action-btn" href="/logout">Logout</a>
+    </div>
+  </nav>
+</header>

@@ -232,7 +232,7 @@ const hasAvailableSkillPoints =
   <div id="statpanel-root"></div>
 
   <main class="town-page">
-    <section class="town-shell">
+    <section class="town-shell main-frame">
 
       <div class="town-layout">
         <!-- LEFT COLUMN -->
@@ -255,7 +255,7 @@ const hasAvailableSkillPoints =
             </div>
           </section>
 
-          <section class="services-panel">
+          <section class="services-panel panel-frame">
             <div class="section-heading">
               <div>
                 <h2>Town Services</h2>
@@ -290,7 +290,7 @@ const hasAvailableSkillPoints =
 
         <!-- RIGHT COLUMN -->
         <aside class="town-side">
-          <section class="ledger-panel">
+          <section class="ledger-panel panel-frame">
             <div class="ledger-head">
               <div>
                 <h2>📖 Town Ledger</h2>
@@ -323,7 +323,7 @@ const hasAvailableSkillPoints =
                   <p>Supplies, gear, and luck — that's what survives the wild.</p>
                 </div>
               </div>
-              <a href="/world" class="leave-btn">Leave Haven <span>›</span></a>
+                <a href="/world" class="leave-btn button-frame">Leave Haven <span>›</span></a>
             </div>
           </section>
         </aside>

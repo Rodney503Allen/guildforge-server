@@ -108,13 +108,91 @@ function normalizeMoveDir(dir) {
     ? dir
     : "";
 }
+function showHuntProgress(progress) {
+  if (
+    !progress ||
+    !progress.advanced
+  ) {
+    return;
+  }
 
+  if (!window.GFToast?.show) {
+    return;
+  }
+
+  const trackingText =
+    `${progress.trackingProgress}/${progress.trackingRequired} Tracking`;
+
+  if (progress.objectiveComplete) {
+    GFToast.show(
+      "Hunt Objective Complete",
+      `+${progress.trackingGain} Tracking • ${trackingText}`,
+      {
+        type: "success",
+        durationMs: 3000
+      }
+    );
+  } else {
+    GFToast.show(
+      "Hunt Progress",
+      `+${progress.trackingGain} Tracking • ${trackingText}`,
+      {
+        type: "success",
+        durationMs: 2400
+      }
+    );
+  }
+
+  if (progress.targetRevealed) {
+    setTimeout(() => {
+      GFToast.show(
+        "Quarry Located",
+        "The trail is complete. Your party has discovered its target.",
+        {
+          type: "success",
+          durationMs: 4500
+        }
+      );
+    }, 650);
+  }
+}
+
+window.showHuntProgress =
+  showHuntProgress;
 // =======================
 // COMBAT HELPERS
 // =======================
 function isInCombat() {
-  const modal = document.getElementById("combatModal");
-  return !!(modal && !modal.classList.contains("hidden"));
+  const combatModal =
+    document.getElementById(
+      "combatModal"
+    );
+
+  const huntCombatModal =
+    document.getElementById(
+      "huntCombatModal"
+    );
+
+  const normalCombatActive =
+    Boolean(
+      combatModal &&
+      !combatModal.classList.contains(
+        "hidden"
+      )
+    );
+
+  const huntCombatActive =
+    Boolean(
+      huntCombatModal &&
+      !huntCombatModal.classList.contains(
+        "hidden"
+      )
+    );
+
+  return (
+    normalCombatActive ||
+    huntCombatActive
+  );
 }
 
 function queueCombatOpen() {
@@ -386,27 +464,95 @@ function renderCurrentResourcePanel(player, resourceNodes) {
 
 
 // Shared render logic — used by both refreshWorld() and moveWorld()
-function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNodes }) {
+function renderWorldFromData({
+  player,
+  tiles,
+  guildMap,
+  worldObjects,
+  resourceNodes,
+  huntClues = [],
+  huntTargets = []
+}) {
   const tileMap = {};
+
   for (const t of tiles || []) {
-    tileMap[`${t.x},${t.y}`] = t;
+    tileMap[
+      `${t.x},${t.y}`
+    ] = t;
   }
 
-  const objectMap = buildWorldObjectMap(worldObjects || []);
 
-  const resourceMap = new Map();
-  for (const node of resourceNodes || []) {
-    const key = `${Number(node.map_x)},${Number(node.map_y)}`;
-    resourceMap.set(key, node);
+  const objectMap =
+    buildWorldObjectMap(
+      worldObjects || []
+    );
+
+
+  const resourceMap =
+    new Map();
+
+  for (
+    const node of
+    resourceNodes || []
+  ) {
+    const key =
+      `${Number(node.map_x)},${Number(node.map_y)}`;
+
+    resourceMap.set(
+      key,
+      node
+    );
   }
 
-  const grid = document.getElementById("Grid");
+
+  const huntClueMap =
+    new Map();
+
+  for (
+    const clue of
+    huntClues || []
+  ) {
+    const key =
+      `${Number(clue.x)},${Number(clue.y)}`;
+
+    huntClueMap.set(
+      key,
+      clue
+    );
+  }
+
+
+  const huntTargetMap =
+    new Map();
+
+  for (
+    const target of
+    huntTargets || []
+  ) {
+    const key =
+      `${Number(target.x)},${Number(target.y)}`;
+
+    huntTargetMap.set(
+      key,
+      target
+    );
+  }
+
+
+  const grid =
+    document.getElementById(
+      "Grid"
+    );
+
   if (!grid) return;
 
   const html = [];
 
-  const minX = Number(player.map_x) - 3;
-  const minY = Number(player.map_y) - 3;
+  const minX =
+    Number(player.map_x) - 3;
+
+  const minY =
+    Number(player.map_y) - 3;
 
   for (let r = 0; r < 7; r++) {
     for (let c = 0; c < 7; c++) {
@@ -420,13 +566,105 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNo
       }
 
       const isPlayer = x === Number(player.map_x) && y === Number(player.map_y);
-      const resourceNode = resourceMap.get(`${x},${y}`);
-      const { replaceSprite, overlays } = getTileVisualData(x, y, objectMap);
+      const resourceNode =
+        resourceMap.get(
+          `${x},${y}`
+        );
+
+      const huntClue =
+        huntClueMap.get(
+          `${x},${y}`
+        );
+
+      const huntTarget =
+        huntTargetMap.get(
+          `${x},${y}`
+        );
+
+      const {
+        replaceSprite,
+        overlays
+      } =
+        getTileVisualData(
+          x,
+          y,
+          objectMap
+        );
 
       const terrainClass = replaceSprite ? "" : t.terrain;
       const baseStyle = replaceSprite
         ? ` style="background-image: url('${escapeHtml(replaceSprite)}');"`
         : "";
+
+      const huntClueHtml =
+  huntClue
+    ? `
+      <div
+        class="hunt-clue-marker"
+        title="${escapeHtml(huntClue.name)}"
+      >
+        ${
+          huntClue.icon &&
+          String(huntClue.icon).startsWith("/")
+            ? `
+              <img
+                src="${escapeHtml(huntClue.icon)}"
+                alt=""
+              >
+            `
+            : `
+              <span>
+                ${escapeHtml(
+                  huntClue.icon || "🐾"
+                )}
+              </span>
+            `
+        }
+      </div>
+    `
+    : "";
+
+    const huntTargetHtml =
+  huntTarget
+    ? `
+      <div
+        class="hunt-target-marker"
+        title="${escapeHtml(
+          huntTarget.name ||
+          "Hunt Target"
+        )}"
+      >
+        ${
+          huntTarget.image
+            ? `
+              <img
+                src="${escapeHtml(
+                  huntTarget.image
+                )}"
+                alt=""
+                onerror="
+                  this.onerror=null;
+                  this.src='/images/default_creature.png';
+                "
+              >
+            `
+            : `
+              <span
+                class="hunt-target-marker__symbol"
+              >
+                ☠
+              </span>
+            `
+        }
+
+        <span
+          class="hunt-target-marker__badge"
+        >
+          HUNT
+        </span>
+      </div>
+    `
+    : "";
 
       const overlayHtml = overlays.map(src => `
         <img class="tile-overlay" src="${escapeHtml(src)}" alt="">
@@ -453,6 +691,8 @@ function renderWorldFromData({ player, tiles, guildMap, worldObjects, resourceNo
         >
           ${overlayHtml}
           ${resourceHtml}
+          ${huntClueHtml}
+          ${huntTargetHtml}
         </div>
       `);
     }
@@ -551,16 +791,38 @@ async function moveWorld(dir) {
     if (!data?.success) return;
 
     // Use bundled data from the single move response — no extra fetches
-    if (data.world) renderWorldFromData(data.world);
-    if (data.nearbyObjects) renderNearbyObjects(data.nearbyObjects);
-    if (data.regionData) renderRegionHeader(data.regionData);
+if (data.world) {
+  renderWorldFromData(
+    data.world
+  );
+}
 
-    updateNavHUD(data);
+if (data.nearbyObjects) {
+  renderNearbyObjects(
+    data.nearbyObjects
+  );
+}
 
-    if (data.inCombat && data.enemy) {
-      pendingCombatEnemy = data.enemy;
-      queueCombatOpen();
-    }
+if (data.regionData) {
+  renderRegionHeader(
+    data.regionData
+  );
+}
+
+updateNavHUD(data);
+
+if (data.huntProgress?.advanced) {
+  showHuntProgress(
+    data.huntProgress
+  );
+}
+
+if (data.inCombat && data.enemy) {
+  pendingCombatEnemy =
+    data.enemy;
+
+  queueCombatOpen();
+}
   } catch (err) {
     console.error("World movement failed", err);
   } finally {
@@ -599,43 +861,480 @@ function renderNearbyObjects(objects) {
   if (!list) return;
 
   const badge = document.getElementById("nav-nearby-count");
-  if (badge) badge.textContent = String(objects?.length || 0);
+  if (badge) {
+    badge.textContent = String(
+      objects?.length || 0
+    );
+  }
 
   if (!objects || objects.length === 0) {
-    list.innerHTML = `<div class="world-interact__empty">Nothing to interact with nearby.</div>`;
+    list.innerHTML = `
+      <div class="world-interact__empty">
+        Nothing to interact with nearby.
+      </div>
+    `;
     return;
   }
 
   const sorted = [...objects].sort((a, b) => {
-    if (!!a.inRange !== !!b.inRange) return a.inRange ? -1 : 1;
-    return Number(a.distance || 0) - Number(b.distance || 0);
+    if (!!a.inRange !== !!b.inRange) {
+      return a.inRange ? -1 : 1;
+    }
+
+    return (
+      Number(a.distance || 0) -
+      Number(b.distance || 0)
+    );
   });
 
-  list.innerHTML = sorted.map(obj => {
-    const rangeText = obj.inRange
-      ? `<span class="world-interact__status in-range">In range</span>`
-      : `<span class="world-interact__status out-of-range">${obj.distance} tiles away</span>`;
+  list.innerHTML = sorted
+    .map(obj => {
 
-    const btn = obj.inRange
-      ? `<button class="world-interact__btn" onclick="interactWithWorldObject(${Number(obj.id)})">Interact</button>`
-      : `<button class="world-interact__btn" disabled>Too Far</button>`;
+      const isHuntClue =
+        obj.object_type ===
+        "hunt_clue";
 
-    return `
-      <div class="world-interact__row">
-        <div class="world-interact__meta">
-          <div class="world-interact__name">${escapeHtml(obj.name)}</div>
-          <div class="world-interact__sub">
-            (${Number(obj.x)}, ${Number(obj.y)}) • ${escapeHtml(obj.object_type || "object")}
+      const isHuntTarget =
+        obj.object_type ===
+        "hunt_target";
+
+      const rangeText =
+        obj.inRange
+          ? `
+            <span class="world-interact__status in-range">
+              In range
+            </span>
+          `
+          : `
+            <span class="world-interact__status out-of-range">
+              ${Number(obj.distance)} tiles away
+            </span>
+          `;
+
+      let btn = "";
+
+      if (!obj.inRange) {
+
+        btn = `
+          <button
+            class="world-interact__btn"
+            disabled
+          >
+            Too Far
+          </button>
+        `;
+
+        } else if (isHuntClue) {
+
+          btn = `
+            <button
+              class="world-interact__btn"
+              onclick="
+                investigateHuntClue(
+                  ${Number(obj.id)}
+                )
+              "
+            >
+              Investigate
+            </button>
+          `;
+
+} else if (isHuntTarget) {
+
+  const huntStatus =
+    String(
+      obj.status || ""
+    ).toLowerCase();
+
+  const encounterEngaged =
+    huntStatus === "engaged";
+
+  btn = `
+    <button
+      class="
+        world-interact__btn
+        world-interact__btn--hunt
+      "
+      onclick="
+        ${
+          encounterEngaged
+            ? "rejoinHuntEncounter()"
+            : `confrontHuntTarget(${Number(obj.partyHuntId)})`
+        }
+      "
+    >
+      ${
+        encounterEngaged
+          ? "Rejoin"
+          : "Confront"
+      }
+    </button>
+  `;
+
+} else {
+
+        btn = `
+          <button
+            class="world-interact__btn"
+            onclick="
+              interactWithWorldObject(
+                ${Number(obj.id)}
+              )
+            "
+          >
+            Interact
+          </button>
+        `;
+
+      }
+
+      const typeLabel =
+        isHuntClue
+          ? "Hunt Clue"
+          : isHuntTarget
+            ? "Hunt Quarry"
+            : String(
+                obj.object_type ||
+                "object"
+              );
+
+      return `
+        <div
+          class="
+            world-interact__row
+            ${isHuntClue
+              ? "world-interact__row--hunt-clue"
+              : ""}
+
+            ${isHuntTarget
+              ? "world-interact__row--hunt-target"
+              : ""}
+          "
+        >
+
+          <div class="world-interact__meta">
+
+            <div class="world-interact__name">
+              ${
+                obj.icon
+                  ? `${escapeHtml(obj.icon)} `
+                  : ""
+              }
+              ${escapeHtml(obj.name)}
+            </div>
+
+            <div class="world-interact__sub">
+              (${Number(obj.x)}, ${Number(obj.y)})
+              •
+              ${escapeHtml(typeLabel)}
+            </div>
+
           </div>
+
+          <div class="world-interact__actions">
+            ${rangeText}
+            ${btn}
+          </div>
+
         </div>
-        <div class="world-interact__actions">
-          ${rangeText}
-          ${btn}
-        </div>
-      </div>
-    `;
-  }).join("");
+      `;
+    })
+    .join("");
 }
+
+async function investigateHuntClue(
+  clueId
+) {
+  if (isInCombat()) {
+    return;
+  }
+
+  try {
+
+    const res =
+      await fetch(
+        `/hunts/clues/${clueId}/investigate`,
+        {
+          method: "POST",
+          credentials: "include"
+        }
+      );
+
+    const data =
+      await res.json();
+
+
+    if (
+      !res.ok ||
+      data.ok === false
+    ) {
+      throw new Error(
+        data.error ||
+        "Unable to investigate clue."
+      );
+    }
+
+
+    /*
+     * Show the clue itself using the
+     * existing discovery/lore modal.
+     */
+    if (data.clue) {
+      openLoreModal(
+        data.clue.name ||
+          "Hunt Clue",
+
+        data.clue.description ||
+          "You examine the evidence."
+      );
+    }
+
+
+    /*
+     * Shared Hunt progress notification.
+     */
+    if (
+      data.huntProgress?.advanced
+    ) {
+      showHuntProgress(
+        data.huntProgress
+      );
+    }
+
+
+    /*
+     * Refresh Nearby so the clue
+     * immediately disappears after
+     * investigation.
+     */
+    await loadNearbyObjects();
+
+  } catch (err) {
+
+    console.error(
+      "Hunt clue investigation failed:",
+      err
+    );
+
+    showErrorToast(
+      err.message ||
+      "Unable to investigate clue."
+    );
+
+  }
+}
+
+let huntConfronting =
+  false;
+
+async function confrontHuntTarget(
+  partyHuntId
+) {
+  if (
+    isInCombat() ||
+    huntConfronting
+  ) {
+    return;
+  }
+
+  huntConfronting = true;
+
+  try {
+
+    /*
+     * Ask the server to create/start
+     * the shared Hunt encounter.
+     *
+     * The server remains authoritative:
+     * it should verify party membership,
+     * Hunt state and player position.
+     */
+    const res =
+      await fetch(
+        "/hunts/active/confront",
+        {
+          method: "POST",
+          credentials: "include",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              partyHuntId:
+                Number(
+                  partyHuntId
+                )
+            })
+        }
+      );
+
+    const data =
+      await res.json();
+
+    if (
+      !res.ok ||
+      data.ok === false
+    ) {
+      throw new Error(
+        data.error ||
+        "Unable to confront the Hunt target."
+      );
+    }
+
+
+    /*
+     * Ensure this player is registered
+     * as an active encounter participant.
+     *
+     * If createHuntEncounter() already
+     * does this for the initiating player,
+     * this route should simply return
+     * the existing participation state.
+     */
+
+
+
+    /*
+     * Open the shared combat UI.
+     */
+    if (
+      typeof window
+        .openHuntCombatModal ===
+      "function"
+    ) {
+
+      await window
+        .openHuntCombatModal();
+
+    } else {
+
+      throw new Error(
+        "Hunt combat UI is unavailable."
+      );
+    }
+
+
+    /*
+     * Refresh world/Nearby state.
+     * Hunt status should now be engaged.
+     */
+    await loadNearbyObjects();
+
+  } catch (err) {
+
+    console.error(
+      "Hunt confrontation failed:",
+      err
+    );
+
+    showErrorToast(
+      err.message ||
+      "Unable to confront the Hunt target.",
+      "Hunt Failed"
+    );
+
+  } finally {
+
+    huntConfronting =
+      false;
+  }
+}
+
+async function rejoinHuntEncounter() {
+  if (
+    isInCombat() ||
+    huntConfronting
+  ) {
+    return;
+  }
+
+  huntConfronting = true;
+
+  try {
+
+    /*
+     * Reattach this player to the
+     * existing shared Hunt encounter.
+     */
+    const joinRes =
+      await fetch(
+        "/hunts/encounter/join",
+        {
+          method: "POST",
+          credentials: "include"
+        }
+      );
+
+    const joinData =
+      await joinRes.json();
+
+    if (
+      !joinRes.ok ||
+      joinData.ok === false
+    ) {
+      throw new Error(
+        joinData.error ||
+        "Unable to rejoin the Hunt encounter."
+      );
+    }
+
+
+    /*
+     * Now that the server has confirmed
+     * participation, open the combat UI.
+     */
+    if (
+      typeof window
+        .openHuntCombatModal !==
+      "function"
+    ) {
+      throw new Error(
+        "Hunt combat UI is unavailable."
+      );
+    }
+
+    await window
+      .openHuntCombatModal();
+
+  } catch (err) {
+
+    console.error(
+      "Hunt rejoin failed:",
+      err
+    );
+
+    showErrorToast(
+      err.message ||
+      "Unable to rejoin the Hunt encounter.",
+      "Hunt Failed"
+    );
+
+    /*
+     * Refresh stale world state if the
+     * encounter has actually ended.
+     */
+    try {
+      await refreshWorld();
+    } catch (_) {}
+
+  } finally {
+
+    huntConfronting =
+      false;
+  }
+}
+
+window.rejoinHuntEncounter =
+  rejoinHuntEncounter;
+
+window.rejoinHuntEncounter =
+  rejoinHuntEncounter;
+
+window.confrontHuntTarget =
+  confrontHuntTarget;
 
 async function interactWithWorldObject(objectId) {
   if (isInCombat()) return;
@@ -693,6 +1392,8 @@ async function interactWithWorldObject(objectId) {
     alert("Interaction failed.");
   }
 }
+
+
 function getResourceIcon(professionName) {
   switch (String(professionName || "").toLowerCase()) {
     case "mining":
@@ -902,6 +1603,274 @@ function closeLoreModal() {
   modal.classList.add("hidden");
 }
 
+/* =========================================
+   PARTY QUICK VIEW
+========================================= */
+
+function escapePartyHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+
+async function loadWorldPartyStatus() {
+  const status =
+    document.getElementById(
+      "partyQuickStatus"
+    );
+
+  if (!status) return;
+
+  try {
+
+    const response =
+      await fetch("/party");
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.ok
+    ) {
+      throw new Error(
+        data.error ||
+        "Unable to load party."
+      );
+    }
+
+    if (!data.party) {
+
+      status.textContent =
+        "No active party";
+
+      return;
+    }
+
+    status.textContent =
+      `${data.party.members.length} / ${data.party.maxMembers} adventurers`;
+
+  } catch (err) {
+
+    console.error(
+      "Party status failed:",
+      err
+    );
+
+    status.textContent =
+      "Party unavailable";
+
+  }
+}
+
+
+async function openPartyQuickView() {
+
+  const modal =
+    document.getElementById(
+      "partyQuickModal"
+    );
+
+  const body =
+    document.getElementById(
+      "partyQuickBody"
+    );
+
+  if (!modal || !body) {
+    return;
+  }
+
+  modal.classList.remove(
+    "hidden"
+  );
+
+  body.innerHTML = `
+    <div class="party-quick-loading">
+      Gathering your company...
+    </div>
+  `;
+
+  try {
+
+    const response =
+      await fetch("/party");
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.ok
+    ) {
+      throw new Error(
+        data.error ||
+        "Unable to load party."
+      );
+    }
+
+    const party =
+      data.party;
+
+
+    if (!party) {
+
+      body.innerHTML = `
+        <div class="party-quick-empty">
+          You are not currently part of an
+          adventuring company.
+        </div>
+      `;
+
+      return;
+    }
+
+
+    body.innerHTML =
+      party.members
+        .map(renderPartyQuickMember)
+        .join("");
+
+  } catch (err) {
+
+    console.error(
+      "Party quick view failed:",
+      err
+    );
+
+    body.innerHTML = `
+      <div class="party-quick-empty">
+        Unable to load your party.
+      </div>
+    `;
+
+  }
+}
+
+
+function renderPartyQuickMember(
+  member
+) {
+
+  const hpPercent =
+    member.maxhp > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            (
+              member.hpoints /
+              member.maxhp
+            ) * 100
+          )
+        )
+      : 0;
+
+
+  const spPercent =
+    member.maxspoints > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            (
+              member.spoints /
+              member.maxspoints
+            ) * 100
+          )
+        )
+      : 0;
+
+
+  return `
+    <div class="party-quick-member">
+
+      <div class="party-quick-member__top">
+
+        <div>
+
+          <div class="party-quick-member__name">
+            ${escapePartyHtml(member.name)}
+          </div>
+
+          <div class="party-quick-member__meta">
+            ${escapePartyHtml(member.className)}
+            · Level ${member.level}
+          </div>
+
+        </div>
+
+        ${
+          member.isLeader
+            ? `
+              <span class="party-quick-leader">
+                👑 Leader
+              </span>
+            `
+            : ""
+        }
+
+      </div>
+
+
+      <div class="party-quick-bars">
+
+        <div class="party-quick-stat">
+
+          <span>HP</span>
+
+          <div class="party-quick-track">
+            <div
+              class="party-quick-fill hp"
+              style="width:${hpPercent}%"
+            ></div>
+          </div>
+
+          <span>
+            ${member.hpoints}/${member.maxhp}
+          </span>
+
+        </div>
+
+
+        <div class="party-quick-stat">
+
+          <span>SP</span>
+
+          <div class="party-quick-track">
+            <div
+              class="party-quick-fill sp"
+              style="width:${spPercent}%"
+            ></div>
+          </div>
+
+          <span>
+            ${member.spoints}/${member.maxspoints}
+          </span>
+
+        </div>
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+function closePartyQuickView() {
+
+  document
+    .getElementById(
+      "partyQuickModal"
+    )
+    ?.classList.add(
+      "hidden"
+    );
+}
+loadWorldPartyStatus();
 // =======================
 // UTILS
 // =======================

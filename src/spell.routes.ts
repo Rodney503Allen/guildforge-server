@@ -13,9 +13,20 @@ import {
   consumeActorTurn,
   getActorReadyInMs,
   isCooldownReady,
-  setCooldown
+  setCooldown,
+  pushDamageEvent
 } from "./services/combatSessionService";
 import { getEquippedSpells } from "./services/spellLoadoutService";
+
+import type {
+  SpellEnemy
+} from "./services/spellHandlers/types";
+
+import {
+  applyCreatureDebuff
+} from "./services/creatureBuffService";
+
+
 
 const router = express.Router();
 async function getOrCreateSession(pid: number) {
@@ -26,6 +37,305 @@ async function getOrCreateSession(pid: number) {
   return session;
 }
 // ⏱️ playerId:spellId -> timestamp
+
+function buildPlayerCreatureSpellEnemy(
+  enemy: any
+): SpellEnemy {
+
+  const spellEnemy: SpellEnemy = {
+    id:
+      Number(enemy.id),
+
+    name:
+      String(
+        enemy.name ??
+        "Enemy"
+      ),
+
+    sourceType:
+      "player_creature",
+
+    hp:
+      Number(
+        enemy.hp ?? 0
+      ),
+
+    maxhp:
+      Math.max(
+        1,
+        Number(
+          enemy.maxhp ?? 1
+        )
+      ),
+
+    level:
+      Number(
+        enemy.level ?? 1
+      ),
+
+    attack:
+      Number(
+        enemy.attack ?? 0
+      ),
+
+    defense:
+      Number(
+        enemy.defense ?? 0
+      ),
+
+    agility:
+      Number(
+        enemy.agility ?? 0
+      ),
+
+
+    // =================================================
+    // HP PERSISTENCE
+    // =================================================
+
+    setHP:
+      async (
+        newHP: number
+      ) => {
+
+        const finalHP =
+          Math.max(
+            0,
+            Math.floor(
+              Number(newHP) || 0
+            )
+          );
+
+        await db.query(
+          `
+            UPDATE player_creatures
+
+            SET hp = ?
+
+            WHERE id = ?
+          `,
+          [
+            finalHP,
+            Number(enemy.id)
+          ]
+        );
+
+        spellEnemy.hp =
+          finalHP;
+
+        enemy.hp =
+          finalHP;
+      },
+
+getDebuffValue:
+  async (
+    stat: string
+  ) => {
+
+    const [[row]]: any =
+      await db.query(
+        `
+          SELECT
+            MAX(value) AS value
+
+          FROM player_creature_debuffs
+
+          WHERE player_creature_id = ?
+            AND stat = ?
+            AND expires_at > NOW(3)
+        `,
+        [
+          Number(enemy.id),
+          String(stat)
+        ]
+      );
+
+    return Math.max(
+      0,
+      Number(
+        row?.value
+      ) || 0
+    );
+  },
+    // =================================================
+    // DOT APPLICATION
+    // =================================================
+
+    applyDot:
+      async (args) => {
+
+        const totalDamage =
+          Math.max(
+            1,
+            Math.floor(
+              Number(
+                args.totalDamage
+              ) || 1
+            )
+          );
+
+        const durationSeconds =
+          Math.max(
+            0.1,
+            Number(
+              args.durationSeconds
+            ) || 1
+          );
+
+        const tickRateSeconds =
+          Math.max(
+            0.1,
+            Number(
+              args.tickRateSeconds
+            ) || 1
+          );
+
+        const totalTicks =
+          Math.max(
+            1,
+            Math.floor(
+              durationSeconds /
+              tickRateSeconds
+            )
+          );
+
+        /*
+         * Keep the legacy damage column populated
+         * even though processEnemyDots now uses
+         * total_damage / total_ticks for exact
+         * fractional distribution.
+         */
+        const initialTickDamage =
+          Math.max(
+            1,
+            Math.floor(
+              totalDamage /
+              totalTicks
+            )
+          );
+
+        const source =
+          `spell:${args.spellId}`;
+
+
+        /*
+         * Refresh the same spell's DOT rather than
+         * stacking duplicate copies from one caster.
+         */
+        await db.query(
+          `
+            DELETE FROM player_creature_dots
+
+            WHERE player_creature_id = ?
+              AND source = ?
+          `,
+          [
+            Number(enemy.id),
+            source
+          ]
+        );
+
+
+        await db.query(
+          `
+            INSERT INTO player_creature_dots
+            (
+              player_creature_id,
+              damage,
+              total_damage,
+              total_ticks,
+              ticks_applied,
+              tick_interval,
+              next_tick_at,
+              expires_at,
+              source
+            )
+
+            VALUES
+            (
+              ?,
+              ?,
+              ?,
+              ?,
+              0,
+              ?,
+              NOW(3),
+              DATE_ADD(
+                NOW(3),
+                INTERVAL ? SECOND
+              ),
+              ?
+            )
+          `,
+          [
+            Number(enemy.id),
+            initialTickDamage,
+            totalDamage,
+            totalTicks,
+            tickRateSeconds,
+            durationSeconds,
+            source
+          ]
+        );
+
+
+        return {
+          totalDamage,
+          totalTicks,
+          tickRateSeconds,
+          durationSeconds
+        };
+      },
+
+
+    // =================================================
+    // DEBUFF APPLICATION
+    // =================================================
+
+    applyDebuff:
+      async (args) => {
+
+        await applyCreatureDebuff(
+          Number(enemy.id),
+
+          String(
+            args.stat
+          ),
+
+          Number(
+            args.value
+          ),
+
+          Number(
+            args.durationSeconds
+          ),
+
+          `spell:${args.spellId}`
+        );
+
+
+        return {
+          stat:
+            String(
+              args.stat
+            ),
+
+          value:
+            Number(
+              args.value
+            ),
+
+          durationSeconds:
+            Number(
+              args.durationSeconds
+            )
+        };
+      }
+  };
+
+
+  return spellEnemy;
+}
 
 // =======================
 // GET COMBAT HOTBAR SPELLS
@@ -107,7 +417,9 @@ router.post("/spells/cast", async (req, res) => {
       player.maxspoints ?? 0
     );
 
-    advanceCombatSession(session);
+    await advanceCombatSession(
+      session
+    );
 
     if (session.state !== "active") {
       return res.json({
@@ -189,25 +501,49 @@ router.post("/spells/cast", async (req, res) => {
     }
 
     // Load the current enemy.
-    const [[enemy]]: any = await db.query(
-      `
-      SELECT
-        pc.id,
-        pc.hp,
-        c.maxhp,
-        c.defense
+const [[enemy]]: any = await db.query(
+  `
+    SELECT
+      pc.id,
+      pc.hp,
 
-      FROM player_creatures pc
+      c.name,
+      c.level,
 
-      JOIN creatures c
-        ON c.id = pc.creature_id
+      c.maxhp,
 
-      WHERE pc.player_id = ?
+      c.attack,
+      c.defense,
+      c.agility
 
-      LIMIT 1
-      `,
-      [pid]
-    );
+    FROM player_creatures pc
+
+    JOIN creatures c
+      ON c.id = pc.creature_id
+
+    WHERE pc.player_id = ?
+
+    LIMIT 1
+  `,
+  [
+    pid
+  ]
+);
+
+const spellEnemy =
+  enemy
+    ? buildPlayerCreatureSpellEnemy(
+        enemy
+      )
+    : null;
+
+    const enemyHPBeforeCast =
+  enemy
+    ? Math.max(
+        0,
+        Number(enemy.hp) || 0
+      )
+    : null;
 
     // Find the generic spell handler.
     const handler = getSpellHandler(spell);
@@ -237,7 +573,8 @@ router.post("/spells/cast", async (req, res) => {
 
     // Configuration validation happens before SP is spent.
     const configurationError =
-      handler.validate(spell);
+      handler.validate?.(spell) ??
+      null;
 
     if (configurationError) {
       console.error(
@@ -281,14 +618,28 @@ router.post("/spells/cast", async (req, res) => {
     );
 
     // Execute the actual spell effect.
-    const result = await handler.execute({
-      playerId: pid,
-      spell,
-      player,
-      enemy: enemy ?? null,
-      currentPlayerHP: Number(session.player.hp),
-      maxPlayerHP: Number(session.player.maxHp)
-    });
+const result =
+  await handler.execute({
+    playerId:
+      pid,
+
+    spell,
+
+    player,
+
+    enemy:
+      spellEnemy,
+
+    currentPlayerHP:
+      Number(
+        session.player.hp
+      ),
+
+    maxPlayerHP:
+      Number(
+        session.player.maxHp
+      )
+  });
 
 if (result.appliedStatus) {
   const refreshedPlayer =
@@ -337,9 +688,41 @@ if (result.appliedStatus) {
 
     if (
       result.enemyHP !== undefined &&
-      session.enemy
+      session.enemy &&
+      enemy
     ) {
-      session.enemy.hp = enemyHP!;
+
+const previousEnemyHP =
+  Math.max(
+    0,
+    Number(
+      enemyHPBeforeCast ?? 0
+    )
+  );
+
+      const updatedEnemyHP = Math.max(
+        0,
+        Number(result.enemyHP) || 0
+      );
+
+      // Calculate actual HP removed so overkill damage
+      // does not produce an inflated floating number.
+      const actualDamage = Math.max(
+        0,
+        previousEnemyHP - updatedEnemyHP
+      );
+
+      session.enemy.hp = updatedEnemyHP;
+      enemyHP = updatedEnemyHP;
+
+      if (actualDamage > 0) {
+        pushDamageEvent(session, {
+          target: "enemy",
+          amount: actualDamage,
+          crit: Boolean(result.crit),
+          kind: "spell"
+        });
+      }
     }
 
     // Process direct-hit kills.
@@ -376,11 +759,16 @@ if (result.appliedStatus) {
         gold: reward?.goldGained,
         levelUp: reward?.levelUp,
         chest: reward?.chest ?? null,
-        quest: reward?.quest ?? null
+        quest: reward?.quest ?? null,
+        huntProgress: reward?.huntProgress ?? null
       };
     }
 
-    session.log.push(result.log);
+    if (result.log) {
+      session.log.push(
+        result.log
+      );
+    }
 
     if (reward) {
       session.log.push(
@@ -428,9 +816,13 @@ if (result.appliedStatus) {
       chest: reward?.chest ?? null,
       quest: reward?.quest ?? null,
 
+      huntProgress:
+        reward?.huntProgress ?? null,
+
       cooldown: cooldownSec,
 
-      snapshot: buildCombatSnapshot(session)
+      snapshot:
+        buildCombatSnapshot(session)
     });
   } catch (err) {
     console.error(

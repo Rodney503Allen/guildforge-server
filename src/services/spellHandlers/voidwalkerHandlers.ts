@@ -1,3 +1,5 @@
+// src/services/spellHandlers/voidwalkerHandlers.ts
+
 import { db } from "../../db";
 import { applyBuff } from "../buffService";
 
@@ -10,37 +12,105 @@ import {
   getConfiguredBuff
 } from "./helpers";
 
+
+// =====================================================
+// SHARED PLAYER MAX HP NORMALIZATION
+// =====================================================
+
+function getMaximumPlayerHP(
+  player: any,
+  maxPlayerHP?: number
+): number {
+
+  return Math.max(
+    1,
+    Number(
+      maxPlayerHP ??
+      player?.maxhp ??
+      player?.maxHp ??
+      1
+    ) || 1
+  );
+}
+
+
 // =====================================================
 // SHARED VOID SHIELD
+//
 // Creates or refreshes a max-HP-based absorb shield.
+//
+// player_shields belongs to the player rather than
+// a particular combat instance, allowing this to work
+// across normal combat, Hunts, dungeons, and raids.
 // =====================================================
 
 async function applyVoidShield(
   playerId: number,
   spell: any,
-  maxPlayerHP: number,
+  maximumPlayerHP: number,
   shieldPercent: number
 ) {
+
   const duration =
-    Number(spell.buff_duration) || 0;
+    Math.max(
+      0,
+      Number(
+        spell.buff_duration
+      ) || 0
+    );
 
-  const shieldAmount = Math.max(
-    1,
-    Math.floor(
-      Math.max(1, Number(maxPlayerHP)) *
-      (shieldPercent / 100)
-    )
-  );
 
-  const source = `spell:${spell.id}`;
+  const safeMaxHP =
+    Math.max(
+      1,
+      Number(
+        maximumPlayerHP
+      ) || 1
+    );
 
-  const expiresAt = new Date(
-    Date.now() + duration * 1000
-  );
 
+  const safeShieldPercent =
+    Math.max(
+      0,
+      Number(
+        shieldPercent
+      ) || 0
+    );
+
+
+  const shieldAmount =
+    Math.max(
+      1,
+      Math.floor(
+        safeMaxHP *
+        (
+          safeShieldPercent /
+          100
+        )
+      )
+    );
+
+
+  const source =
+    `spell:${spell.id}`;
+
+
+  const expiresAt =
+    new Date(
+      Date.now() +
+      duration *
+      1000
+    );
+
+
+  /*
+   * Refresh this spell's shield on this
+   * specific player instead of stacking
+   * repeated copies.
+   */
   await db.query(
     `
-    INSERT INTO player_shields
+      INSERT INTO player_shields
       (
         player_id,
         max_absorb,
@@ -48,13 +118,25 @@ async function applyVoidShield(
         expires_at,
         source
       )
-    VALUES
-      (?, ?, ?, ?, ?)
 
-    ON DUPLICATE KEY UPDATE
-      max_absorb = VALUES(max_absorb),
-      remaining_absorb = VALUES(remaining_absorb),
-      expires_at = VALUES(expires_at)
+      VALUES
+      (
+        ?,
+        ?,
+        ?,
+        ?,
+        ?
+      )
+
+      ON DUPLICATE KEY UPDATE
+        max_absorb =
+          VALUES(max_absorb),
+
+        remaining_absorb =
+          VALUES(remaining_absorb),
+
+        expires_at =
+          VALUES(expires_at)
     `,
     [
       playerId,
@@ -65,187 +147,471 @@ async function applyVoidShield(
     ]
   );
 
+
   return {
     shieldAmount,
     duration
   };
 }
 
+
 // =====================================================
 // NULL BARRIER
-// Personal absorb shield based on maximum HP.
+//
+// Selected-friendly-target absorb shield.
 // =====================================================
 
-export const nullBarrierHandler: SpellHandlerDefinition = {
-  requiresEnemy: false,
+export const nullBarrierHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    false,
+
 
   validate(spell) {
-    const buff = getConfiguredBuff(spell);
 
-    if (buff.stat !== "shield_maxhp_pct") {
-      return `${spell.name} must use shield_maxhp_pct`;
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+
+    if (
+      buff.stat !==
+      "shield_maxhp_pct"
+    ) {
+
+      return (
+        `${spell.name} must use shield_maxhp_pct`
+      );
     }
 
-    if (buff.value <= 0) {
-      return `${spell.name} has an invalid shield percentage`;
+
+    if (
+      buff.value <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid shield percentage`
+      );
     }
 
-    if (buff.duration <= 0) {
-      return `${spell.name} has an invalid shield duration`;
+
+    if (
+      buff.duration <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid shield duration`
+      );
     }
+
 
     return null;
   },
 
+
   async execute({
     playerId,
     spell,
-    maxPlayerHP
+    player,
+    maxPlayerHP,
+
+    targetPlayerId,
+    targetPlayer,
+    maxTargetHP
   }): Promise<SpellHandlerResult> {
-    const buff = getConfiguredBuff(spell);
+
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+
+    /*
+     * Hunt combat supplies the selected ally.
+     *
+     * Solo combat falls back to the caster.
+     */
+    const targetId =
+      targetPlayerId ??
+      playerId;
+
+
+    const recipient =
+      targetPlayer ??
+      player;
+
+
+    const maximumHP =
+      getMaximumPlayerHP(
+        recipient,
+        maxTargetHP ??
+        maxPlayerHP
+      );
+
 
     const {
       shieldAmount,
       duration
-    } = await applyVoidShield(
-      playerId,
-      spell,
-      maxPlayerHP,
-      buff.value
-    );
+    } =
+      await applyVoidShield(
+        targetId,
+        spell,
+        maximumHP,
+        buff.value
+      );
+
+
+    const targetingSelf =
+      Number(
+        targetId
+      ) ===
+      Number(
+        playerId
+      );
+
 
     return {
       log:
-        `🌌 You cast ${spell.name}, surrounding yourself ` +
-        `with a ${shieldAmount}-point void barrier for ` +
-        `${duration}s!`,
+        targetingSelf
+          ? (
+              `🌌 You cast ${spell.name}, surrounding yourself ` +
+              `with a ${shieldAmount}-point void barrier for ` +
+              `${duration}s!`
+            )
+          : (
+              `🌌 You cast ${spell.name}, surrounding your ally ` +
+              `with a ${shieldAmount}-point void barrier for ` +
+              `${duration}s!`
+            ),
 
-      appliedStatus: true
+      appliedStatus:
+        true
     };
   }
 };
+
 
 // =====================================================
 // SPATIAL EXCHANGE
 //
-// Current solo behavior:
-// Grants temporary damage reduction.
+// Intended final behavior:
+// Redirect a percentage of damage taken by the
+// selected ally to the Voidwalker.
 //
-// Future party behavior:
-// Redirects part of an ally's incoming damage to the
-// Voidwalker.
+// Current compatible behavior:
+// Half of the configured redirect amount becomes
+// damage reduction on the selected ally.
+//
+// Example:
+// 30% redirect
+//      ↓
+// 15% temporary damage reduction
+//
+// This preserves useful party behavior until the
+// Hunt damage pipeline supports true redirection.
 // =====================================================
 
-export const spatialExchangeHandler: SpellHandlerDefinition = {
-  requiresEnemy: false,
+export const spatialExchangeHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    false,
+
 
   validate(spell) {
-    const buff = getConfiguredBuff(spell);
 
-    if (buff.stat !== "damage_redirect_pct") {
-      return `${spell.name} must use damage_redirect_pct`;
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+
+    if (
+      buff.stat !==
+      "damage_redirect_pct"
+    ) {
+
+      return (
+        `${spell.name} must use damage_redirect_pct`
+      );
     }
 
-    if (buff.value <= 0) {
-      return `${spell.name} has an invalid redirect percentage`;
+
+    if (
+      buff.value <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid redirect percentage`
+      );
     }
 
-    if (buff.duration <= 0) {
-      return `${spell.name} has an invalid duration`;
+
+    if (
+      buff.duration <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid duration`
+      );
     }
+
 
     return null;
   },
 
-  async execute({
-    playerId,
-    spell
-  }): Promise<SpellHandlerResult> {
-    const buff = getConfiguredBuff(spell);
-
-    /*
-     * Solo conversion:
-     * Half of the configured redirect percentage becomes
-     * personal damage reduction.
-     *
-     * Current spell value:
-     * 30% redirect -> 15% solo damage reduction.
-     */
-    const soloDamageReduction = Math.max(
-      1,
-      Math.floor(buff.value * 0.5)
-    );
-
-    await applyBuff(
-      playerId,
-      "damage_reduction",
-      soloDamageReduction,
-      buff.duration,
-      `spell:${spell.id}`
-    );
-
-    return {
-      log:
-        `🌀 You cast ${spell.name}, bending incoming force ` +
-        `through folded space and gaining ` +
-        `${soloDamageReduction}% damage reduction for ` +
-        `${buff.duration}s!`,
-
-      appliedStatus: true
-    };
-  }
-};
-
-// =====================================================
-// ABYSSAL WARD
-// Current: shields the caster.
-// Future: applies a shield to every allied party member.
-// =====================================================
-
-export const abyssalWardHandler: SpellHandlerDefinition = {
-  requiresEnemy: false,
-
-  validate(spell) {
-    const buff = getConfiguredBuff(spell);
-
-    if (buff.stat !== "shield_maxhp_pct") {
-      return `${spell.name} must use shield_maxhp_pct`;
-    }
-
-    if (buff.value <= 0) {
-      return `${spell.name} has an invalid shield percentage`;
-    }
-
-    if (buff.duration <= 0) {
-      return `${spell.name} has an invalid shield duration`;
-    }
-
-    return null;
-  },
 
   async execute({
     playerId,
     spell,
-    maxPlayerHP
+    targetPlayerId
   }): Promise<SpellHandlerResult> {
-    const buff = getConfiguredBuff(spell);
 
-    const {
-      shieldAmount,
-      duration
-    } = await applyVoidShield(
-      playerId,
-      spell,
-      maxPlayerHP,
-      buff.value
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+
+    const targetId =
+      targetPlayerId ??
+      playerId;
+
+
+    /*
+     * Temporary implementation until combat
+     * supports actual cross-player damage
+     * redirection.
+     */
+    const protectionPercent =
+      Math.max(
+        1,
+        Math.floor(
+          buff.value *
+          0.5
+        )
+      );
+
+
+    await applyBuff(
+      targetId,
+      "damage_reduction",
+      protectionPercent,
+      buff.duration,
+      `spell:${spell.id}`
     );
+
+
+    const targetingSelf =
+      Number(
+        targetId
+      ) ===
+      Number(
+        playerId
+      );
+
 
     return {
       log:
-        `🌑 You open an abyssal ward, gaining a ` +
-        `${shieldAmount}-point shield for ${duration}s!`,
+        targetingSelf
+          ? (
+              `🌀 You cast ${spell.name}, bending incoming force ` +
+              `through folded space and gaining ` +
+              `${protectionPercent}% damage reduction for ` +
+              `${buff.duration}s!`
+            )
+          : (
+              `🌀 You cast ${spell.name}, linking yourself to your ally ` +
+              `through folded space and granting them ` +
+              `${protectionPercent}% damage reduction for ` +
+              `${buff.duration}s!`
+            ),
 
-      appliedStatus: true
+      appliedStatus:
+        true
+    };
+  }
+};
+
+
+// =====================================================
+// ABYSSAL WARD
+//
+// Applies an absorb shield to every living ally.
+//
+// Each shield is calculated independently using that
+// player's own maximum HP.
+// =====================================================
+
+export const abyssalWardHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    false,
+
+
+  validate(spell) {
+
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+
+    if (
+      buff.stat !==
+      "shield_maxhp_pct"
+    ) {
+
+      return (
+        `${spell.name} must use shield_maxhp_pct`
+      );
+    }
+
+
+    if (
+      buff.value <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid shield percentage`
+      );
+    }
+
+
+    if (
+      buff.duration <= 0
+    ) {
+
+      return (
+        `${spell.name} has an invalid shield duration`
+      );
+    }
+
+
+    return null;
+  },
+
+
+  async execute({
+    playerId,
+    spell,
+    player,
+    maxPlayerHP,
+    allies
+  }): Promise<SpellHandlerResult> {
+
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+
+    /*
+     * Hunt / future party combat supplies allies.
+     *
+     * Normal solo combat may not, so fall back
+     * to a one-player target list containing caster.
+     */
+    const targets =
+      allies &&
+      allies.length > 0
+        ? allies.filter(
+            ally =>
+              Number(
+                ally.hp
+              ) > 0
+          )
+        : [
+            {
+              playerId,
+
+              hp:
+                Number(
+                  player?.hpoints ??
+                  1
+                ),
+
+              maxHp:
+                getMaximumPlayerHP(
+                  player,
+                  maxPlayerHP
+                ),
+
+              stats:
+                player
+            }
+          ];
+
+
+    if (
+      targets.length === 0
+    ) {
+
+      return {
+        log:
+          `🌑 You cast ${spell.name}, but there are ` +
+          `no living allies to protect.`,
+
+        appliedStatus:
+          false
+      };
+    }
+
+
+    let totalShield =
+      0;
+
+
+    let shieldedPlayers =
+      0;
+
+
+    for (
+      const ally of
+      targets
+    ) {
+
+      const maximumHP =
+        getMaximumPlayerHP(
+          ally.stats,
+          ally.maxHp
+        );
+
+
+      const {
+        shieldAmount
+      } =
+        await applyVoidShield(
+          ally.playerId,
+          spell,
+          maximumHP,
+          buff.value
+        );
+
+
+      totalShield +=
+        shieldAmount;
+
+
+      shieldedPlayers++;
+    }
+
+
+    return {
+      log:
+        `🌑 You open ${spell.name}, shielding ` +
+        `${shieldedPlayers} ${
+          shieldedPlayers === 1
+            ? "ally"
+            : "allies"
+        } for ${totalShield} total absorb ` +
+        `for ${buff.duration}s!`,
+
+      appliedStatus:
+        true
     };
   }
 };

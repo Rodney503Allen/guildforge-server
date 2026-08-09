@@ -19,16 +19,18 @@
   <div id="statpanel-root"></div>
 
   <main class="tavern-page">
-    <div class="tavern-shell">
+    <div class="tavern-shell frame-host">
+  <span class="frame-border main" aria-hidden="true"></span>
 
       <section class="tavern-hero">
-        <div class="hero-title">
+  <div class="hero-title">
           <div class="hero-icon">🍺</div>
           <div>
             <h1 id="tavernTitle">Tavern</h1>
             <p>A warm den of rumors, recruits, and questionable deals.</p>
           </div>
         </div>
+        <span class="hero-divider-center" aria-hidden="true"></span>
 
         <div class="hero-actions">
           <span class="pill">Haven <strong id="townName">—</strong></span>
@@ -41,42 +43,57 @@
 
         <div class="main-stack">
 
-          <section class="card chat-card">
-            <div class="cardHeader">
-              <div class="cardTitle">
-                <h2>World Chat</h2>
-                <p>All voices pass through the tavern first.</p>
-              </div>
-              <span class="badge good">Live Hub</span>
-            </div>
+<section class="card chat-card frame-host">
+<span class="frame-border panel" aria-hidden="true"></span>
 
-            <div class="cardBody">
-              <div class="chatShell">
-                <div class="chatLog" id="chatLog" aria-label="Chat log">                 
-                </div>
+  <div class="cardHeader">
+    <div class="cardTitle">
+      <h2>World Chat</h2>
+      <p>All voices pass through the tavern first.</p>
+    </div>
 
-                <div class="chatInputRow">
-                  <input class="input" id="chatInput" placeholder="Speak into the smoke…" />
-                  <button class="btn primary" id="chatSend" type="button">Send</button>
-                </div>
-              </div>
-            </div>
-          </section>
+    <span class="badge good">Live Hub</span>
+  </div>
 
-          <section class="card tavern-tip-card">
-            <div class="cardBody tavern-tip-body">
-              <div>
-                <h3>Tavern Tip</h3>
-                <p>Not all heroes seek glory. Some just want a warm meal and a listening ear.</p>
-              </div>
-            </div>
-          </section>
+  <div class="cardBody">
+    <div class="chatShell">
+      <div class="chatLog frame-host" id="chatLog" aria-label="Chat log">
+        <span class="frame-border sub" aria-hidden="true"></span>
+      </div>
+
+      <div class="chatInputRow">
+        <input
+          class="input"
+          id="chatInput"
+          placeholder="Speak into the smoke…"
+        />
+
+        <button class="btn primary" id="chatSend" type="button">
+          Send
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="card tavern-tip-card frame-host">
+  <span class="frame-border panel" aria-hidden="true"></span>
+
+  <div class="cardBody tavern-tip-body">
+    <div>
+      <h3>Tavern Tip</h3>
+      <p>
+        Not all heroes seek glory. Some just want a warm meal and a listening ear.
+      </p>
+    </div>
+  </div>
+</section>
 
         </div>
 
         <aside class="right-stack">
 
-          <section class="card">
+          <section class="card frame-host">
+  <span class="frame-border panel" aria-hidden="true"></span>
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Rumors & Company</h2>
@@ -86,7 +103,8 @@
             </div>
 
             <div class="cardBody">
-              <div class="rumorBox" id="rumorBox">
+              <div class="rumorBox frame-host" id="rumorBox">
+  <span class="frame-border sub" aria-hidden="true"></span>
                 <div class="rumorTitle">
                   <strong>Rumor</strong>
                   <span class="hint" id="rumorHint">Click “Listen” to hear what’s spreading.</span>
@@ -104,8 +122,14 @@
             </div>
           </section>
 
-          <section class="card collapsed" id="turninBox">
-            <button class="cardHeader compact collapsibleHeader" id="turninToggle" type="button">
+          <section class="card collapsed frame-host" id="turninBox">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <button
+              class="cardHeader compact collapsibleHeader"
+              id="turninToggle"
+              type="button"
+            >
               <div class="cardTitle">
                 <h2>Turn In Quests</h2>
                 <p>
@@ -121,7 +145,8 @@
             </div>
           </section>
 
-          <section class="card">
+          <section class="card frame-host">
+  <span class="frame-border panel" aria-hidden="true"></span>
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Tavern Systems</h2>
@@ -133,15 +158,23 @@
             <div class="cardBody">
               <div class="socialList">
 
-                <div class="socialRow">
-                  <div>
-                    <strong>Form Party</strong>
-                    <span>Invite allies, share progress, and coordinate hunts.</span>
-                  </div>
-                  <button class="btn disabled" disabled type="button">Soon</button>
-                </div>
+<div
+  class="socialRow frame-host socialRow--active"
+  onclick="window.location.href='/party.html'"
+  role="link"
+  tabindex="0"
+  onkeydown="if(event.key === 'Enter' || event.key === ' ') window.location.href='/party.html'"
+>
+  <span class="frame-border panel" aria-hidden="true"></span>
 
-                <div class="socialRow">
+  <div>
+    <strong>Form Party</strong>
+    <span>Invite allies, share progress, and coordinate hunts.</span>
+  </div>
+</div>
+
+                <div class="socialRow frame-host">
+  <span class="frame-border sub" aria-hidden="true"></span>
                   <div>
                     <strong>Guild Corner</strong>
                     <span>Recruitment posts, guild announcements, and quick actions.</span>
@@ -149,7 +182,8 @@
                   <button class="btn disabled" disabled type="button">Soon</button>
                 </div>
 
-                <div class="socialRow">
+                <div class="socialRow frame-host">
+  <span class="frame-border sub" aria-hidden="true"></span>
                   <div>
                     <strong>Trade Table</strong>
                     <span>Player offers and crafting material requests.</span>
@@ -157,7 +191,8 @@
                   <button class="btn disabled" disabled type="button">Soon</button>
                 </div>
 
-                <div class="socialRow">
+                <div class="socialRow frame-host">
+  <span class="frame-border sub" aria-hidden="true"></span>
                   <div>
                     <strong>Dice & Deeds</strong>
                     <span>Light tavern mini-games and social interactions.</span>

@@ -15,7 +15,12 @@ export type DropLine = {
   roll_json?: any;
 };
 
-export type ChestSourceType = "combat" | "quest" | "guild" | "admin";
+export type ChestSourceType =
+  | "combat"
+  | "hunt"
+  | "quest"
+  | "guild"
+  | "admin";
 export type LootRarity = "base" | "dormant" | "awakened" | "empowered" | "transcendent";
 
 export type ChestRow = {

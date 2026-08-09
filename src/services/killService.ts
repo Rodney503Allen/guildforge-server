@@ -6,6 +6,8 @@ import { createChestFromDrops } from "./chestService";
 import { applyKillProgress } from "./questService";
 import { generateLootForCreature } from "./lootGenerator";
 import { recordCreatureKill } from "./bestiaryService";
+import { advanceHuntObjective } from "../huntService";
+
 
 async function getGuildRewardMultipliers(playerId: number) {
   const [rows]: any = await db.query(`
@@ -181,6 +183,24 @@ const goldGained = Math.max(
     killProg?.completedPlayerQuestIds ?? []
   );
 
+  let huntProgress = null;
+
+try {
+  huntProgress =
+    await advanceHuntObjective(
+      playerId,
+      {
+        type: "KILL",
+        creatureId
+      }
+    );
+} catch (err) {
+  console.warn(
+    "Hunt KILL progress failed",
+    err
+  );
+}
+
   const chestDrops = [
     ...(drops ?? []).map((d: any) => ({
       item_id: d.itemId,
@@ -208,24 +228,39 @@ await db.query(
   [playerCreatureId, playerId]
 );
 
-  return {
-    expGained,
-    goldGained,
-    levelUp,
-    enemyDead: true,
-    affix: affixName
+return {
+  expGained,
+  goldGained,
+  levelUp,
+
+  enemyDead: true,
+
+  affix: affixName
+    ? {
+        id: Number(row.affix_id),
+        name: affixName,
+        xpMult: affixXpMult,
+        goldMult: affixGoldMult,
+        lootMult: affixLootMult
+      }
+    : null,
+
+  chest:
+    chest
       ? {
-          id: Number(row.affix_id),
-          name: affixName,
-          xpMult: affixXpMult,
-          goldMult: affixGoldMult,
-          lootMult: affixLootMult
+          id: chest.chestId
         }
       : null,
-    chest: chest ? { id: chest.chestId } : null,
-    quest: {
-      ...(killProg ?? { updatedObjectives: [], completedPlayerQuestIds: [] }),
-      completedQuests
-    }
-  };
+
+  quest: {
+    ...(killProg ?? {
+      updatedObjectives: [],
+      completedPlayerQuestIds: []
+    }),
+
+    completedQuests
+  },
+
+  huntProgress
+};
 }

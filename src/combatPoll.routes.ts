@@ -74,20 +74,23 @@ router.get("/combat/poll", async (req, res) => {
       reward = await handleCreatureKill(pid, enemy.id);
     }
 
-    res.json({
-      enemyHP,
-      enemyMaxHP: enemy.maxhp,
-      enemyDead: enemyHP <= 0,
+res.json({
+  enemyHP,
+  enemyMaxHP: enemy.maxhp,
+  enemyDead: enemyHP <= 0,
 
-      exp: reward?.expGained,
-      gold: reward?.goldGained,
-      levelUp: reward?.levelUp,
+  exp: reward?.expGained,
+  gold: reward?.goldGained,
+  levelUp: reward?.levelUp,
 
-      chest: reward?.chest ?? null,
-      quest: reward?.quest ?? null,
+  chest: reward?.chest ?? null,
+  quest: reward?.quest ?? null,
 
-      log: combatLog
-    });
+  // Hunt progression
+  huntProgress: reward?.huntProgress ?? null,
+
+  log: combatLog
+});
 
   } catch (err) {
     console.error("COMBAT POLL ERROR:", err);

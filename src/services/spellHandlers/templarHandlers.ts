@@ -1,64 +1,77 @@
-import { db } from "../../db";
-
-import {
-  applyCreatureDebuff
-} from "../creatureDebuffService";
-
 import {
   SpellEnemy,
-  SpellHandlerDefinition,
-  SpellHandlerResult
+  SpellHandlerDefinition
 } from "./types";
 
 import {
+  applySpellDebuff,
   calculateScaledSpellAmount,
-  resolveDamageAgainstEnemy
+  getSpellEnemyDebuffValue,
+  resolveDamageAgainstEnemy,
+  setSpellEnemyHP
 } from "./helpers";
+
 
 type JudgmentState = {
   active: boolean;
   value: number;
 };
 
-/**
- * Returns the strongest active Judgment mark.
+
+// =====================================================
+// JUDGMENT STATE
+// =====================================================
+
+/*
+ * Combat-mode agnostic.
+ *
+ * Normal combat:
+ *   reads player_creature_debuffs
+ *
+ * Hunt combat:
+ *   reads session.debuffs
+ *
+ * Future dungeon/raid combat:
+ *   their SpellEnemy adapter decides.
  */
 async function getJudgmentState(
-  enemyId: number
+  enemy: SpellEnemy
 ): Promise<JudgmentState> {
-  const [[row]]: any = await db.query(
-    `
-    SELECT
-      MAX(value) AS judgment_value
-    FROM player_creature_debuffs
-    WHERE player_creature_id = ?
-      AND stat = 'judgment'
-      AND expires_at > NOW()
-    `,
-    [enemyId]
-  );
 
-  const value = Math.max(
-    0,
-    Number(row?.judgment_value) || 0
-  );
+  const value =
+    await getSpellEnemyDebuffValue(
+      enemy,
+      "judgment"
+    );
 
   return {
-    active: value > 0,
-    value
+    active:
+      value > 0,
+
+    value:
+      Math.max(
+        0,
+        Number(value) || 0
+      )
   };
 }
 
-/**
- * Shared direct-damage execution for Templar handlers.
- */
+
+// =====================================================
+// SHARED TEMPLAR DAMAGE
+// =====================================================
+
 async function dealTemplarDamage(
   spell: any,
   player: any,
   enemy: SpellEnemy,
   damageMultiplier = 1
 ) {
-  const baseDamage = Number(spell.damage) || 0;
+
+  const baseDamage =
+    Number(
+      spell.damage
+    ) || 0;
 
   const scaledDamage =
     calculateScaledSpellAmount(
@@ -66,12 +79,14 @@ async function dealTemplarDamage(
       baseDamage
     );
 
-  const modifiedDamage = Math.max(
-    1,
-    Math.floor(
-      scaledDamage * damageMultiplier
-    )
-  );
+  const modifiedDamage =
+    Math.max(
+      1,
+      Math.floor(
+        scaledDamage *
+        damageMultiplier
+      )
+    );
 
   const damageResult =
     resolveDamageAgainstEnemy(
@@ -80,78 +95,128 @@ async function dealTemplarDamage(
       modifiedDamage
     );
 
-  const damage = Math.max(
-    1,
-    Number(damageResult.damage) || 1
-  );
+  const damage =
+    damageResult.dodged
+      ? 0
+      : Math.max(
+          1,
+          Number(
+            damageResult.damage
+          ) || 1
+        );
 
-  const enemyHP = Math.max(
-    0,
-    Number(enemy.hp) - damage
-  );
+  const enemyHP =
+    Math.max(
+      0,
+      Number(
+        enemy.hp
+      ) -
+      damage
+    );
 
-  await db.query(
-    `
-    UPDATE player_creatures
-    SET hp = ?
-    WHERE id = ?
-    `,
-    [enemyHP, enemy.id]
+  await setSpellEnemyHP(
+    enemy,
+    enemyHP
   );
 
   return {
     damage,
+
     enemyHP,
-    critical: Boolean(damageResult.crit)
+
+    critical:
+      Boolean(
+        damageResult.crit
+      ),
+
+    dodged:
+      Boolean(
+        damageResult.dodged
+      )
   };
 }
+
 
 // =====================================================
 // JUDGMENT
 // Deals damage and applies the Judgment mark.
 // =====================================================
 
-export const judgmentHandler: SpellHandlerDefinition = {
-  requiresEnemy: true,
+export const judgmentHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    true,
 
   validate(spell) {
-    const damage = Number(spell.damage) || 0;
-    const debuffStat = String(
-      spell.debuff_stat || ""
-    )
-      .trim()
-      .toLowerCase();
+
+    const damage =
+      Number(
+        spell.damage
+      ) || 0;
+
+    const debuffStat =
+      String(
+        spell.debuff_stat ||
+        ""
+      )
+        .trim()
+        .toLowerCase();
 
     const debuffValue =
-      Number(spell.debuff_value) || 0;
+      Number(
+        spell.debuff_value
+      ) || 0;
 
     const debuffDuration =
-      Number(spell.debuff_duration) || 0;
+      Number(
+        spell.debuff_duration
+      ) || 0;
 
-    if (damage <= 0) {
-      return `${spell.name} has invalid damage configuration`;
+    if (
+      damage <= 0
+    ) {
+      return (
+        `${spell.name} has invalid damage configuration`
+      );
     }
 
-    if (debuffStat !== "judgment") {
-      return `${spell.name} must apply the judgment mark`;
+    if (
+      debuffStat !==
+      "judgment"
+    ) {
+      return (
+        `${spell.name} must apply the judgment mark`
+      );
     }
 
-    if (debuffValue <= 0) {
-      return `${spell.name} has an invalid Judgment value`;
+    if (
+      debuffValue <= 0
+    ) {
+      return (
+        `${spell.name} has an invalid Judgment value`
+      );
     }
 
-    if (debuffDuration <= 0) {
-      return `${spell.name} has an invalid Judgment duration`;
+    if (
+      debuffDuration <= 0
+    ) {
+      return (
+        `${spell.name} has an invalid Judgment duration`
+      );
     }
 
     return null;
   },
 
+
   async execute({
+    playerId,
     spell,
     player,
     enemy
-  }): Promise<SpellHandlerResult> {
+  }) {
+
     if (!enemy) {
       throw new Error(
         "Judgment handler received no enemy"
@@ -165,61 +230,156 @@ export const judgmentHandler: SpellHandlerDefinition = {
         enemy
       );
 
-    if (damageResult.enemyHP > 0) {
-      await applyCreatureDebuff(
-        enemy.id,
-        "judgment",
-        Number(spell.debuff_value) || 1,
-        Number(spell.debuff_duration) || 10,
-        `spell:${spell.id}`
+    let appliedStatus =
+      false;
+
+    if (
+      damageResult.enemyHP >
+      0
+    ) {
+
+      await applySpellDebuff(
+        enemy,
+        {
+          sourcePlayerId:
+            playerId,
+
+          spellId:
+            Number(
+              spell.id
+            ),
+
+          spellName:
+            String(
+              spell.name
+            ),
+
+          stat:
+            "judgment",
+
+          value:
+            Math.max(
+              1,
+              Number(
+                spell.debuff_value
+              ) || 1
+            ),
+
+          durationSeconds:
+            Math.max(
+              1,
+              Number(
+                spell.debuff_duration
+              ) || 10
+            )
+        }
       );
+
+      appliedStatus =
+        true;
     }
 
-    const log = damageResult.critical
-      ? (
-          `✨ Critical! ${spell.name} strikes for ` +
-          `${damageResult.damage} damage and marks the enemy!`
-        )
-      : (
-          `⚖️ ${spell.name} strikes for ` +
-          `${damageResult.damage} damage and marks the enemy!`
-        );
+    let log: string;
+
+    if (
+      damageResult.dodged
+    ) {
+
+      log =
+        `⚖️ ${spell.name} misses the enemy!`;
+
+    } else if (
+      damageResult.critical
+    ) {
+
+      log =
+        `✨ Critical! ${spell.name} strikes for ` +
+        `${damageResult.damage} damage`;
+
+      if (
+        appliedStatus
+      ) {
+        log +=
+          " and marks the enemy!";
+      } else {
+        log += "!";
+      }
+
+    } else {
+
+      log =
+        `⚖️ ${spell.name} strikes for ` +
+        `${damageResult.damage} damage`;
+
+      if (
+        appliedStatus
+      ) {
+        log +=
+          " and marks the enemy!";
+      } else {
+        log += "!";
+      }
+    }
 
     return {
       log,
-      enemyHP: damageResult.enemyHP,
-      appliedStatus:
-        damageResult.enemyHP > 0,
+
+      enemyHP:
+        damageResult.enemyHP,
+
+      appliedStatus,
+
       killedEnemy:
-        damageResult.enemyHP <= 0
+        damageResult.enemyHP <=
+        0,
+
+      crit:
+        damageResult.critical,
+
+      dodged:
+        damageResult.dodged
     };
   }
 };
 
+
 // =====================================================
 // CRUSADER'S WRATH
-// Deals bonus damage against judged enemies.
 //
 // Judgment 1: +50% damage
 // Judgment 2+: +75% damage
 // =====================================================
 
-export const crusadersWrathHandler: SpellHandlerDefinition = {
-  requiresEnemy: true,
+export const crusadersWrathHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    true,
 
   validate(spell) {
-    if ((Number(spell.damage) || 0) <= 0) {
-      return `${spell.name} has invalid damage configuration`;
+
+    if (
+      (
+        Number(
+          spell.damage
+        ) || 0
+      ) <= 0
+    ) {
+      return (
+        `${spell.name} has invalid damage configuration`
+      );
     }
 
     return null;
   },
 
+
   async execute({
     spell,
     player,
     enemy
-  }): Promise<SpellHandlerResult> {
+  }) {
+
     if (!enemy) {
       throw new Error(
         "Crusader's Wrath handler received no enemy"
@@ -227,14 +387,26 @@ export const crusadersWrathHandler: SpellHandlerDefinition = {
     }
 
     const judgment =
-      await getJudgmentState(enemy.id);
+      await getJudgmentState(
+        enemy
+      );
 
-    let damageMultiplier = 1;
+    let damageMultiplier =
+      1;
 
-    if (judgment.value >= 2) {
-      damageMultiplier = 1.75;
-    } else if (judgment.active) {
-      damageMultiplier = 1.5;
+    if (
+      judgment.value >= 2
+    ) {
+
+      damageMultiplier =
+        1.75;
+
+    } else if (
+      judgment.active
+    ) {
+
+      damageMultiplier =
+        1.5;
     }
 
     const damageResult =
@@ -245,20 +417,33 @@ export const crusadersWrathHandler: SpellHandlerDefinition = {
         damageMultiplier
       );
 
-    let log = damageResult.critical
-      ? (
-          `✨ Critical! ${spell.name} strikes for ` +
-          `${damageResult.damage} damage!`
-        )
-      : (
-          `⚔️ ${spell.name} strikes for ` +
-          `${damageResult.damage} damage!`
-        );
+    let log =
+      damageResult.dodged
+        ? (
+            `⚔️ ${spell.name} misses the enemy!`
+          )
+        : damageResult.critical
+          ? (
+              `✨ Critical! ${spell.name} strikes for ` +
+              `${damageResult.damage} damage!`
+            )
+          : (
+              `⚔️ ${spell.name} strikes for ` +
+              `${damageResult.damage} damage!`
+            );
 
-    if (judgment.active) {
+    if (
+      judgment.active &&
+      !damageResult.dodged
+    ) {
+
       const bonusPercent =
         Math.round(
-          (damageMultiplier - 1) * 100
+          (
+            damageMultiplier -
+            1
+          ) *
+          100
         );
 
       log +=
@@ -268,39 +453,64 @@ export const crusadersWrathHandler: SpellHandlerDefinition = {
 
     return {
       log,
-      enemyHP: damageResult.enemyHP,
+
+      enemyHP:
+        damageResult.enemyHP,
+
       killedEnemy:
-        damageResult.enemyHP <= 0
+        damageResult.enemyHP <=
+        0,
+
+      crit:
+        damageResult.critical,
+
+      dodged:
+        damageResult.dodged
     };
   }
 };
 
+
 // =====================================================
 // DIVINE RECKONING
-// Heavy damage.
 //
 // Against a judged enemy:
-// - deals 25% bonus damage
-// - intensifies Judgment to value 2
-// - refreshes Judgment to 10 seconds
+// - +25% damage
+// - Judgment becomes value 2
+// - Judgment refreshes to 10 seconds
 // =====================================================
 
-export const divineReckoningHandler: SpellHandlerDefinition = {
-  requiresEnemy: true,
+export const divineReckoningHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    true,
 
   validate(spell) {
-    if ((Number(spell.damage) || 0) <= 0) {
-      return `${spell.name} has invalid damage configuration`;
+
+    if (
+      (
+        Number(
+          spell.damage
+        ) || 0
+      ) <= 0
+    ) {
+      return (
+        `${spell.name} has invalid damage configuration`
+      );
     }
 
     return null;
   },
 
+
   async execute({
+    playerId,
     spell,
     player,
     enemy
-  }): Promise<SpellHandlerResult> {
+  }) {
+
     if (!enemy) {
       throw new Error(
         "Divine Reckoning handler received no enemy"
@@ -308,10 +518,14 @@ export const divineReckoningHandler: SpellHandlerDefinition = {
     }
 
     const judgment =
-      await getJudgmentState(enemy.id);
+      await getJudgmentState(
+        enemy
+      );
 
     const damageMultiplier =
-      judgment.active ? 1.25 : 1;
+      judgment.active
+        ? 1.25
+        : 1;
 
     const damageResult =
       await dealTemplarDamage(
@@ -321,100 +535,167 @@ export const divineReckoningHandler: SpellHandlerDefinition = {
         damageMultiplier
       );
 
-    let intensifiedJudgment = false;
+    let intensifiedJudgment =
+      false;
 
     if (
       judgment.active &&
       damageResult.enemyHP > 0
     ) {
-      await applyCreatureDebuff(
-        enemy.id,
-        "judgment",
-        2,
-        10,
-        `spell:${spell.id}`
+
+      await applySpellDebuff(
+        enemy,
+        {
+          sourcePlayerId:
+            playerId,
+
+          spellId:
+            Number(
+              spell.id
+            ),
+
+          spellName:
+            String(
+              spell.name
+            ),
+
+          stat:
+            "judgment",
+
+          value:
+            2,
+
+          durationSeconds:
+            10
+        }
       );
 
-      intensifiedJudgment = true;
+      intensifiedJudgment =
+        true;
     }
 
-    let log = damageResult.critical
-      ? (
-          `✨ Critical! ${spell.name} crashes into the enemy ` +
-          `for ${damageResult.damage} damage!`
-        )
-      : (
-          `⚡ ${spell.name} deals ` +
-          `${damageResult.damage} damage!`
-        );
+    let log =
+      damageResult.dodged
+        ? (
+            `⚡ ${spell.name} misses the enemy!`
+          )
+        : damageResult.critical
+          ? (
+              `✨ Critical! ${spell.name} crashes into the enemy ` +
+              `for ${damageResult.damage} damage!`
+            )
+          : (
+              `⚡ ${spell.name} deals ` +
+              `${damageResult.damage} damage!`
+            );
 
-    if (intensifiedJudgment) {
+    if (
+      intensifiedJudgment
+    ) {
       log +=
         " ⚖️ Judgment intensifies!";
     }
 
     return {
       log,
-      enemyHP: damageResult.enemyHP,
+
+      enemyHP:
+        damageResult.enemyHP,
+
       appliedStatus:
         intensifiedJudgment,
+
       killedEnemy:
-        damageResult.enemyHP <= 0
+        damageResult.enemyHP <=
+        0,
+
+      crit:
+        damageResult.critical,
+
+      dodged:
+        damageResult.dodged
     };
   }
 };
 
+
 // =====================================================
 // FINAL JUDGMENT
-// Damage increases based on the enemy's missing health.
 //
-// Full health: 1.0x
-// Half health: 1.5x
-// Near death: approaches 2.0x
+// Full HP: 1x
+// Half HP: 1.5x
+// Near death: approaches 2x
 // =====================================================
 
-export const finalJudgmentHandler: SpellHandlerDefinition = {
-  requiresEnemy: true,
+export const finalJudgmentHandler:
+SpellHandlerDefinition = {
+
+  requiresEnemy:
+    true,
 
   validate(spell) {
-    if ((Number(spell.damage) || 0) <= 0) {
-      return `${spell.name} has invalid damage configuration`;
+
+    if (
+      (
+        Number(
+          spell.damage
+        ) || 0
+      ) <= 0
+    ) {
+      return (
+        `${spell.name} has invalid damage configuration`
+      );
     }
 
     return null;
   },
 
+
   async execute({
     spell,
     player,
     enemy
-  }): Promise<SpellHandlerResult> {
+  }) {
+
     if (!enemy) {
       throw new Error(
         "Final Judgment handler received no enemy"
       );
     }
 
-    const currentHP = Math.max(
-      0,
-      Number(enemy.hp) || 0
-    );
+    const currentHP =
+      Math.max(
+        0,
+        Number(
+          enemy.hp
+        ) || 0
+      );
 
-    const maxHP = Math.max(
-      1,
-      Number(enemy.maxhp) || 1
-    );
+    const maxHP =
+      Math.max(
+        1,
+        Number(
+          enemy.maxhp
+        ) || 1
+      );
 
-    const healthPercent = Math.max(
-      0,
-      Math.min(1, currentHP / maxHP)
-    );
+    const healthPercent =
+      Math.max(
+        0,
+        Math.min(
+          1,
+          currentHP /
+          maxHP
+        )
+      );
 
     const missingHealthPercent =
-      1 - healthPercent;
+      1 -
+      healthPercent;
 
     const damageMultiplier =
-      1 + missingHealthPercent;
+      1 +
+      missingHealthPercent;
 
     const damageResult =
       await dealTemplarDamage(
@@ -424,21 +705,31 @@ export const finalJudgmentHandler: SpellHandlerDefinition = {
         damageMultiplier
       );
 
-    const bonusPercent = Math.floor(
-      missingHealthPercent * 100
-    );
+    const bonusPercent =
+      Math.floor(
+        missingHealthPercent *
+        100
+      );
 
-    let log = damageResult.critical
-      ? (
-          `✨ Critical! ${spell.name} passes sentence for ` +
-          `${damageResult.damage} damage!`
-        )
-      : (
-          `⚖️ ${spell.name} deals ` +
-          `${damageResult.damage} damage!`
-        );
+    let log =
+      damageResult.dodged
+        ? (
+            `⚖️ ${spell.name} misses the enemy!`
+          )
+        : damageResult.critical
+          ? (
+              `✨ Critical! ${spell.name} passes sentence for ` +
+              `${damageResult.damage} damage!`
+            )
+          : (
+              `⚖️ ${spell.name} deals ` +
+              `${damageResult.damage} damage!`
+            );
 
-    if (bonusPercent > 0) {
+    if (
+      bonusPercent > 0 &&
+      !damageResult.dodged
+    ) {
       log +=
         ` Missing health increases the damage by ` +
         `${bonusPercent}%!`;
@@ -446,9 +737,19 @@ export const finalJudgmentHandler: SpellHandlerDefinition = {
 
     return {
       log,
-      enemyHP: damageResult.enemyHP,
+
+      enemyHP:
+        damageResult.enemyHP,
+
       killedEnemy:
-        damageResult.enemyHP <= 0
+        damageResult.enemyHP <=
+        0,
+
+      crit:
+        damageResult.critical,
+
+      dodged:
+        damageResult.dodged
     };
   }
 };

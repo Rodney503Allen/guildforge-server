@@ -32,6 +32,8 @@ import refiningRoutes from "./refining.routes";
 import craftingRoutes from "./crafting.routes";
 import restRoutes from "./rest.routes";
 import spellLoadoutRoutes from "./spellLoadout.routes";
+import partyRoutes from "./party.routes";
+import huntRoutes from "./hunt.routes";
 
 const app = express();
 
@@ -140,6 +142,8 @@ app.use("/workshop", refiningRoutes);
 app.use("/workshop", craftingRoutes);
 app.use("/rest", restRoutes);
 app.use(spellLoadoutRoutes);
+app.use(partyRoutes);
+app.use(huntRoutes);
 
 // =======================
 // MAIN PAGE

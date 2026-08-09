@@ -54,10 +54,21 @@ function startCombatStatePolling() {
           const rewards = data.snapshot.rewards;
 
           if (rewards) {
+
             maybeShowLootChest({
               chest: rewards.chest ?? null,
               quest: rewards.quest ?? null
             });
+
+            if (
+              rewards.huntProgress?.advanced &&
+              typeof window.showHuntProgress === "function"
+            ) {
+              window.showHuntProgress(
+                rewards.huntProgress
+              );
+            }
+
           }
         }
 
@@ -111,7 +122,86 @@ function setCombatUIEnabled(enabled) {
     el.style.pointerEvents = enabled ? "" : "none";
   });
 }
+// =======================================
+// HUNT PROGRESS NOTIFICATIONS
+// =======================================
 
+let lastShownHuntProgressKey = null;
+
+function showCombatHuntProgress(progress) {
+  if (!progress?.advanced) {
+    return;
+  }
+
+  console.log(
+    "Combat Hunt Progress:",
+    progress
+  );
+
+  const key =
+    [
+      progress.partyHuntId,
+      progress.objectiveId,
+      progress.progressCount,
+      progress.trackingProgress
+    ].join(":");
+
+  // Prevent the polling snapshot from
+  // showing the exact same progress twice.
+  if (key === lastShownHuntProgressKey) {
+    return;
+  }
+
+  lastShownHuntProgressKey = key;
+
+  const trackingText =
+    `${progress.trackingProgress}/${progress.trackingRequired} Tracking`;
+
+  if (window.GFToast?.show) {
+
+    if (progress.objectiveComplete) {
+      window.GFToast.show(
+        "Hunt Objective Complete",
+        `+${progress.trackingGain} Tracking • ${trackingText}`,
+        {
+          type: "success",
+          durationMs: 3200
+        }
+      );
+    } else {
+      window.GFToast.show(
+        "Hunt Progress",
+        `+${progress.trackingGain} Tracking • ${trackingText}`,
+        {
+          type: "success",
+          durationMs: 2600
+        }
+      );
+    }
+
+    if (progress.targetRevealed) {
+      setTimeout(() => {
+        window.GFToast.show(
+          "Quarry Located",
+          "The trail is complete. Your party has uncovered its quarry.",
+          {
+            type: "success",
+            durationMs: 4500
+          }
+        );
+      }, 700);
+    }
+
+    return;
+  }
+
+  // Debug fallback so we know the
+  // Hunt payload reached the browser.
+  console.warn(
+    "GFToast unavailable. Hunt progressed:",
+    progress
+  );
+}
 // =======================
 // POTION COOLDOWNS (PER SLOT)
 // =======================
@@ -253,6 +343,105 @@ function updateEnemyHUD(hp, maxHP) {
   }
 }
 
+const displayedDamageEventIds = new Set();
+
+function showFloatingDamage(
+  target,
+  amount,
+  crit = false
+) {
+  const panel =
+    target === "player"
+      ? document.querySelector(
+          "#combatModal .player-panel"
+        )
+      : document.querySelector(
+          "#combatModal .enemy-panel"
+        );
+
+  if (!panel) return;
+
+  const value = Math.max(
+    0,
+    Math.floor(Number(amount) || 0)
+  );
+
+  if (value <= 0) return;
+
+  const element =
+    document.createElement("div");
+
+  element.className = crit
+    ? "floating-damage is-crit"
+    : "floating-damage";
+
+  element.textContent = crit
+    ? `${value}!`
+    : String(value);
+
+  // Prevent simultaneous numbers from
+  // appearing directly on top of each other.
+  const horizontalOffset =
+    Math.floor(Math.random() * 41) - 20;
+
+  element.style.marginLeft =
+    `${horizontalOffset}px`;
+
+  panel.appendChild(element);
+
+  element.addEventListener(
+    "animationend",
+    () => element.remove(),
+    { once: true }
+  );
+
+  // Fallback cleanup if the animation
+  // is interrupted or unavailable.
+  window.setTimeout(
+    () => element.remove(),
+    1500
+  );
+}
+
+function syncDamageEvents(snapshot) {
+  const events = Array.isArray(
+    snapshot?.damageEvents
+  )
+    ? snapshot.damageEvents
+    : [];
+
+  for (const event of events) {
+    const eventId = String(event.id ?? "");
+
+    if (
+      !eventId ||
+      displayedDamageEventIds.has(eventId)
+    ) {
+      continue;
+    }
+
+    displayedDamageEventIds.add(eventId);
+
+    showFloatingDamage(
+      event.target,
+      event.amount,
+      Boolean(event.crit)
+    );
+  }
+
+  if (displayedDamageEventIds.size > 100) {
+    const newestIds = events
+      .slice(-30)
+      .map(event => String(event.id));
+
+    displayedDamageEventIds.clear();
+
+    for (const id of newestIds) {
+      displayedDamageEventIds.add(id);
+    }
+  }
+}
+
 function syncCombatSnapshot(snapshot) {
   if (!snapshot) return;
 
@@ -328,6 +517,7 @@ function syncCombatSnapshot(snapshot) {
     }
   }
 
+  syncDamageEvents(snapshot);
   syncServerCombatLog(snapshot);
 }
 /* ===============================
@@ -336,6 +526,14 @@ function syncCombatSnapshot(snapshot) {
 
 window.openCombatModal = async function (enemy) {
   await waitForEl("combatModal");
+  // New combat sessions restart damage-event IDs at 1.
+  displayedDamageEventIds.clear();
+
+  // Remove any floating numbers left from the previous combat.
+  document
+    .querySelectorAll("#combatModal .floating-damage")
+    .forEach(element => element.remove());
+
   ["health", "mana"].forEach(slot => {
   const remaining = Math.ceil((potionCdEnd[slot] - Date.now()) / 1000);
 
@@ -537,6 +735,14 @@ async function combatAttack() {
     if (exp) logCombat(`✨ You gained ${exp} EXP!`);
     if (gold) logCombat(`💰 You gained ${gold} gold!`);
     if (data.levelUp) logCombat("⬆ LEVEL UP!");
+    if (
+      data.huntProgress?.advanced &&
+      typeof window.showHuntProgress === "function"
+    ) {
+      window.showHuntProgress(
+        data.huntProgress
+      );
+    }
 
     enterPostCombatState();
     maybeShowLootChest(data);
@@ -777,22 +983,52 @@ async function castSpell(spellId) {
 
   if (data.playerSP !== undefined) {
     updatePlayerSP(data.playerSP);
+  } 
+  
+if (data.dead) {
+  logCombat("🏆 Enemy defeated!");
+
+  const exp =
+    data.exp ??
+    data.expGained;
+
+  const gold =
+    data.gold ??
+    data.goldGained;
+
+  if (exp) {
+    logCombat(
+      `✨ You gained ${exp} EXP!`
+    );
   }
 
-  if (data.dead) {
-    logCombat("🏆 Enemy defeated!");
-
-    const exp = data.exp ?? data.expGained;
-    const gold = data.gold ?? data.goldGained;
-
-    if (exp) logCombat(`✨ You gained ${exp} EXP!`);
-    if (gold) logCombat(`💰 You gained ${gold} gold!`);
-    if (data.levelUp) logCombat("⬆ LEVEL UP!");
-
-    enterPostCombatState();
-    maybeShowLootChest(data);
-    return;
+  if (gold) {
+    logCombat(
+      `💰 You gained ${gold} gold!`
+    );
   }
+
+  if (data.levelUp) {
+    logCombat(
+      "⬆ LEVEL UP!"
+    );
+  }
+
+  // =======================
+  // HUNT PROGRESS
+  // =======================
+  showCombatHuntProgress(
+    data.huntProgress
+  );
+
+  maybeShowLootChest(
+    data
+  );
+
+  enterPostCombatState();
+
+  return;
+}
 
 }
 

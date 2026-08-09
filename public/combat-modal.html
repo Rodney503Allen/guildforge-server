@@ -1049,6 +1049,97 @@
   background: linear-gradient(180deg, rgba(122,30,30,.72), rgba(0,0,0,.22));
 }
 
+.combat-panel {
+  position: relative;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.floating-damage {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  z-index: 30;
+
+  color: #ff7566;
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+
+  text-shadow:
+    0 2px 2px rgba(0, 0, 0, 0.95),
+    0 0 8px rgba(255, 40, 25, 0.75);
+
+  transform: translate(-50%, 0);
+  animation: floatingDamageRise 900ms ease-out forwards;
+}
+
+.floating-damage.is-crit {
+  color: #ffd45c;
+  font-size: 48px;
+
+  text-shadow:
+    0 2px 2px rgba(0, 0, 0, 0.95),
+    0 0 10px rgba(255, 190, 30, 0.95);
+
+  animation-name: floatingCritRise;
+}
+
+@keyframes floatingDamageRise {
+  0% {
+    opacity: 0;
+    transform:
+      translate(-50%, 10px)
+      scale(0.8);
+  }
+
+  15% {
+    opacity: 1;
+    transform:
+      translate(-50%, 0)
+      scale(1.12);
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate(-50%, -70px)
+      scale(1);
+  }
+}
+
+@keyframes floatingCritRise {
+  0% {
+    opacity: 0;
+    transform:
+      translate(-50%, 12px)
+      scale(0.65);
+  }
+
+  18% {
+    opacity: 1;
+    transform:
+      translate(-50%, -2px)
+      scale(1.35);
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate(-50%, -85px)
+      scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floating-damage,
+  .floating-damage.is-crit {
+    animation-duration: 250ms;
+  }
+}
+
 /* responsive */
 @media (max-width: 520px){
   .combat-hotbar{
@@ -1101,7 +1192,7 @@
 
       <!-- HP -->
       <div class="bar-group">
-        <div class="bar-label">❤️ HP</div>
+        <div class="bar-label">❤️ Health</div>
         <div class="bar">
           <div id="playerHPBar" class="bar-fill hp"></div>
           <div class="bar-text">
@@ -1112,7 +1203,7 @@
 
       <!-- SP -->
       <div class="bar-group">
-        <div class="bar-label">✨ SP</div>
+        <div class="bar-label">✨ Mana</div>
         <div class="bar">
           <div id="playerSPBar" class="bar-fill sp"></div>
           <div class="bar-text">
