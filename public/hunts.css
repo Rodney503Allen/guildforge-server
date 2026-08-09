@@ -259,10 +259,10 @@ body{
 .hunts-return-btn{
   position:absolute;
 
-  top:28px;
-  right:30px;
+  top:22px;
+  right:22px;
 
-  z-index:3;
+  z-index:10;
 
   min-height:44px;
 
@@ -1045,10 +1045,15 @@ body{
   }
 
   .hunts-return-btn{
-    top:auto;
-    bottom:24px;
-    left:22px;
-    right:22px;
+    top:16px;
+    right:16px;
+    bottom:auto;
+    left:auto;
+
+    min-height:40px;
+    padding:0 13px;
+
+    font-size:10px;
   }
 
   .hunt-card__head,
