@@ -974,9 +974,12 @@ body{
 ========================================= */
 
 .main-frame,
-.panel-frame,
-.button-frame{
+.panel-frame{
   position:relative;
+  box-sizing:border-box;
+}
+
+.button-frame{
   box-sizing:border-box;
 }
 
