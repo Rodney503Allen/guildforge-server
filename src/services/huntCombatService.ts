@@ -1,3 +1,4 @@
+//huntCombatService.ts
 import { db } from "../db";
 
 export async function getActiveHuntEncounter(
@@ -168,54 +169,90 @@ export async function getActiveHuntEncounter(
 export async function joinHuntEncounter(
   playerId: number
 ) {
+  if (
+    !Number.isInteger(playerId) ||
+    playerId <= 0
+  ) {
+    throw new Error(
+      "Invalid player."
+    );
+  }
+
   const connection =
     await db.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const [rows]: any =
+    // =========================================
+    // FIND AND LOCK ACTIVE PARTY ENCOUNTER
+    // =========================================
+
+    const [encounterRows]: any =
       await connection.query(
         `
           SELECT
             he.id AS encounter_id,
-            he.map_x,
-            he.map_y,
-            pl.map_x AS player_map_x,
-            pl.map_y AS player_map_y
+            he.party_hunt_id,
+            he.party_id,
+            he.status
 
           FROM party_members pm
 
           JOIN hunt_encounters he
             ON he.party_id = pm.party_id
 
-          JOIN players pl
-            ON pl.id = pm.player_id
-
           WHERE pm.player_id = ?
             AND he.status = 'active'
+
+          ORDER BY
+            he.started_at DESC
 
           LIMIT 1
 
           FOR UPDATE
         `,
-        [playerId]
+        [
+          playerId
+        ]
       );
 
-    if (!rows.length) {
+    if (!encounterRows.length) {
       throw new Error(
         "No active Hunt encounter is available."
       );
     }
 
-    const encounter = rows[0];
+    const encounter =
+      encounterRows[0];
 
     const encounterId =
-      Number(encounter.encounter_id);
+      Number(
+        encounter.encounter_id
+      );
+
+    const partyHuntId =
+      Number(
+        encounter.party_hunt_id
+      );
+
+    const partyId =
+      Number(
+        encounter.party_id
+      );
+
+    // =========================================
+    // REQUIRE FROZEN-ROSTER MEMBERSHIP
+    // =========================================
 
     /*
-     * Existing participants may rejoin
-     * the encounter from any location.
+     * createHuntEncounterInTransaction()
+     * inserted the complete frozen ready-check
+     * roster into hunt_encounter_players.
+     *
+     * Therefore, the absence of this row means
+     * the player was not included in the roster
+     * and must not be allowed to join afterward.
      */
     const [participantRows]: any =
       await connection.query(
@@ -239,76 +276,75 @@ export async function joinHuntEncounter(
         ]
       );
 
-    if (participantRows.length) {
-      await connection.query(
-        `
-          UPDATE hunt_encounter_players
-
-          SET is_active = 1
-
-          WHERE hunt_encounter_id = ?
-            AND player_id = ?
-        `,
-        [
-          encounterId,
-          playerId
-        ]
-      );
-
-      await connection.commit();
-
-      return {
-        encounterId,
-        joined: true,
-        rejoined: true
-      };
-    }
-
-    /*
-     * New participants must be standing
-     * on the Hunt encounter tile.
-     */
-    const isAtEncounter =
-      Number(encounter.player_map_x) ===
-        Number(encounter.map_x) &&
-      Number(encounter.player_map_y) ===
-        Number(encounter.map_y);
-
-    if (!isAtEncounter) {
+    if (!participantRows.length) {
       throw new Error(
-        "You must reach the Hunt target before joining the battle."
+        "You were not included in this Hunt encounter's ready-check roster."
       );
     }
 
-    /*
-     * Register the new participant.
-     */
-    await connection.query(
-      `
-        INSERT INTO hunt_encounter_players (
-          hunt_encounter_id,
-          player_id,
-          is_active
-        )
+    const participant =
+      participantRows[0];
 
-        VALUES (?, ?, 1)
-      `,
-      [
-        encounterId,
-        playerId
-      ]
-    );
+    const wasActive =
+      Boolean(
+        participant.is_active
+      );
+
+    // =========================================
+    // REACTIVATE EXISTING PARTICIPANT
+    // =========================================
+
+    if (!wasActive) {
+      const [updateResult]: any =
+        await connection.query(
+          `
+            UPDATE hunt_encounter_players
+
+            SET is_active = 1
+
+            WHERE hunt_encounter_id = ?
+              AND player_id = ?
+          `,
+          [
+            encounterId,
+            playerId
+          ]
+        );
+
+      if (
+        Number(updateResult.affectedRows) !==
+        1
+      ) {
+        throw new Error(
+          "Unable to rejoin the Hunt encounter."
+        );
+      }
+    }
 
     await connection.commit();
 
     return {
       encounterId,
+      partyHuntId,
+      partyId,
+
       joined: true,
-      rejoined: false
+
+      /*
+       * True only when this request changed the
+       * player from inactive to active.
+       */
+      rejoined:
+        !wasActive,
+
+      alreadyActive:
+        wasActive
     };
+
   } catch (err) {
     await connection.rollback();
     throw err;
+
   } finally {
     connection.release();
   }

@@ -2855,6 +2855,11 @@ async function advanceHuntCombatSessionUnlocked(
     return session;
   }
 
+  if (session.enemy.hp <= 0) {
+  await completeHuntVictory(session);
+  return session;
+}
+
   const now =
     Date.now();
 
@@ -3682,9 +3687,7 @@ function rollHuntItemRewards(
 async function completeHuntVictory(
   session: HuntCombatSession
 ) {
-  if (
-    session.state === "victory"
-  ) {
+  if (session.state === "victory") {
     return;
   }
 
@@ -3720,43 +3723,43 @@ async function completeHuntVictory(
       );
     }
 
-      const [[hunt]]: any =
-        await connection.query(
-          `
-            SELECT
-              ph.id AS party_hunt_id,
-              ph.hunt_id,
+    const [[hunt]]: any =
+      await connection.query(
+        `
+          SELECT
+            ph.id AS party_hunt_id,
+            ph.hunt_id,
 
-              h.name,
-              h.reward_xp AS exp_reward,
-              h.reward_gold AS gold_reward,
+            h.name,
+            h.reward_xp AS exp_reward,
+            h.reward_gold AS gold_reward,
 
-              he.creature_id,
+            he.creature_id,
 
-              c.name AS creature_name,
-              c.level AS creature_level,
-              c.rarity AS creature_rarity
+            c.name AS creature_name,
+            c.level AS creature_level,
+            c.rarity AS creature_rarity
 
-            FROM party_hunts ph
+          FROM party_hunts ph
 
-            JOIN hunts h
-              ON h.id = ph.hunt_id
+          JOIN hunts h
+            ON h.id = ph.hunt_id
 
-            JOIN hunt_encounters he
-              ON he.id = ?
+          JOIN hunt_encounters he
+            ON he.id = ?
 
-            JOIN creatures c
-              ON c.id = he.creature_id
+          JOIN creatures c
+            ON c.id = he.creature_id
 
-            WHERE ph.id = ?
+          WHERE ph.id = ?
 
-            LIMIT 1
-          `,
-          [
-            session.encounterId,
-            session.partyHuntId
-          ]
-        );
+          LIMIT 1
+        `,
+        [
+          session.encounterId,
+          session.partyHuntId
+        ]
+      );
 
     if (!hunt) {
       throw new Error(
@@ -3795,308 +3798,279 @@ async function completeHuntVictory(
         )
       );
 
-      /*
- * Load the Hunt's personal item
- * reward pool.
- */
-const [huntRewardRows]: any =
-  await connection.query(
-    `
-      SELECT
-        hr.item_id,
-        hr.drop_chance,
-        hr.min_qty,
-        hr.max_qty,
+    /*
+     * Load the Hunt's personal item
+     * reward pool.
+     */
+    const [huntRewardRows]: any =
+      await connection.query(
+        `
+          SELECT
+            hr.item_id,
+            hr.drop_chance,
+            hr.min_qty,
+            hr.max_qty,
+            i.name
 
-        i.name
+          FROM hunt_rewards hr
 
-      FROM hunt_rewards hr
+          JOIN items i
+            ON i.id = hr.item_id
 
-      JOIN items i
-        ON i.id = hr.item_id
+          WHERE hr.hunt_id = ?
 
-      WHERE hr.hunt_id = ?
-
-      ORDER BY
-        hr.id ASC
-    `,
-    [
-      Number(
-        hunt.hunt_id
-      )
-    ]
-  );
+          ORDER BY
+            hr.id ASC
+        `,
+        [
+          Number(
+            hunt.hunt_id
+          )
+        ]
+      );
 
     const pendingRewards:
       HuntCombatReward[] = [];
 
-for (
-  const participant of
-  participants
-) {
-  const playerId =
-    Number(
-      participant.player_id
-    );
-
-  /*
-   * -------------------------------------------------
-   * EXPERIENCE / LEVEL PROGRESSION
-   * -------------------------------------------------
-   */
-
-  const experienceResult =
-    await grantExperienceTx(
-      connection,
-      playerId,
-      expReward
-    );
-
-  /*
-   * -------------------------------------------------
-   * GOLD
-   * -------------------------------------------------
-   */
-
-  if (goldReward > 0) {
-    await connection.query(
-      `
-        UPDATE players
-
-        SET gold = gold + ?
-
-        WHERE id = ?
-      `,
-      [
-        goldReward,
-        playerId
-      ]
-    );
-  }
-
-  /*
-   * -------------------------------------------------
-   * PERSONAL HUNT MATERIAL ROLLS
-   * -------------------------------------------------
-   */
-
-  const materialRewards =
-    rollHuntItemRewards(
-      huntRewardRows
-    );
-
-
-  /*
-   * -------------------------------------------------
-   * PERSONAL EQUIPMENT ROLL
-   * -------------------------------------------------
-   *
-   * Hunt targets use the normal Guildforge
-   * generated equipment system.
-   *
-   * Each player rolls independently.
-   */
-
-  const generatedEquipment =
-    await generateLootForCreature(
-      {
-        id:
-          Number(
-            encounter.creature_id
-          ),
-
-        name:
-          session.enemy.name,
-
-        level:
-          session.enemy.level,
-
-        rarity:
-          "boss"
-      },
-
-      {
-        id:
-          playerId,
-
-        level:
-          session.enemy.level
-      },
-
-      1,
-
-      {
-        sourceType:
-          "hunt",
-
-        /*
-         * Use hunt_id instead of party_hunt_id
-         * because party_hunts is deleted when
-         * victory cleanup finishes.
-         */
-        sourceId:
-          Number(
-            hunt.hunt_id
-          ),
-
-        conn:
-          connection
-      }
-    );
-
-
-  /*
-   * -------------------------------------------------
-   * BUILD CHEST DROPS
-   * -------------------------------------------------
-   */
-
-  const chestDrops:
-    DropLine[] = [];
-
-
-  /*
-   * Static crafting materials.
-   */
-  for (
-    const material of
-    materialRewards
-  ) {
-    chestDrops.push({
-      item_id:
-        material.itemId,
-
-      qty:
-        material.quantity
-    });
-  }
-
-
-  /*
-   * Generated equipment.
-   *
-   * player_items rows were created above,
-   * but remain unclaimed until the reward
-   * chest is claimed.
-   */
-  for (
-    const equipment of
-    generatedEquipment
-  ) {
-    chestDrops.push({
-      player_item_id:
-        equipment.playerItemId,
-
-      qty:
-        1,
-
-      roll_json:
-        equipment.affixes
-    });
-  }
-
-
-  /*
-   * -------------------------------------------------
-   * CREATE PERSONAL HUNT CHEST
-   * -------------------------------------------------
-   */
-
-  const chest =
-    await createChestFromDrops({
-      playerId,
-
-      sourceType:
-        "hunt",
-
-      sourceId:
+    for (
+      const participant of
+      participants
+    ) {
+      const playerId =
         Number(
-          hunt.hunt_id
-        ),
+          participant.player_id
+        );
 
-      drops:
-        chestDrops,
+      /*
+       * EXPERIENCE / LEVEL PROGRESSION
+       */
+      const experienceResult =
+        await grantExperienceTx(
+          connection,
+          playerId,
+          expReward
+        );
 
-      conn:
-        connection
-    });
+      /*
+       * GOLD
+       */
+      if (goldReward > 0) {
+        await connection.query(
+          `
+            UPDATE players
 
+            SET gold = gold + ?
 
-  /*
-   * -------------------------------------------------
-   * FINAL CLIENT-FACING REWARD DATA
-   * -------------------------------------------------
-   */
+            WHERE id = ?
+          `,
+          [
+            goldReward,
+            playerId
+          ]
+        );
+      }
 
-  const rewardItems:
-    HuntCombatRewardItem[] = [
-      ...materialRewards.map(
-        item => ({
-          itemId:
-            item.itemId,
+      /*
+       * PERSONAL HUNT MATERIAL ROLLS
+       */
+      const materialRewards =
+        rollHuntItemRewards(
+          huntRewardRows
+        );
 
-          playerItemId:
-            null,
+      /*
+       * PERSONAL EQUIPMENT ROLL
+       *
+       * Each eligible player rolls
+       * independently.
+       */
+      const generatedEquipment =
+        await generateLootForCreature(
+          {
+            id:
+              Number(
+                encounter.creature_id
+              ),
 
-          name:
-            item.name,
+            name:
+              session.enemy.name,
 
-          quantity:
-            item.quantity,
+            level:
+              session.enemy.level,
 
-          rarity:
-            null,
+            rarity:
+              "boss"
+          },
 
-          isEquipment:
-            false
-        })
-      ),
+          {
+            id:
+              playerId,
 
-      ...generatedEquipment.map(
-        item => ({
-          itemId:
-            null,
+            level:
+              session.enemy.level
+          },
 
-          playerItemId:
-            item.playerItemId,
+          1,
 
-          name:
-            item.name,
+          {
+            sourceType:
+              "hunt",
 
-          quantity:
+            /*
+             * Use hunt_id instead of
+             * party_hunt_id because the
+             * active party Hunt is deleted
+             * during victory cleanup.
+             */
+            sourceId:
+              Number(
+                hunt.hunt_id
+              ),
+
+            conn:
+              connection
+          }
+        );
+
+      /*
+       * BUILD CHEST DROPS
+       */
+      const chestDrops:
+        DropLine[] = [];
+
+      /*
+       * Static crafting materials.
+       */
+      for (
+        const material of
+        materialRewards
+      ) {
+        chestDrops.push({
+          item_id:
+            material.itemId,
+
+          qty:
+            material.quantity
+        });
+      }
+
+      /*
+       * Generated equipment.
+       *
+       * The player_items records were
+       * created above, but remain unclaimed
+       * until the chest is claimed.
+       */
+      for (
+        const equipment of
+        generatedEquipment
+      ) {
+        chestDrops.push({
+          player_item_id:
+            equipment.playerItemId,
+
+          qty:
             1,
 
-          rarity:
-            item.rarity,
+          roll_json:
+            equipment.affixes
+        });
+      }
 
-          isEquipment:
-            true
-        })
-      )
-    ];
+      /*
+       * CREATE PERSONAL HUNT CHEST
+       */
+      const chest =
+        await createChestFromDrops({
+          playerId,
 
+          sourceType:
+            "hunt",
 
-  pendingRewards.push({
-    playerId,
+          sourceId:
+            Number(
+              hunt.hunt_id
+            ),
 
-    exp:
-      experienceResult.expGained,
+          drops:
+            chestDrops,
 
-    gold:
-      goldReward,
+          conn:
+            connection
+        });
 
-    items:
-      rewardItems,
+      /*
+       * FINAL CLIENT-FACING REWARD DATA
+       */
+      const rewardItems:
+        HuntCombatRewardItem[] = [
+          ...materialRewards.map(
+            item => ({
+              itemId:
+                item.itemId,
 
-    chestId:
-      chest?.chestId ??
-      null,
+              playerItemId:
+                null,
 
-    levelUp:
-      experienceResult.levelUp ??
-      null
-  });
-}
+              name:
+                item.name,
+
+              quantity:
+                item.quantity,
+
+              rarity:
+                null,
+
+              isEquipment:
+                false
+            })
+          ),
+
+          ...generatedEquipment.map(
+            item => ({
+              itemId:
+                null,
+
+              playerItemId:
+                item.playerItemId,
+
+              name:
+                item.name,
+
+              quantity:
+                1,
+
+              rarity:
+                item.rarity,
+
+              isEquipment:
+                true
+            })
+          )
+        ];
+
+      pendingRewards.push({
+        playerId,
+
+        exp:
+          experienceResult.expGained,
+
+        gold:
+          goldReward,
+
+        items:
+          rewardItems,
+
+        chestId:
+          chest?.chestId ??
+          null,
+
+        levelUp:
+          experienceResult.levelUp ??
+          null
+      });
+    }
+
     /*
      * Remove clue instances.
      */
@@ -4154,6 +4128,42 @@ for (
     );
 
     /*
+     * Remove ready-check player records
+     * before deleting their parent checks.
+     */
+    await connection.query(
+      `
+        DELETE hrcp
+
+        FROM hunt_ready_check_players hrcp
+
+        JOIN hunt_ready_checks hrc
+          ON hrc.id =
+            hrcp.ready_check_id
+
+        WHERE hrc.party_hunt_id = ?
+      `,
+      [
+        session.partyHuntId
+      ]
+    );
+
+    /*
+     * Remove ready checks before deleting
+     * the party Hunt they reference.
+     */
+    await connection.query(
+      `
+        DELETE FROM hunt_ready_checks
+
+        WHERE party_hunt_id = ?
+      `,
+      [
+        session.partyHuntId
+      ]
+    );
+
+    /*
      * Finally remove the completed
      * active Hunt instance.
      */
@@ -4168,60 +4178,54 @@ for (
       ]
     );
 
-await connection.commit();
+    await connection.commit();
 
-/*
- * Database lifecycle is complete.
- *
- * From this point onward the in-memory
- * session becomes the short-lived final
- * victory record shown to the clients.
- */
+    /*
+     * Database completion succeeded.
+     * Preserve a short-lived victory
+     * snapshot for all combat clients.
+     */
+    session.rewards =
+      pendingRewards;
 
-session.rewards =
-  pendingRewards;
+    session.enemy.hp = 0;
+    session.enemy.stats.hpoints = 0;
 
-session.enemy.hp = 0;
-session.enemy.stats.hpoints = 0;
+    session.enemy.gauge = 0;
+    session.enemy.ready = false;
 
-session.enemy.gauge = 0;
-session.enemy.ready = false;
+    session.state =
+      "victory";
 
-session.state =
-  "victory";
+    session.updatedAt =
+      Date.now();
 
-session.updatedAt =
-  Date.now();
+    session.log.push(
+      `🏆 ${session.enemy.name} has been defeated!`
+    );
 
-session.log.push(
-  `🏆 ${session.enemy.name} has been defeated!`
-);
+    session.log.push(
+      "🎖 The Hunt is complete!"
+    );
 
-session.log.push(
-  `🎖 The Hunt is complete!`
-);
+    session.log.push(
+      `✨ Each eligible adventurer receives ${expReward} EXP and ${goldReward} gold.`
+    );
 
-session.log.push(
-  `✨ Each eligible adventurer receives ${expReward} EXP and ${goldReward} gold.`
-);
+    if (session.log.length > 60) {
+      session.log =
+        session.log.slice(-60);
+    }
 
-if (
-  session.log.length > 60
-) {
-  session.log =
-    session.log.slice(-60);
-}
-
-/*
- * Keep the final snapshot alive long enough
- * for all party clients to receive victory.
- */
-scheduleHuntSessionCleanup(
-  session.encounterId
-);
-
+    /*
+     * Keep the final snapshot alive long
+     * enough for every party client to
+     * receive the victory response.
+     */
+    scheduleHuntSessionCleanup(
+      session.encounterId
+    );
   } catch (err) {
-
     await connection.rollback();
 
     console.error(
@@ -4230,9 +4234,7 @@ scheduleHuntSessionCleanup(
     );
 
     throw err;
-
   } finally {
-
     connection.release();
   }
 }

@@ -1,0 +1,239 @@
+.hunt-ready-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  font-family: "Cinzel", serif;
+}
+
+.hunt-ready-modal.hidden {
+  display: none;
+}
+
+.hunt-ready-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 7, 10, 0.82);
+  backdrop-filter: blur(5px);
+}
+
+.hunt-ready-card {
+  position: relative;
+  width: min(540px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: auto;
+  color: #eee5ce;
+  border: 1px solid #76603c;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 0, rgba(128, 82, 35, 0.22), transparent 48%),
+    linear-gradient(180deg, #211c18 0%, #121416 100%);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7), inset 0 0 35px rgba(207, 163, 87, 0.05);
+}
+
+.hunt-ready-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px 26px 18px;
+  border-bottom: 1px solid rgba(192, 151, 82, 0.3);
+}
+
+.hunt-ready-kicker {
+  margin-bottom: 5px;
+  color: #c59a58;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.hunt-ready-header h2 {
+  margin: 0;
+  color: #fff2d2;
+  font-size: clamp(1.25rem, 4vw, 1.7rem);
+  line-height: 1.2;
+}
+
+.hunt-ready-countdown {
+  min-width: 74px;
+  padding: 10px 12px;
+  color: #ffd88a;
+  border: 1px solid rgba(217, 167, 81, 0.45);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.15rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.hunt-ready-content {
+  padding: 20px 26px 24px;
+}
+
+.hunt-ready-status {
+  margin: 0 0 16px;
+  color: #bdb39f;
+  font-family: system-ui, sans-serif;
+  text-align: center;
+}
+
+.hunt-ready-participants {
+  display: grid;
+  gap: 9px;
+}
+
+.hunt-ready-player {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 50px;
+  padding: 8px 13px;
+  border: 1px solid rgba(143, 131, 109, 0.28);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.hunt-ready-player.is-ready {
+  border-color: rgba(92, 177, 112, 0.48);
+  background: rgba(48, 115, 64, 0.12);
+}
+
+.hunt-ready-player__sigil {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: #aaa08e;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+}
+
+.is-ready .hunt-ready-player__sigil,
+.is-ready .hunt-ready-player__state {
+  color: #7fd18f;
+}
+
+.hunt-ready-player__name {
+  min-width: 0;
+  overflow: hidden;
+  color: #eee5ce;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hunt-ready-player__state {
+  color: #9e9585;
+  font-family: system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hunt-ready-loading {
+  padding: 28px;
+  color: #aaa08e;
+  text-align: center;
+}
+
+.hunt-ready-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  color: #ffc2b8;
+  border: 1px solid rgba(205, 77, 58, 0.5);
+  border-radius: 5px;
+  background: rgba(111, 29, 20, 0.22);
+  font-family: system-ui, sans-serif;
+  font-size: 0.86rem;
+}
+
+.hunt-ready-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 17px 26px 23px;
+  border-top: 1px solid rgba(192, 151, 82, 0.22);
+}
+
+.hunt-ready-btn {
+  min-width: 120px;
+  padding: 11px 18px;
+  color: #f6ecd7;
+  border: 1px solid #8e7448;
+  border-radius: 5px;
+  background: linear-gradient(#755326, #4b3218);
+  font: 700 0.85rem/1 "Cinzel", serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.hunt-ready-btn:hover:not(:disabled) {
+  filter: brightness(1.16);
+  transform: translateY(-1px);
+}
+
+.hunt-ready-btn:focus-visible {
+  outline: 2px solid #f0c978;
+  outline-offset: 3px;
+}
+
+.hunt-ready-btn:disabled {
+  cursor: wait;
+  filter: grayscale(0.55);
+  opacity: 0.55;
+}
+
+.hunt-ready-btn--unready,
+.hunt-ready-btn--cancel {
+  color: #d7cfc0;
+  border-color: #625b50;
+  background: #292a2b;
+}
+
+.hunt-ready-btn--cancel {
+  margin-right: auto;
+}
+
+body.hunt-ready-open {
+  overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .hunt-ready-modal {
+    padding: 10px;
+  }
+
+  .hunt-ready-header,
+  .hunt-ready-content,
+  .hunt-ready-footer {
+    padding-left: 17px;
+    padding-right: 17px;
+  }
+
+  .hunt-ready-footer {
+    flex-wrap: wrap;
+  }
+
+  .hunt-ready-btn {
+    flex: 1 1 130px;
+  }
+
+  .hunt-ready-btn--cancel {
+    margin-right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hunt-ready-btn {
+    transition: none;
+  }
+}

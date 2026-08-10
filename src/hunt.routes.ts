@@ -6,9 +6,15 @@ import {
   getActivePartyHunt,
   acceptHunt,
   abandonHunt,
-  investigateHuntClue,
-  createHuntEncounter
+  investigateHuntClue
 } from "./huntService";
+
+import {
+  startHuntReadyCheck,
+  getHuntReadyCheck,
+  setHuntReadyState,
+  cancelHuntReadyCheck
+} from "./services/huntReadyCheckService";
 
 import {
   joinHuntEncounter
@@ -91,8 +97,9 @@ router.get(
 
   }
 );
+
 /* =========================================================
-   CONFRONT HUNT TARGET
+   START HUNT READY CHECK
 ========================================================= */
 
 router.post(
@@ -101,18 +108,16 @@ router.post(
   async (req: any, res) => {
     try {
       const playerId =
-        Number(
-          req.session.playerId
-        );
+        Number(req.session.playerId);
 
-      const encounter =
-        await createHuntEncounter(
+      const result =
+        await startHuntReadyCheck(
           playerId
         );
 
       return res.json({
         ok: true,
-        encounter
+        ...result
       });
 
     } catch (err: any) {
@@ -127,44 +132,39 @@ router.post(
           ok: false,
           error:
             err.message ||
-            "Unable to confront Hunt target."
+            "Unable to start Hunt ready check."
         });
     }
   }
 );
 
+/* =========================================================
+   GET CURRENT HUNT READY CHECK
+========================================================= */
 
-router.post(
-  "/hunts/encounter/start",
+router.get(
+  "/hunts/ready-check",
   requireLogin,
   async (req: any, res) => {
-
     try {
-
       const playerId =
-        Number(
-          req.session.playerId
-        );
+        Number(req.session.playerId);
 
-
-      const encounter =
-        await createHuntEncounter(
+      const readyCheck =
+        await getHuntReadyCheck(
           playerId
         );
 
-
       return res.json({
         ok: true,
-        encounter
+        readyCheck
       });
 
     } catch (err: any) {
-
       console.error(
-        "POST /hunts/encounter/start failed:",
+        "GET /hunts/ready-check failed:",
         err
       );
-
 
       return res
         .status(400)
@@ -172,13 +172,107 @@ router.post(
           ok: false,
           error:
             err.message ||
-            "Unable to begin Hunt encounter."
+            "Unable to load Hunt ready check."
         });
     }
   }
 );
 
 
+/* =========================================================
+   SET READY STATE
+========================================================= */
+
+router.post(
+  "/hunts/ready-check/ready",
+  requireLogin,
+  async (req: any, res) => {
+    try {
+      const playerId =
+        Number(req.session.playerId);
+
+      if (
+        typeof req.body?.ready !==
+        "boolean"
+      ) {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            error:
+              "Ready must be true or false."
+          });
+      }
+
+      const result =
+        await setHuntReadyState(
+          playerId,
+          req.body.ready
+        );
+
+      return res.json({
+        ok: true,
+        ...result
+      });
+
+    } catch (err: any) {
+      console.error(
+        "POST /hunts/ready-check/ready failed:",
+        err
+      );
+
+      return res
+        .status(400)
+        .json({
+          ok: false,
+          error:
+            err.message ||
+            "Unable to update ready state."
+        });
+    }
+  }
+);
+
+
+/* =========================================================
+   CANCEL READY CHECK
+========================================================= */
+
+router.post(
+  "/hunts/ready-check/cancel",
+  requireLogin,
+  async (req: any, res) => {
+    try {
+      const playerId =
+        Number(req.session.playerId);
+
+      const result =
+        await cancelHuntReadyCheck(
+          playerId
+        );
+
+      return res.json({
+        ok: true,
+        ...result
+      });
+
+    } catch (err: any) {
+      console.error(
+        "POST /hunts/ready-check/cancel failed:",
+        err
+      );
+
+      return res
+        .status(400)
+        .json({
+          ok: false,
+          error:
+            err.message ||
+            "Unable to cancel Hunt ready check."
+        });
+    }
+  }
+);
 
 router.post(
   "/hunts/encounter/join",

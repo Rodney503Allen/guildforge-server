@@ -403,6 +403,7 @@ res.send(`
   <link rel="stylesheet" href="/world.css">
   <link rel="stylesheet" href="/rest.css">
   <link rel="stylesheet" href="/ui/itemTooltip.css">
+  <link rel="stylesheet" href="/hunt-ready-check.css">
   <link rel="stylesheet" href="/hunt-combat.css">
 </head>
 
@@ -814,7 +815,96 @@ res.send(`
   </section>
 </div>
 
-  <div id="combat-root"></div>
+  <!-- Hunt Ready Check -->
+<div
+  id="huntReadyModal"
+  class="hunt-ready-modal hidden"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="huntReadyTitle"
+  aria-describedby="huntReadyStatus"
+>
+  <div
+    class="hunt-ready-backdrop"
+    aria-hidden="true"
+  ></div>
+
+  <section class="hunt-ready-card frame-host">
+    <span
+      class="frame-border panel"
+      aria-hidden="true"
+    ></span>
+
+    <header class="hunt-ready-header">
+      <div>
+        <div class="hunt-ready-kicker">
+          Party Hunt
+        </div>
+
+        <h2 id="huntReadyTitle">
+          Prepare for Battle
+        </h2>
+      </div>
+
+      <div
+        id="huntReadyCountdown"
+        class="hunt-ready-countdown"
+        aria-label="Time remaining"
+      >
+        --:--
+      </div>
+    </header>
+
+    <div class="hunt-ready-content">
+      <p
+        id="huntReadyStatus"
+        class="hunt-ready-status"
+        aria-live="polite"
+      >
+        Waiting for the party...
+      </p>
+
+      <div
+        id="huntReadyParticipants"
+        class="hunt-ready-participants"
+        aria-label="Hunt participants"
+      >
+        <div class="hunt-ready-loading">
+          Gathering your company...
+        </div>
+      </div>
+
+      <div
+        id="huntReadyError"
+        class="hunt-ready-error"
+        role="alert"
+        hidden
+      ></div>
+    </div>
+
+    <footer class="hunt-ready-footer">
+      <button
+        id="huntReadyCancelBtn"
+        class="hunt-ready-btn hunt-ready-btn--cancel"
+        type="button"
+        hidden
+      >
+        Cancel
+      </button>
+
+      <button
+        id="huntReadyToggleBtn"
+        class="hunt-ready-btn hunt-ready-btn--ready"
+        type="button"
+        disabled
+      >
+        Ready
+      </button>
+    </footer>
+  </section>
+</div>
+
+<div id="combat-root"></div>
   <!-- Shared Party Hunt Combat -->
   <div id="hunt-combat-root"></div>
   <div id="rest-root"></div>
@@ -1010,6 +1100,7 @@ res.send(`
   <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>
+  <script src="/hunt-ready-check.js"></script>
   <script src="/hunt-combat.js"></script>
   <script src="/rest.js" defer></script>
 </body>
@@ -1243,10 +1334,83 @@ if (!tile) {
   return res.json({ success: false });
 }
 
-await db.query(
-  "UPDATE players SET map_x=?, map_y=? WHERE id=?",
-  [newX, newY, pid]
-);
+const movementConnection =
+  await db.getConnection();
+
+try {
+  await movementConnection.beginTransaction();
+
+  const [moveResult]: any =
+    await movementConnection.query(
+      `
+        UPDATE players
+
+        SET
+          map_x = ?,
+          map_y = ?
+
+        WHERE id = ?
+      `,
+      [
+        newX,
+        newY,
+        pid
+      ]
+    );
+
+  if (
+    Number(moveResult.affectedRows) !== 1
+  ) {
+    throw new Error(
+      "Player could not be moved."
+    );
+  }
+
+  /*
+   * Moving away revokes Ready on any pending
+   * Hunt ready check.
+   */
+  await movementConnection.query(
+    `
+      UPDATE hunt_ready_check_players hrcp
+
+      JOIN hunt_ready_checks hrc
+        ON hrc.id =
+           hrcp.ready_check_id
+
+      SET
+        hrcp.is_ready = 0,
+        hrcp.ready_at = NULL
+
+      WHERE hrcp.player_id = ?
+        AND hrc.status = 'pending'
+        AND hrcp.is_ready = 1
+    `,
+    [pid]
+  );
+
+  await movementConnection.commit();
+
+} catch (err) {
+
+  await movementConnection.rollback();
+
+  console.error(
+    "World movement transaction failed:",
+    err
+  );
+
+  return res
+    .status(500)
+    .json({
+      success: false,
+      error: "movement_failed"
+    });
+
+} finally {
+
+  movementConnection.release();
+}
 
 const spawnedResourceNode =
   await maybeSpawnResourceNodeForPlayer(

@@ -1,3 +1,4 @@
+//huntService.ts
 import { db } from "./db";
 
 import {
@@ -211,578 +212,674 @@ export async function getHuntById(
   );
 }
 /* =========================================================
-   CREATE HUNT ENCOUNTER
+   CREATE HUNT ENCOUNTER INSIDE EXISTING TRANSACTION
 ========================================================= */
 
-export async function createHuntEncounter(
-  playerId: number
+export async function createHuntEncounterInTransaction(
+  connection: any,
+  partyHuntId: number,
+  readyPlayers: Array<{
+    playerId: number;
+    name?: string;
+  }>
 ) {
-  const connection =
-    await db.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // =========================================
-    // LOAD ACTIVE REVEALED HUNT
-    // =========================================
-
-    const [rows]: any =
-      await connection.query(
-        `
-          SELECT
-            ph.id AS party_hunt_id,
-            ph.party_id,
-            ph.hunt_id,
-            ph.status,
-            ph.target_revealed,
-            ph.target_map_x,
-            ph.target_map_y,
-
-            ht.id AS hunt_target_id,
-            ht.creature_id AS target_creature_id,
-
-            ht.hp_multiplier,
-            ht.attack_multiplier,
-            ht.defense_multiplier,
-            ht.speed_multiplier,
-
-            ht.party_hp_scaling,
-            ht.party_attack_scaling,
-
-            p.leader_player_id,
-
-            pl.map_x AS player_map_x,
-            pl.map_y AS player_map_y
-
-          FROM party_members pm
-
-          JOIN party_hunts ph
-            ON ph.party_id = pm.party_id
-
-          JOIN hunts h
-            ON h.id = ph.hunt_id
-
-          JOIN hunt_targets ht
-            ON ht.hunt_id = h.id
-           AND ht.is_active = 1
-
-          JOIN parties p
-            ON p.id = ph.party_id
-
-          JOIN players pl
-            ON pl.id = pm.player_id
-
-          WHERE pm.player_id = ?
-            AND ph.status = 'revealed'
-
-          LIMIT 1
-
-          FOR UPDATE
-        `,
-        [
-          playerId
-        ]
-      );
-
-    if (!rows.length) {
-      throw new Error(
-        "No revealed Hunt target is available."
-      );
-    }
-
-    const hunt =
-      rows[0];
-
-    const partyHuntId =
-      Number(
-        hunt.party_hunt_id
-      );
-
-    const partyId =
-      Number(
-        hunt.party_id
-      );
-
-    const huntTargetId =
-      Number(
-        hunt.hunt_target_id
-      );
-
-    const targetCreatureId =
-      Number(
-        hunt.target_creature_id
-      );
-
-    const targetMapX =
-      Number(
-        hunt.target_map_x
-      );
-
-    const targetMapY =
-      Number(
-        hunt.target_map_y
-      );
-
-    if (
-      !hunt.target_revealed
-    ) {
-      throw new Error(
-        "The Hunt target has not been revealed."
-      );
-    }
-
-    if (
-      !Number.isFinite(
-        targetMapX
-      ) ||
-      !Number.isFinite(
-        targetMapY
-      )
-    ) {
-      throw new Error(
-        "The Hunt target has no valid location."
-      );
-    }
-
-    // =========================================
-    // REQUIRE PLAYER ON TARGET TILE
-    // =========================================
-
-    if (
-      Number(
-        hunt.player_map_x
-      ) !==
-        targetMapX ||
-      Number(
-        hunt.player_map_y
-      ) !==
-        targetMapY
-    ) {
-      throw new Error(
-        "You must reach the Hunt target before confronting it."
-      );
-    }
-
-    // =========================================
-    // PREVENT DUPLICATE ENCOUNTERS
-    // =========================================
-
-    const [existingRows]: any =
-      await connection.query(
-        `
-          SELECT id
-
-          FROM hunt_encounters
-
-          WHERE party_hunt_id = ?
-
-          LIMIT 1
-
-          FOR UPDATE
-        `,
-        [
-          partyHuntId
-        ]
-      );
-
-    if (
-      existingRows.length
-    ) {
-      throw new Error(
-        "This Hunt encounter already exists."
-      );
-    }
-
-    // =========================================
-    // LOAD BASE CREATURE
-    // =========================================
-
-    const [creatureRows]: any =
-      await connection.query(
-        `
-          SELECT
-            id,
-            level,
-
-            maxhp,
-            attack,
-            defense,
-            agility,
-            attack_speed
-
-          FROM creatures
-
-          WHERE id = ?
-
-          LIMIT 1
-        `,
-        [
-          targetCreatureId
-        ]
-      );
-
-    if (
-      !creatureRows.length
-    ) {
-      throw new Error(
-        "Hunt target creature does not exist."
-      );
-    }
-
-    const creature =
-      creatureRows[0];
-
-    // =========================================
-    // DETERMINE HUNT PARTY SIZE
-    // =========================================
-
-    /*
-     * Hunt participants are snapshotted when
-     * the Hunt is accepted, so use them as the
-     * authoritative party-size value.
-     */
-    const [[participantCountRow]]: any =
-      await connection.query(
-        `
-          SELECT
-            COUNT(*) AS participant_count
-
-          FROM hunt_participants
-
-          WHERE party_hunt_id = ?
-        `,
-        [
-          partyHuntId
-        ]
-      );
-
-    const partySize =
-      Math.max(
-        1,
-        Number(
-          participantCountRow
-            ?.participant_count ??
-          1
-        )
-      );
-
-    // =========================================
-    // TARGET MULTIPLIERS
-    // =========================================
-
-    const hpMultiplier =
-      Math.max(
-        0.01,
-        Number(
-          hunt.hp_multiplier ??
-          1
-        )
-      );
-
-    const attackMultiplier =
-      Math.max(
-        0.01,
-        Number(
-          hunt.attack_multiplier ??
-          1
-        )
-      );
-
-    const defenseMultiplier =
-      Math.max(
-        0.01,
-        Number(
-          hunt.defense_multiplier ??
-          1
-        )
-      );
-
-    const speedMultiplier =
-      Math.max(
-        0.01,
-        Number(
-          hunt.speed_multiplier ??
-          1
-        )
-      );
-
-    const partyHpScaling =
-      Math.max(
-        0,
-        Number(
-          hunt.party_hp_scaling ??
-          0
-        )
-      );
-
-    const partyAttackScaling =
-      Math.max(
-        0,
-        Number(
-          hunt.party_attack_scaling ??
-          0
-        )
-      );
-
-    // =========================================
-    // PARTY SCALING
-    // =========================================
-
-    /*
-     * First player contributes no additional
-     * party-size modifier.
-     *
-     * Example with 0.50 HP scaling:
-     *
-     * 1 player = 1.00x
-     * 2 player = 1.50x
-     * 3 player = 2.00x
-     * 4 player = 2.50x
-     */
-    const additionalPlayers =
-      Math.max(
-        0,
-        partySize - 1
-      );
-
-    const partyHpMultiplier =
-      1 +
-      additionalPlayers *
-        partyHpScaling;
-
-    const partyAttackMultiplier =
-      1 +
-      additionalPlayers *
-        partyAttackScaling;
-
-    // =========================================
-    // FINAL BOSS STATS
-    // =========================================
-
-    const baseMaxHp =
-      Math.max(
-        1,
-        Number(
-          creature.maxhp ??
-          1
-        )
-      );
-
-    const baseAttack =
-      Math.max(
-        0,
-        Number(
-          creature.attack ??
-          0
-        )
-      );
-
-    const baseDefense =
-      Math.max(
-        0,
-        Number(
-          creature.defense ??
-          0
-        )
-      );
-
-    const baseAgility =
-      Math.max(
-        0,
-        Number(
-          creature.agility ??
-          0
-        )
-      );
-
-    const baseAttackSpeed =
-      Math.max(
-        1,
-        Number(
-          creature.attack_speed ??
-          1500
-        )
-      );
-
-    /*
-     * Boss HP:
-     *
-     * creature HP
-     * × Hunt target multiplier
-     * × party scaling
-     */
-    const maxHp =
-      Math.max(
-        1,
-        Math.floor(
-          baseMaxHp *
-          hpMultiplier *
-          partyHpMultiplier
-        )
-      );
-
-    /*
-     * Calculate these now as well.
-     *
-     * huntCombatSessionService will be updated
-     * next to actually use the Hunt-scaled
-     * versions instead of raw creature stats.
-     */
-    const scaledAttack =
-      Math.max(
-        0,
-        Math.floor(
-          baseAttack *
-          attackMultiplier *
-          partyAttackMultiplier
-        )
-      );
-
-    const scaledDefense =
-      Math.max(
-        0,
-        Math.floor(
-          baseDefense *
-          defenseMultiplier
-        )
-      );
-
-    const scaledAgility =
-      Math.max(
-        0,
-        Math.floor(
-          baseAgility *
-          speedMultiplier
-        )
-      );
-
-    const scaledAttackSpeed =
-      Math.max(
-        250,
-        Math.floor(
-          baseAttackSpeed /
-          speedMultiplier
-        )
-      );
-
-    // =========================================
-    // DEBUG SCALING
-    // =========================================
-
-    console.log(
-      "Hunt boss scaling:",
-      {
-        partyHuntId,
-        huntTargetId,
-        targetCreatureId,
-
-        partySize,
-
-        baseMaxHp,
-        hpMultiplier,
-        partyHpScaling,
-        partyHpMultiplier,
-        maxHp,
-
-        baseAttack,
-        attackMultiplier,
-        partyAttackScaling,
-        partyAttackMultiplier,
-        scaledAttack,
-
-        baseDefense,
-        defenseMultiplier,
-        scaledDefense,
-
-        baseAgility,
-        speedMultiplier,
-        scaledAgility,
-
-        baseAttackSpeed,
-        scaledAttackSpeed
-      }
+  // =========================================
+  // VALIDATE INPUT
+  // =========================================
+
+  if (
+    !Number.isInteger(partyHuntId) ||
+    partyHuntId <= 0
+  ) {
+    throw new Error(
+      "Invalid party Hunt."
+    );
+  }
+
+  /*
+   * Deduplicate the roster defensively.
+   * The ready-check table should already enforce
+   * uniqueness, but encounter scaling must never
+   * count the same player twice.
+   */
+  const uniqueReadyPlayers =
+    Array.from(
+      new Map(
+        readyPlayers
+          .filter(player =>
+            Number.isInteger(
+              Number(player.playerId)
+            ) &&
+            Number(player.playerId) > 0
+          )
+          .map(player => [
+            Number(player.playerId),
+            {
+              ...player,
+              playerId:
+                Number(player.playerId)
+            }
+          ])
+      ).values()
     );
 
-    // =========================================
-    // CREATE SHARED ENCOUNTER
-    // =========================================
+  const partySize =
+    uniqueReadyPlayers.length;
 
-    const [encounterResult]: any =
-      await connection.query(
-        `
-          INSERT INTO hunt_encounters (
-            party_hunt_id,
-            party_id,
-            hunt_target_id,
-            creature_id,
-            status,
-            hp,
-            max_hp,
-            map_x,
-            map_y,
-            started_at
-          )
+  if (partySize < 1) {
+    throw new Error(
+      "The Hunt encounter requires at least one ready player."
+    );
+  }
 
-          VALUES (
-            ?,
-            ?,
-            ?,
-            ?,
-            'active',
-            ?,
-            ?,
-            ?,
-            ?,
-            NOW()
-          )
-        `,
-        [
-          partyHuntId,
-          partyId,
-          huntTargetId,
-          targetCreatureId,
+  // =========================================
+  // LOAD AND LOCK REVEALED HUNT
+  // =========================================
 
-          maxHp,
-          maxHp,
-
-          targetMapX,
-          targetMapY
-        ]
-      );
-
-    const encounterId =
-      Number(
-        encounterResult.insertId
-      );
-
-    // =========================================
-    // ADD INITIAL PARTICIPANT
-    // =========================================
-
+  const [rows]: any =
     await connection.query(
       `
-        INSERT INTO hunt_encounter_players (
-          hunt_encounter_id,
-          player_id,
-          is_active
-        )
+        SELECT
+          ph.id AS party_hunt_id,
+          ph.party_id,
+          ph.hunt_id,
+          ph.status,
+          ph.target_revealed,
+          ph.target_map_x,
+          ph.target_map_y,
 
-        VALUES (?, ?, 1)
+          ht.id AS hunt_target_id,
+          ht.creature_id AS target_creature_id,
 
-        ON DUPLICATE KEY UPDATE
-          is_active = 1
+          ht.hp_multiplier,
+          ht.attack_multiplier,
+          ht.defense_multiplier,
+          ht.speed_multiplier,
+
+          ht.party_hp_scaling,
+          ht.party_attack_scaling,
+
+          p.leader_player_id
+
+        FROM party_hunts ph
+
+        JOIN hunts h
+          ON h.id = ph.hunt_id
+
+        JOIN hunt_targets ht
+          ON ht.hunt_id = h.id
+         AND ht.is_active = 1
+
+        JOIN parties p
+          ON p.id = ph.party_id
+
+        WHERE ph.id = ?
+          AND ph.status = 'revealed'
+
+        LIMIT 1
+
+        FOR UPDATE
       `,
       [
-        encounterId,
-        playerId
+        partyHuntId
       ]
     );
 
-    // =========================================
-    // UPDATE HUNT STATE
-    // =========================================
+  if (!rows.length) {
+    throw new Error(
+      "No revealed Hunt target is available."
+    );
+  }
 
+  const hunt =
+    rows[0];
+
+  const loadedPartyHuntId =
+    Number(
+      hunt.party_hunt_id
+    );
+
+  const partyId =
+    Number(
+      hunt.party_id
+    );
+
+  const huntTargetId =
+    Number(
+      hunt.hunt_target_id
+    );
+
+  const targetCreatureId =
+    Number(
+      hunt.target_creature_id
+    );
+
+  const targetMapX =
+    Number(
+      hunt.target_map_x
+    );
+
+  const targetMapY =
+    Number(
+      hunt.target_map_y
+    );
+
+  if (!hunt.target_revealed) {
+    throw new Error(
+      "The Hunt target has not been revealed."
+    );
+  }
+
+  if (
+    !Number.isFinite(targetMapX) ||
+    !Number.isFinite(targetMapY)
+  ) {
+    throw new Error(
+      "The Hunt target has no valid location."
+    );
+  }
+
+  // =========================================
+  // VERIFY FROZEN ROSTER
+  // =========================================
+
+  /*
+   * Every ready player must still be a
+   * snapshotted participant in this Hunt.
+   */
+  const readyPlayerIds =
+    uniqueReadyPlayers.map(
+      player => player.playerId
+    );
+
+  const playerPlaceholders =
+    readyPlayerIds
+      .map(() => "?")
+      .join(", ");
+
+  const [participantRows]: any =
+    await connection.query(
+      `
+        SELECT
+          player_id
+
+        FROM hunt_participants
+
+        WHERE party_hunt_id = ?
+          AND player_id IN (
+            ${playerPlaceholders}
+          )
+
+        FOR UPDATE
+      `,
+      [
+        loadedPartyHuntId,
+        ...readyPlayerIds
+      ]
+    );
+
+  const participantIds =
+    new Set(
+      participantRows.map(
+        (row: any) =>
+          Number(row.player_id)
+      )
+    );
+
+  const invalidReadyPlayer =
+    readyPlayerIds.find(
+      playerId =>
+        !participantIds.has(playerId)
+    );
+
+  if (
+    invalidReadyPlayer != null
+  ) {
+    throw new Error(
+      "The ready-check roster contains a player who is not participating in this Hunt."
+    );
+  }
+
+  // =========================================
+  // VERIFY PLAYERS REMAIN ON TARGET TILE
+  // =========================================
+
+  /*
+   * This protects the final Ready transition
+   * against movement occurring just before
+   * encounter creation.
+   */
+  const [positionRows]: any =
+    await connection.query(
+      `
+        SELECT
+          id,
+          map_x,
+          map_y
+
+        FROM players
+
+        WHERE id IN (
+          ${playerPlaceholders}
+        )
+
+        FOR UPDATE
+      `,
+      readyPlayerIds
+    );
+
+  if (
+    positionRows.length !== partySize
+  ) {
+    throw new Error(
+      "One or more ready players no longer exist."
+    );
+  }
+
+  const playerAwayFromTarget =
+    positionRows.find(
+      (player: any) =>
+        Number(player.map_x) !==
+          targetMapX ||
+        Number(player.map_y) !==
+          targetMapY
+    );
+
+  if (playerAwayFromTarget) {
+    throw new Error(
+      "Every ready player must remain on the Hunt target tile."
+    );
+  }
+
+  // =========================================
+  // PREVENT DUPLICATE ENCOUNTERS
+  // =========================================
+
+  const [existingRows]: any =
+    await connection.query(
+      `
+        SELECT id
+
+        FROM hunt_encounters
+
+        WHERE party_hunt_id = ?
+
+        LIMIT 1
+
+        FOR UPDATE
+      `,
+      [
+        loadedPartyHuntId
+      ]
+    );
+
+  if (existingRows.length) {
+    throw new Error(
+      "This Hunt encounter already exists."
+    );
+  }
+
+  // =========================================
+  // LOAD BASE CREATURE
+  // =========================================
+
+  const [creatureRows]: any =
+    await connection.query(
+      `
+        SELECT
+          id,
+          level,
+          maxhp,
+          attack,
+          defense,
+          agility,
+          attack_speed
+
+        FROM creatures
+
+        WHERE id = ?
+
+        LIMIT 1
+      `,
+      [
+        targetCreatureId
+      ]
+    );
+
+  if (!creatureRows.length) {
+    throw new Error(
+      "Hunt target creature does not exist."
+    );
+  }
+
+  const creature =
+    creatureRows[0];
+
+  // =========================================
+  // TARGET MULTIPLIERS
+  // =========================================
+
+  const hpMultiplier =
+    Math.max(
+      0.01,
+      Number(
+        hunt.hp_multiplier ?? 1
+      )
+    );
+
+  const attackMultiplier =
+    Math.max(
+      0.01,
+      Number(
+        hunt.attack_multiplier ?? 1
+      )
+    );
+
+  const defenseMultiplier =
+    Math.max(
+      0.01,
+      Number(
+        hunt.defense_multiplier ?? 1
+      )
+    );
+
+  const speedMultiplier =
+    Math.max(
+      0.01,
+      Number(
+        hunt.speed_multiplier ?? 1
+      )
+    );
+
+  const partyHpScaling =
+    Math.max(
+      0,
+      Number(
+        hunt.party_hp_scaling ?? 0
+      )
+    );
+
+  const partyAttackScaling =
+    Math.max(
+      0,
+      Number(
+        hunt.party_attack_scaling ?? 0
+      )
+    );
+
+  // =========================================
+  // PARTY SCALING
+  // =========================================
+
+  const additionalPlayers =
+    Math.max(
+      0,
+      partySize - 1
+    );
+
+  const partyHpMultiplier =
+    1 +
+    additionalPlayers *
+      partyHpScaling;
+
+  const partyAttackMultiplier =
+    1 +
+    additionalPlayers *
+      partyAttackScaling;
+
+  // =========================================
+  // BASE CREATURE STATS
+  // =========================================
+
+  const baseMaxHp =
+    Math.max(
+      1,
+      Number(
+        creature.maxhp ?? 1
+      )
+    );
+
+  const baseAttack =
+    Math.max(
+      0,
+      Number(
+        creature.attack ?? 0
+      )
+    );
+
+  const baseDefense =
+    Math.max(
+      0,
+      Number(
+        creature.defense ?? 0
+      )
+    );
+
+  const baseAgility =
+    Math.max(
+      0,
+      Number(
+        creature.agility ?? 0
+      )
+    );
+
+  const baseAttackSpeed =
+    Math.max(
+      1,
+      Number(
+        creature.attack_speed ?? 1500
+      )
+    );
+
+  // =========================================
+  // FINAL BOSS STATS
+  // =========================================
+
+  const maxHp =
+    Math.max(
+      1,
+      Math.floor(
+        baseMaxHp *
+        hpMultiplier *
+        partyHpMultiplier
+      )
+    );
+
+  const scaledAttack =
+    Math.max(
+      0,
+      Math.floor(
+        baseAttack *
+        attackMultiplier *
+        partyAttackMultiplier
+      )
+    );
+
+  const scaledDefense =
+    Math.max(
+      0,
+      Math.floor(
+        baseDefense *
+        defenseMultiplier
+      )
+    );
+
+  const scaledAgility =
+    Math.max(
+      0,
+      Math.floor(
+        baseAgility *
+        speedMultiplier
+      )
+    );
+
+  const scaledAttackSpeed =
+    Math.max(
+      250,
+      Math.floor(
+        baseAttackSpeed /
+        speedMultiplier
+      )
+    );
+
+  console.log(
+    "Hunt boss scaling:",
+    {
+      partyHuntId:
+        loadedPartyHuntId,
+
+      huntTargetId,
+      targetCreatureId,
+      partySize,
+
+      baseMaxHp,
+      hpMultiplier,
+      partyHpScaling,
+      partyHpMultiplier,
+      maxHp,
+
+      baseAttack,
+      attackMultiplier,
+      partyAttackScaling,
+      partyAttackMultiplier,
+      scaledAttack,
+
+      baseDefense,
+      defenseMultiplier,
+      scaledDefense,
+
+      baseAgility,
+      speedMultiplier,
+      scaledAgility,
+
+      baseAttackSpeed,
+      scaledAttackSpeed
+    }
+  );
+
+  // =========================================
+  // CREATE SHARED ENCOUNTER
+  // =========================================
+
+  const [encounterResult]: any =
+    await connection.query(
+      `
+        INSERT INTO hunt_encounters (
+          party_hunt_id,
+          party_id,
+          hunt_target_id,
+          creature_id,
+          status,
+          hp,
+          max_hp,
+          map_x,
+          map_y,
+          started_at
+        )
+
+        VALUES (
+          ?,
+          ?,
+          ?,
+          ?,
+          'active',
+          ?,
+          ?,
+          ?,
+          ?,
+          NOW()
+        )
+      `,
+      [
+        loadedPartyHuntId,
+        partyId,
+        huntTargetId,
+        targetCreatureId,
+
+        maxHp,
+        maxHp,
+
+        targetMapX,
+        targetMapY
+      ]
+    );
+
+  const encounterId =
+    Number(
+      encounterResult.insertId
+    );
+
+  // =========================================
+  // ADD COMPLETE FROZEN ROSTER
+  // =========================================
+
+  const encounterPlayerValues =
+    uniqueReadyPlayers
+      .map(() => "(?, ?, 1)")
+      .join(", ");
+
+  const encounterPlayerParams =
+    uniqueReadyPlayers.flatMap(
+      player => [
+        encounterId,
+        player.playerId
+      ]
+    );
+
+  await connection.query(
+    `
+      INSERT INTO hunt_encounter_players (
+        hunt_encounter_id,
+        player_id,
+        is_active
+      )
+
+      VALUES
+        ${encounterPlayerValues}
+
+      ON DUPLICATE KEY UPDATE
+        is_active = 1
+    `,
+    encounterPlayerParams
+  );
+
+  // =========================================
+  // MARK HUNT PARTICIPATION
+  // =========================================
+
+  const [participationResult]: any =
+    await connection.query(
+      `
+        UPDATE hunt_participants
+
+        SET participated_in_boss = 1
+
+        WHERE party_hunt_id = ?
+          AND player_id IN (
+            ${playerPlaceholders}
+          )
+      `,
+      [
+        loadedPartyHuntId,
+        ...readyPlayerIds
+      ]
+    );
+
+  if (
+    Number(
+      participationResult.affectedRows
+    ) !== partySize
+  ) {
+    throw new Error(
+      "Unable to record every Hunt encounter participant."
+    );
+  }
+
+  // =========================================
+  // UPDATE HUNT STATE
+  // =========================================
+
+  const [huntUpdateResult]: any =
     await connection.query(
       `
         UPDATE party_hunts
@@ -790,62 +887,60 @@ export async function createHuntEncounter(
         SET status = 'engaged'
 
         WHERE id = ?
+          AND status = 'revealed'
       `,
       [
-        partyHuntId
+        loadedPartyHuntId
       ]
     );
 
-    await connection.commit();
+  if (
+    Number(
+      huntUpdateResult.affectedRows
+    ) !== 1
+  ) {
+    throw new Error(
+      "The Hunt is no longer available for engagement."
+    );
+  }
 
-    return {
-      encounterId,
+  // =========================================
+  // RETURN ENCOUNTER
+  // =========================================
 
-      partyHuntId,
-      partyId,
+  return {
+    encounterId,
 
-      huntTargetId,
+    partyHuntId:
+      loadedPartyHuntId,
 
-      creatureId:
-        targetCreatureId,
+    partyId,
+    huntTargetId,
 
-      partySize,
+    creatureId:
+      targetCreatureId,
 
-      hp:
-        maxHp,
+    partySize,
 
+    hp:
       maxHp,
 
-      /*
-       * Useful diagnostic information.
-       *
-       * These are not persisted yet.
-       */
-      scaledAttack,
-      scaledDefense,
-      scaledAgility,
-      scaledAttackSpeed,
+    maxHp,
 
-      mapX:
-        targetMapX,
+    scaledAttack,
+    scaledDefense,
+    scaledAgility,
+    scaledAttackSpeed,
 
-      mapY:
-        targetMapY,
+    mapX:
+      targetMapX,
 
-      status:
-        "active"
-    };
+    mapY:
+      targetMapY,
 
-  } catch (err) {
-
-    await connection.rollback();
-
-    throw err;
-
-  } finally {
-
-    connection.release();
-  }
+    status:
+      "active"
+  };
 }
 
 /* =========================================================
