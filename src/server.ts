@@ -41,7 +41,11 @@ app.get("/api/test", (_req, res) => {
   res.json({ status: "API OK" });
 });
 
-const PORT = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT || 8080);
+
+server.listen(port, "0.0.0.0", () => {
+  console.log(`Guildforge engine running on port ${port}`);
+});
 
 // =======================
 // MIDDLEWARE
