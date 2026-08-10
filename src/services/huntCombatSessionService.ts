@@ -3236,7 +3236,7 @@ async function completeHuntCombatDefeat(
       UPDATE hunt_encounters
 
       SET
-        status = 'failed',
+        status = 'defeat',
         completed_at = NOW()
 
       WHERE id = ?
