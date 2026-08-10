@@ -168,36 +168,29 @@ export async function getActiveHuntEncounter(
 export async function joinHuntEncounter(
   playerId: number
 ) {
-
   const connection =
     await db.getConnection();
 
   try {
-
     await connection.beginTransaction();
-
 
     const [rows]: any =
       await connection.query(
         `
           SELECT
             he.id AS encounter_id,
-
             he.map_x,
             he.map_y,
-
             pl.map_x AS player_map_x,
             pl.map_y AS player_map_y
 
           FROM party_members pm
 
           JOIN hunt_encounters he
-            ON he.party_id =
-               pm.party_id
+            ON he.party_id = pm.party_id
 
           JOIN players pl
-            ON pl.id =
-               pm.player_id
+            ON pl.id = pm.player_id
 
           WHERE pm.player_id = ?
             AND he.status = 'active'
@@ -209,40 +202,87 @@ export async function joinHuntEncounter(
         [playerId]
       );
 
-
     if (!rows.length) {
       throw new Error(
         "No active Hunt encounter is available."
       );
     }
 
+    const encounter = rows[0];
 
-    const encounter =
-      rows[0];
+    const encounterId =
+      Number(encounter.encounter_id);
 
+    /*
+     * Existing participants may rejoin
+     * the encounter from any location.
+     */
+    const [participantRows]: any =
+      await connection.query(
+        `
+          SELECT
+            player_id,
+            is_active
 
-    if (
-      Number(
-        encounter.player_map_x
-      ) !==
-      Number(
-        encounter.map_x
-      ) ||
+          FROM hunt_encounter_players
 
-      Number(
-        encounter.player_map_y
-      ) !==
-      Number(
-        encounter.map_y
-      )
-    ) {
+          WHERE hunt_encounter_id = ?
+            AND player_id = ?
 
+          LIMIT 1
+
+          FOR UPDATE
+        `,
+        [
+          encounterId,
+          playerId
+        ]
+      );
+
+    if (participantRows.length) {
+      await connection.query(
+        `
+          UPDATE hunt_encounter_players
+
+          SET is_active = 1
+
+          WHERE hunt_encounter_id = ?
+            AND player_id = ?
+        `,
+        [
+          encounterId,
+          playerId
+        ]
+      );
+
+      await connection.commit();
+
+      return {
+        encounterId,
+        joined: true,
+        rejoined: true
+      };
+    }
+
+    /*
+     * New participants must be standing
+     * on the Hunt encounter tile.
+     */
+    const isAtEncounter =
+      Number(encounter.player_map_x) ===
+        Number(encounter.map_x) &&
+      Number(encounter.player_map_y) ===
+        Number(encounter.map_y);
+
+    if (!isAtEncounter) {
       throw new Error(
         "You must reach the Hunt target before joining the battle."
       );
     }
 
-
+    /*
+     * Register the new participant.
+     */
     await connection.query(
       `
         INSERT INTO hunt_encounter_players (
@@ -252,44 +292,25 @@ export async function joinHuntEncounter(
         )
 
         VALUES (?, ?, 1)
-
-        ON DUPLICATE KEY UPDATE
-          is_active = 1
       `,
       [
-        Number(
-          encounter.encounter_id
-        ),
-
+        encounterId,
         playerId
       ]
     );
 
-
     await connection.commit();
 
-
     return {
-      encounterId:
-        Number(
-          encounter.encounter_id
-        ),
-
-      joined:
-        true
+      encounterId,
+      joined: true,
+      rejoined: false
     };
-
-
   } catch (err) {
-
     await connection.rollback();
-
     throw err;
-
   } finally {
-
     connection.release();
-
   }
 }
 
