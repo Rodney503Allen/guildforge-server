@@ -1093,7 +1093,16 @@ res.send(`
     window.__HUNT_TARGETS__ =
       ${JSON.stringify(huntTargets)};
   </script>
+<script>
+  window.__PLAYER_ID__ =
+    ${Number(player.id)};
 
+  window.__RESOURCE_NODES__ =
+    ${JSON.stringify(resourceNodes)};
+
+  window.__HUNT_TARGETS__ =
+    ${JSON.stringify(huntTargets)};
+</script>
   <script src="/ui/toast.js"></script>
   <script src="/statpanel.js"></script>
   <script src="/world.page.js" defer></script>

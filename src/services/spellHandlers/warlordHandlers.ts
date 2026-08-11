@@ -50,7 +50,106 @@ function getLivingAllies(
   ];
 }
 
+// =====================================================
+// HOLD THE LINE
+//
+// target_type = all_allies
+//
+// Grants the configured flat Defense bonus to every
+// living ally. In solo combat, it applies to the caster.
+// =====================================================
 
+export const holdTheLineHandler:
+  SpellHandlerDefinition = {
+  requiresEnemy: false,
+
+  validate(spell) {
+    const buff =
+      getConfiguredBuff(spell);
+
+    if (buff.stat !== "defense") {
+      return (
+        `${spell.name} must use the defense buff stat`
+      );
+    }
+
+    if (buff.value <= 0) {
+      return (
+        `${spell.name} has an invalid Defense bonus`
+      );
+    }
+
+    if (buff.duration <= 0) {
+      return (
+        `${spell.name} has an invalid buff duration`
+      );
+    }
+
+    return null;
+  },
+
+  async execute({
+    playerId,
+    spell,
+    allies
+  }): Promise<SpellHandlerResult> {
+    const buff =
+      getConfiguredBuff(spell);
+
+    const targets =
+      getLivingAllies(
+        playerId,
+        allies
+      );
+
+    if (targets.length === 0) {
+      return {
+        log:
+          `🛡️ You order your allies to hold the line, ` +
+          `but no living allies can answer.`,
+
+        appliedStatus: false
+      };
+    }
+
+    for (const ally of targets) {
+      const allyPlayerId =
+        Number(ally.playerId);
+
+      if (
+        !Number.isInteger(allyPlayerId) ||
+        allyPlayerId <= 0
+      ) {
+        continue;
+      }
+
+      await applyBuff(
+        allyPlayerId,
+        buff.stat,
+        buff.value,
+        buff.duration,
+        `spell:${spell.id}`
+      );
+    }
+
+    return {
+      log:
+        targets.length > 1
+          ? (
+              `🛡️ You order your company to hold the line, ` +
+              `granting ${buff.value} Defense for ` +
+              `${buff.duration}s!`
+            )
+          : (
+              `🛡️ You hold your ground, gaining ` +
+              `${buff.value} Defense for ` +
+              `${buff.duration}s!`
+            ),
+
+      appliedStatus: true
+    };
+  }
+};
 // =====================================================
 // COMMANDING STRIKE
 //
