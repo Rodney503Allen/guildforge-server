@@ -68,7 +68,8 @@ import {
   callToVictoryHandler,
   commandingStrikeHandler,
   warBannerHandler,
-  holdTheLineHandler
+  holdTheLineHandler,
+  rallyingCryHandler
 } from "./warlordHandlers";
 
 import {
@@ -178,6 +179,8 @@ const customSpellHandlers: Record<
         callToVictoryHandler,
     warlord_hold_the_line:
         holdTheLineHandler,
+    warlord_rallying_cry:
+        rallyingCryHandler,
     // Ranger Handlers
     ranger_volley:
         volleyHandler,

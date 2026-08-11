@@ -150,6 +150,107 @@ export const holdTheLineHandler:
     };
   }
 };
+
+// =====================================================
+// RALLYING CRY
+//
+// Grants the configured Attack percentage bonus to
+// every living ally. In solo combat, targets the caster.
+// =====================================================
+
+export const rallyingCryHandler:
+  SpellHandlerDefinition = {
+  requiresEnemy: false,
+
+  validate(spell) {
+    const buff =
+      getConfiguredBuff(spell);
+
+    if (buff.stat !== "attack_pct") {
+      return (
+        `${spell.name} must use attack_pct`
+      );
+    }
+
+    if (buff.value <= 0) {
+      return (
+        `${spell.name} has an invalid Attack bonus`
+      );
+    }
+
+    if (buff.duration <= 0) {
+      return (
+        `${spell.name} has an invalid buff duration`
+      );
+    }
+
+    return null;
+  },
+
+  async execute({
+    playerId,
+    spell,
+    allies
+  }): Promise<SpellHandlerResult> {
+    const buff =
+      getConfiguredBuff(spell);
+
+    const targets =
+      getLivingAllies(
+        playerId,
+        allies
+      );
+
+    const validTargets =
+      targets.filter(ally => {
+        const allyPlayerId =
+          Number(ally.playerId);
+
+        return (
+          Number.isInteger(allyPlayerId) &&
+          allyPlayerId > 0
+        );
+      });
+
+    if (validTargets.length === 0) {
+      return {
+        log:
+          `📣 You sound ${spell.name}, but no ` +
+          `living allies can answer.`,
+
+        appliedStatus: false
+      };
+    }
+
+    for (const ally of validTargets) {
+      await applyBuff(
+        Number(ally.playerId),
+        buff.stat,
+        buff.value,
+        buff.duration,
+        `spell:${spell.id}`
+      );
+    }
+
+    return {
+      log:
+        validTargets.length > 1
+          ? (
+              `📣 You sound ${spell.name}, granting your ` +
+              `company ${buff.value}% Attack for ` +
+              `${buff.duration}s!`
+            )
+          : (
+              `📣 You sound ${spell.name}, gaining ` +
+              `${buff.value}% Attack for ` +
+              `${buff.duration}s!`
+            ),
+
+      appliedStatus: true
+    };
+  }
+};
+
 // =====================================================
 // COMMANDING STRIKE
 //
