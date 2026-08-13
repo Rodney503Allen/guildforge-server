@@ -15,7 +15,406 @@ function saveSpellCooldowns() {
 
 // ✅ NEW: post-combat state flag (so we can enable close + reload on manual close)
 let combatOver = false;
-let combatStateInterval = null;
+
+// =======================================
+// WORLD COMBAT SOCKET STATE
+// =======================================
+
+let combatSocket = null;
+let combatSocketBound = false;
+let combatSocketJoined = false;
+
+/*
+ * Incremented whenever a player action changes combat state.
+ * Any /combat/state request that began before that action is
+ * considered stale and must not repaint the HUD afterward.
+ */
+let combatStateGeneration = 0;
+
+// =======================================
+// SMOOTH COMBAT TIMER ANIMATION
+// =======================================
+//
+// The server remains authoritative.
+// Snapshots provide timing anchors, while the browser
+// interpolates the visual bars every animation frame.
+
+let combatTimingFrame = null;
+let combatTimingRunning = false;
+
+const combatTiming = {
+  playerATB: null,
+  enemyATB: null,
+  autoAttack: null
+};
+
+function clampCombatPct(value) {
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Number(value) || 0
+    )
+  );
+}
+
+function setCombatBarPct(barId, pct) {
+  const bar = document.getElementById(barId);
+  if (!bar) return;
+
+  bar.style.width =
+    `${clampCombatPct(pct)}%`;
+}
+
+function makeATBTimingAnchor(actor) {
+  if (!actor) return null;
+
+  const gauge =
+    clampCombatPct(
+      actor.gauge
+    );
+
+  const ready =
+    Boolean(
+      actor.ready
+    );
+
+  const recoveryMs =
+    Math.max(
+      0,
+      Number(
+        actor.recoveryMs ?? 0
+      ) || 0
+    );
+
+  const readyInMs =
+    Math.max(
+      0,
+      Number(
+        actor.readyInMs ?? 0
+      ) || 0
+    );
+
+  return {
+    receivedAt:
+      performance.now(),
+
+    gauge,
+
+    ready,
+
+    recoveryMs,
+
+    readyInMs
+  };
+}
+
+function makeAutoAttackTimingAnchor(player) {
+  if (!player) return null;
+
+  return {
+    receivedAt:
+      performance.now(),
+
+    remainingMs:
+      Math.max(
+        0,
+        Number(
+          player.autoAttackMs ?? 0
+        ) || 0
+      ),
+
+    totalMs:
+      Math.max(
+        1,
+        Number(
+          player.autoAttackTotalMs ?? 6000
+        ) || 6000
+      )
+  };
+}
+
+function getInterpolatedATB(anchor, now) {
+  if (!anchor) {
+    return {
+      pct: 0,
+      ready: false
+    };
+  }
+
+  if (anchor.ready) {
+    return {
+      /*
+       * READY is communicated by the READY label/panel
+       * state rather than forcing the fill width to 100%.
+       *
+       * Holding just under full removes the visible
+       * 100% -> 0% flash when the turn is consumed.
+       */
+      pct: 99,
+      ready: true
+    };
+  }
+
+  const elapsedMs =
+    Math.max(
+      0,
+      now -
+      anchor.receivedAt
+    );
+
+  /*
+   * Recovery is intentionally held at the server's
+   * current gauge. Once recovery finishes, the gauge
+   * fills linearly using the server-provided ready time.
+   */
+  if (
+    elapsedMs <=
+    anchor.recoveryMs
+  ) {
+    return {
+      pct: anchor.gauge,
+      ready: false
+    };
+  }
+
+  const fillElapsedMs =
+    elapsedMs -
+    anchor.recoveryMs;
+
+  const fillDurationMs =
+    Math.max(
+      1,
+      anchor.readyInMs -
+      anchor.recoveryMs
+    );
+
+  const progress =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        fillElapsedMs /
+        fillDurationMs
+      )
+    );
+
+  const predictedPct =
+    anchor.gauge +
+    (
+      100 -
+      anchor.gauge
+    ) *
+    progress;
+
+  return {
+    /*
+     * Never visually predict a server-authoritative
+     * READY state. Hold just below full until a
+     * snapshot explicitly reports actor.ready = true.
+     *
+     * This prevents a 100% flash immediately before
+     * the server sends the post-action reset.
+     */
+    pct:
+      Math.min(
+        99,
+        predictedPct
+      ),
+
+    ready:
+      false
+  };
+}
+
+function renderSmoothCombatTimers() {
+  if (!combatTimingRunning) {
+    combatTimingFrame = null;
+    return;
+  }
+
+  const now =
+    performance.now();
+
+  // -----------------------
+  // Player ATB
+  // -----------------------
+  if (combatTiming.playerATB) {
+    const visual =
+      getInterpolatedATB(
+        combatTiming.playerATB,
+        now
+      );
+
+    setCombatBarPct(
+      "playerATBBar",
+      visual.pct
+    );
+
+    setText(
+      "playerATBText",
+      visual.ready
+        ? "READY"
+        : `${Math.round(
+            visual.pct
+          )}%`
+    );
+  }
+
+  // -----------------------
+  // Enemy ATB
+  // -----------------------
+  if (combatTiming.enemyATB) {
+    const visual =
+      getInterpolatedATB(
+        combatTiming.enemyATB,
+        now
+      );
+
+    setCombatBarPct(
+      "enemyATBBar",
+      visual.pct
+    );
+
+    setText(
+      "enemyATBText",
+      visual.ready
+        ? "READY"
+        : `${Math.round(
+            visual.pct
+          )}%`
+    );
+  }
+
+  // -----------------------
+  // Auto Attack
+  // -----------------------
+  if (combatTiming.autoAttack) {
+    const elapsedMs =
+      Math.max(
+        0,
+        now -
+        combatTiming.autoAttack
+          .receivedAt
+      );
+
+    const remainingMs =
+      Math.max(
+        0,
+        combatTiming.autoAttack
+          .remainingMs -
+        elapsedMs
+      );
+
+    const totalMs =
+      combatTiming.autoAttack
+        .totalMs;
+
+    const predictedPct =
+      totalMs > 0
+        ? (
+            1 -
+            remainingMs /
+              totalMs
+          ) *
+          100
+        : 0;
+
+    /*
+     * The browser does not decide when the auto attack
+     * actually fires. Hold the visual just below full
+     * until the server processes the swing and sends
+     * the next reset anchor.
+     */
+    const pct =
+      Math.min(
+        99,
+        predictedPct
+      );
+
+    setCombatBarPct(
+      "playerAutoAttackBar",
+      pct
+    );
+
+    setText(
+      "playerAutoAttackText",
+      remainingMs <= 0
+        ? "Swinging..."
+        : `${(
+            remainingMs /
+            1000
+          ).toFixed(1)}s`
+    );
+  }
+
+  combatTimingFrame =
+    requestAnimationFrame(
+      renderSmoothCombatTimers
+    );
+}
+
+function startSmoothCombatTimers() {
+  if (combatTimingRunning) {
+    return;
+  }
+
+  combatTimingRunning =
+    true;
+
+  combatTimingFrame =
+    requestAnimationFrame(
+      renderSmoothCombatTimers
+    );
+}
+
+function stopSmoothCombatTimers() {
+  combatTimingRunning =
+    false;
+
+  if (combatTimingFrame) {
+    cancelAnimationFrame(
+      combatTimingFrame
+    );
+
+    combatTimingFrame =
+      null;
+  }
+
+  combatTiming.playerATB =
+    null;
+
+  combatTiming.enemyATB =
+    null;
+
+  combatTiming.autoAttack =
+    null;
+}
+
+function syncCombatTimingAnchors(snapshot) {
+  if (!snapshot) return;
+
+  if (snapshot.player) {
+    combatTiming.playerATB =
+      makeATBTimingAnchor(
+        snapshot.player
+      );
+
+    combatTiming.autoAttack =
+      makeAutoAttackTimingAnchor(
+        snapshot.player
+      );
+  }
+
+  if (snapshot.enemy) {
+    combatTiming.enemyATB =
+      makeATBTimingAnchor(
+        snapshot.enemy
+      );
+  }
+
+  startSmoothCombatTimers();
+}
 function maybeShowLootChest(data) {
   const chestId = data?.chest?.id ?? data?.chestId ?? null;
   if (!chestId) return;
@@ -30,61 +429,161 @@ function maybeShowLootChest(data) {
   }, 250);
 }
 
-function startCombatStatePolling() {
-  if (combatStateInterval) return;
+async function getWorldCombatSocket() {
+  if (
+    window.GFSocket &&
+    typeof window.GFSocket.on === "function"
+  ) {
+    return window.GFSocket;
+  }
 
-  combatStateInterval = setInterval(async () => {
-    try {
-      const res = await fetch("/combat/state", { credentials: "include" });
-      const data = await res.json();
+  if (window.GFSocketReady) {
+    const socket =
+      await window.GFSocketReady;
 
-      if (!data?.snapshot) return;
+    if (
+      socket &&
+      typeof socket.on === "function"
+    ) {
+      return socket;
+    }
+  }
 
-      syncCombatSnapshot(data.snapshot);
+  return null;
+}
 
-      if (data.snapshot?.state === "defeat" && !combatOver) {
-        stopCombatStatePolling();
-        currentEnemy = null;
-        setTimeout(() => (window.location.href = "/death.html"), 500);
+function handleCombatStatePayload(data) {
+  const snapshot =
+    data?.snapshot ??
+    null;
+
+  if (!snapshot) {
+    return;
+  }
+
+  syncCombatSnapshot(
+    snapshot
+  );
+
+  if (
+    snapshot.state ===
+      "defeat" &&
+    !combatOver
+  ) {
+    stopCombatStateSocket();
+
+    currentEnemy =
+      null;
+
+    setTimeout(
+      () => {
+        window.location.href =
+          "/death.html";
+      },
+      500
+    );
+
+    return;
+  }
+
+  if (
+    snapshot.state !==
+      "active" &&
+    !combatOver
+  ) {
+    if (
+      snapshot.state ===
+      "victory"
+    ) {
+      const rewards =
+        snapshot.rewards;
+
+      if (rewards) {
+        maybeShowLootChest({
+          chest:
+            rewards.chest ??
+            null,
+
+          quest:
+            rewards.quest ??
+            null
+        });
+
+      }
+    }
+
+    enterPostCombatState();
+  }
+}
+
+async function startCombatStateSocket() {
+  if (combatSocketJoined) {
+    return;
+  }
+
+  const socket =
+    await getWorldCombatSocket();
+
+  if (!socket) {
+    console.error(
+      "World combat socket unavailable."
+    );
+
+    return;
+  }
+
+  combatSocket =
+    socket;
+
+  if (!combatSocketBound) {
+    combatSocketBound =
+      true;
+
+    socket.on(
+      "combat:state",
+      handleCombatStatePayload
+    );
+  }
+
+  socket.emit(
+    "combat:join",
+    result => {
+      if (!result?.ok) {
+        console.error(
+          "Unable to join world combat socket:",
+          result?.error ||
+          "Unknown error"
+        );
+
         return;
       }
 
-      if (!data.inCombat && !combatOver) {
-        if (data.snapshot?.state === "victory") {
-          const rewards = data.snapshot.rewards;
+      combatSocketJoined =
+        Boolean(
+          result.inCombat
+        );
 
-          if (rewards) {
-
-            maybeShowLootChest({
-              chest: rewards.chest ?? null,
-              quest: rewards.quest ?? null
-            });
-
-            if (
-              rewards.huntProgress?.advanced &&
-              typeof window.showHuntProgress === "function"
-            ) {
-              window.showHuntProgress(
-                rewards.huntProgress
-              );
-            }
-
-          }
-        }
-
-        enterPostCombatState();
+      if (result.snapshot) {
+        handleCombatStatePayload(
+          result
+        );
       }
-    } catch (err) {
-      console.error("combat/state polling failed", err);
     }
-  }, 200);
+  );
 }
 
-function stopCombatStatePolling() {
-  if (combatStateInterval) {
-    clearInterval(combatStateInterval);
-    combatStateInterval = null;
+function stopCombatStateSocket() {
+  if (
+    combatSocket &&
+    combatSocketJoined
+  ) {
+    combatSocket.emit(
+      "combat:leave"
+    );
   }
+
+  combatSocketJoined =
+    false;
 }
 
 // ✅ NEW: enable/disable close button (top-right of modal)
@@ -121,86 +620,6 @@ function setCombatUIEnabled(enabled) {
     // don't block tooltips/scrolling; just stop clicking
     el.style.pointerEvents = enabled ? "" : "none";
   });
-}
-// =======================================
-// HUNT PROGRESS NOTIFICATIONS
-// =======================================
-
-let lastShownHuntProgressKey = null;
-
-function showCombatHuntProgress(progress) {
-  if (!progress?.advanced) {
-    return;
-  }
-
-  console.log(
-    "Combat Hunt Progress:",
-    progress
-  );
-
-  const key =
-    [
-      progress.partyHuntId,
-      progress.objectiveId,
-      progress.progressCount,
-      progress.trackingProgress
-    ].join(":");
-
-  // Prevent the polling snapshot from
-  // showing the exact same progress twice.
-  if (key === lastShownHuntProgressKey) {
-    return;
-  }
-
-  lastShownHuntProgressKey = key;
-
-  const trackingText =
-    `${progress.trackingProgress}/${progress.trackingRequired} Tracking`;
-
-  if (window.GFToast?.show) {
-
-    if (progress.objectiveComplete) {
-      window.GFToast.show(
-        "Hunt Objective Complete",
-        `+${progress.trackingGain} Tracking • ${trackingText}`,
-        {
-          type: "success",
-          durationMs: 3200
-        }
-      );
-    } else {
-      window.GFToast.show(
-        "Hunt Progress",
-        `+${progress.trackingGain} Tracking • ${trackingText}`,
-        {
-          type: "success",
-          durationMs: 2600
-        }
-      );
-    }
-
-    if (progress.targetRevealed) {
-      setTimeout(() => {
-        window.GFToast.show(
-          "Quarry Located",
-          "The trail is complete. Your party has uncovered its quarry.",
-          {
-            type: "success",
-            durationMs: 4500
-          }
-        );
-      }, 700);
-    }
-
-    return;
-  }
-
-  // Debug fallback so we know the
-  // Hunt payload reached the browser.
-  console.warn(
-    "GFToast unavailable. Hunt progressed:",
-    progress
-  );
 }
 // =======================
 // POTION COOLDOWNS (PER SLOT)
@@ -300,7 +719,8 @@ function cancelPotionCooldown(slot) {
 function enterPostCombatState() {
   combatOver = true;
 
-  stopCombatStatePolling();
+  stopCombatStateSocket();
+  stopSmoothCombatTimers();
 
   // lock further combat actions safely
   currentEnemy = null;
@@ -460,29 +880,8 @@ function syncCombatSnapshot(snapshot) {
     window.playerMaxHP = player.maxHp;
     window.playerMaxSP = player.maxSp;
 
-    // Action Timer
-    const playerGauge = Math.max(0, Math.min(100, Number(player.gauge || 0)));
-    updateBar("playerATBBar", playerGauge, 100);
-    setText(
-      "playerATBText",
-      player.ready ? "READY" : `${Math.round(playerGauge)}%`
-    );
-
-    // Auto Attack Timer
-    const autoMs = Number(player.autoAttackMs ?? 0);
-    const autoTotal = Number(player.autoAttackTotalMs ?? 6000);
-
-    const autoElapsed = Math.max(0, autoTotal - autoMs);
-    const autoPct =
-      autoTotal > 0
-        ? Math.max(0, Math.min(100, (autoElapsed / autoTotal) * 100))
-        : 0;
-
-    updateBar("playerAutoAttackBar", autoPct, 100);
-    setText(
-      "playerAutoAttackText",
-      autoMs <= 0 ? "Swinging..." : `${(autoMs / 1000).toFixed(1)}s`
-    );
+    // ATB + auto attack visuals are interpolated by
+    // requestAnimationFrame from server timing anchors.
 
     const playerPanel = document.querySelector(".player-panel");
     if (playerPanel) {
@@ -504,18 +903,18 @@ function syncCombatSnapshot(snapshot) {
 
     updateBar("enemyHPBar", enemy.hp, enemy.maxHp);
 
-    const enemyGauge = Math.max(0, Math.min(100, Number(enemy.gauge || 0)));
-    updateBar("enemyATBBar", enemyGauge, 100);
-    setText(
-      "enemyATBText",
-      enemy.ready ? "READY" : `${Math.round(enemyGauge)}%`
-    );
+    // Enemy ATB visual is interpolated by
+    // requestAnimationFrame from server timing anchors.
 
     const enemyPanel = document.querySelector(".enemy-panel");
     if (enemyPanel) {
       enemyPanel.classList.toggle("ready", !!enemy.ready);
     }
   }
+
+  syncCombatTimingAnchors(
+    snapshot
+  );
 
   syncDamageEvents(snapshot);
   syncServerCombatLog(snapshot);
@@ -526,6 +925,8 @@ function syncCombatSnapshot(snapshot) {
 
 window.openCombatModal = async function (enemy) {
   await waitForEl("combatModal");
+
+  combatStateGeneration++;
   // New combat sessions restart damage-event IDs at 1.
   displayedDamageEventIds.clear();
 
@@ -550,7 +951,11 @@ if (attackBtn) attackBtn.style.display = "none";
 // ✅ NEW: always populate the hotbar ASAP
 loadHotbarSpells();
 
-  startCombatStatePolling();
+  startCombatStateSocket().catch(err => {
+    console.error("Unable to start combat socket:", err);
+  });
+  startSmoothCombatTimers();
+
   // ✅ Always show modal immediately (so user sees it)
   document.getElementById("combatModal").classList.remove("hidden");
   loadEquippedPotions();
@@ -601,7 +1006,7 @@ if (enemyImg) {
   setText("enemyMaxHP", currentEnemy.maxHP);
   updateBar("enemyHPBar", currentEnemy.hp, currentEnemy.maxHP);
 
-   // Enemy actions now resolve through /combat/state polling
+   // Enemy actions now resolve through the server-owned combat socket loop
 
   // ✅ In parallel: load player stats (doesn't block enemy UI)
   try {
@@ -625,7 +1030,7 @@ if (enemyImg) {
   }
 
   // ✅ OPTIONAL BUT STRONG: Immediately sync enemy from authoritative server state
-  // (prevents NaN / stale state if enemy payload was incomplete)
+  // (one-time bootstrap; prevents stale state if enemy payload was incomplete)
     try {
     const state = await fetch("/combat/state", { credentials: "include" }).then(r => r.json());
     const snap = state?.snapshot;
@@ -667,7 +1072,8 @@ if (enemyImg) {
 
 // ✅ CHANGED: stop polling too; only reload if combatOver is true
 window.closeCombatModal = function () {
-  stopCombatStatePolling();
+  stopCombatStateSocket();
+  stopSmoothCombatTimers();
   currentEnemy = null;
 
   document.getElementById("combatModal")?.classList.add("hidden");
@@ -735,15 +1141,6 @@ async function combatAttack() {
     if (exp) logCombat(`✨ You gained ${exp} EXP!`);
     if (gold) logCombat(`💰 You gained ${gold} gold!`);
     if (data.levelUp) logCombat("⬆ LEVEL UP!");
-    if (
-      data.huntProgress?.advanced &&
-      typeof window.showHuntProgress === "function"
-    ) {
-      window.showHuntProgress(
-        data.huntProgress
-      );
-    }
-
     enterPostCombatState();
     maybeShowLootChest(data);
     return;
@@ -950,6 +1347,13 @@ async function castSpell(spellId) {
     return;
   }
 
+  /*
+   * Invalidate any /combat/state request that began
+   * before this action. Its response may describe the
+   * pre-cast READY/100% state.
+   */
+  combatStateGeneration++;
+
   const response = await fetch("/spells/cast", {
     method: "POST",
     credentials: "include",
@@ -965,6 +1369,17 @@ async function castSpell(spellId) {
     if (data.error === "combat_over") return;
     alert(data.error);
     return;
+  }
+
+  /*
+   * /spells/cast returns the authoritative session
+   * after consumeActorTurn(), so apply its ATB reset
+   * immediately instead of waiting for the next poll.
+   */
+  if (data.snapshot) {
+    syncCombatSnapshot(
+      data.snapshot
+    );
   }
 
   if (data.cooldown && data.cooldown > 0) {
@@ -1013,13 +1428,6 @@ if (data.dead) {
       "⬆ LEVEL UP!"
     );
   }
-
-  // =======================
-  // HUNT PROGRESS
-  // =======================
-  showCombatHuntProgress(
-    data.huntProgress
-  );
 
   maybeShowLootChest(
     data

@@ -1,3 +1,4 @@
+//party.routes.ts
 import express from "express";
 
 import {
@@ -5,6 +6,7 @@ import {
   createParty,
   invitePlayer,
   getPendingInvites,
+  getPartyInvite,
   acceptInvite,
   declineInvite,
   leaveParty,
@@ -13,6 +15,14 @@ import {
   disbandParty,
   searchPartyPlayers
 } from "./partyService";
+
+import {
+  publishPartyInvite,
+  publishPartyInviteDeclined,
+  publishPartyChanged,
+  publishPartyRemoved,
+  publishPartyDisbanded,
+} from "./partySocket";
 
 const router = express.Router();
 
@@ -136,6 +146,29 @@ router.post(
           invitedPlayerId
         );
 
+      const party =
+        await getPartyByPlayer(
+          inviterPlayerId
+        );
+
+      const inviter =
+        party?.members.find(
+          member =>
+            member.playerId ===
+            inviterPlayerId
+        );
+
+      publishPartyInvite(
+        invitedPlayerId,
+        {
+          inviteId: result.inviteId,
+          partyId: result.partyId,
+          inviterPlayerId,
+          inviterName:
+            inviter?.name || undefined,
+        }
+      );
+
       return res.json({
         ok: true,
         ...result
@@ -251,6 +284,10 @@ router.post(
           playerId
         );
 
+      publishPartyChanged(
+        party
+      );
+
       return res.json({
         ok: true,
         party
@@ -283,10 +320,28 @@ router.post(
       const inviteId =
         Number(req.params.id);
 
+      const invite =
+        await getPartyInvite(
+          inviteId
+        );
+
       await declineInvite(
         inviteId,
         playerId
       );
+
+      if (invite) {
+        publishPartyInviteDeclined(
+          Number(
+            invite.inviter_player_id
+          ),
+          {
+            inviteId,
+            invitedPlayerId:
+              playerId,
+          }
+        );
+      }
 
       return res.json({
         ok: true
@@ -316,10 +371,41 @@ router.post(
       const playerId =
         Number(req.session.playerId);
 
+      const partyBefore =
+        await getPartyByPlayer(
+          playerId
+        );
+
       const result =
         await leaveParty(
           playerId
         );
+
+      if (partyBefore) {
+        publishPartyRemoved(
+          playerId,
+          {
+            partyId:
+              partyBefore.id,
+            reason: "left",
+          }
+        );
+
+        const updated =
+          await getPartyByPlayer(
+            partyBefore.members.find(
+              member =>
+                member.playerId !==
+                playerId
+            )?.playerId || 0
+          );
+
+        if (updated) {
+          publishPartyChanged(
+            updated
+          );
+        }
+      }
 
       return res.json({
         ok: true,
@@ -353,10 +439,37 @@ router.post(
       const targetPlayerId =
         Number(req.body.playerId);
 
+      const partyBefore =
+        await getPartyByPlayer(
+          leaderPlayerId
+        );
+
       await kickPlayer(
         leaderPlayerId,
         targetPlayerId
       );
+
+      if (partyBefore) {
+        publishPartyRemoved(
+          targetPlayerId,
+          {
+            partyId:
+              partyBefore.id,
+            reason: "kicked",
+          }
+        );
+
+        const updated =
+          await getPartyByPlayer(
+            leaderPlayerId
+          );
+
+        if (updated) {
+          publishPartyChanged(
+            updated
+          );
+        }
+      }
 
       return res.json({
         ok: true
@@ -393,6 +506,17 @@ router.post(
         leaderPlayerId,
         targetPlayerId
       );
+
+      const updated =
+        await getPartyByPlayer(
+          leaderPlayerId
+        );
+
+      if (updated) {
+        publishPartyChanged(
+          updated
+        );
+      }
 
       return res.json({
         ok: true
@@ -438,6 +562,10 @@ router.post(
       await disbandParty(
         party.id,
         playerId
+      );
+
+      publishPartyDisbanded(
+        party
       );
 
       return res.json({

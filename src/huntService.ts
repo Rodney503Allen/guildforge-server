@@ -13,6 +13,11 @@ import type {
 } from "./hunt.types";
 
 
+import {
+  publishHuntProgressEvent
+} from "./huntEvents";
+
+
 /* =========================================================
    QUERY HELPER
 ========================================================= */
@@ -2559,7 +2564,7 @@ if (
     await connection.commit();
 
 
-return {
+const progress = {
   advanced: true,
 
   partyHuntId,
@@ -2595,6 +2600,21 @@ return {
   targetMapX,
   targetMapY
 };
+
+/*
+ * Objective progress is shared party state.
+ *
+ * Broadcast only AFTER the transaction commits so every
+ * client receives a notification for confirmed progress.
+ */
+publishHuntProgressEvent(
+  Number(
+    hunt.party_id
+  ),
+  progress
+);
+
+return progress;
 
 
   } catch (err) {

@@ -35,6 +35,11 @@ import {
   grantExperienceTx
 } from "./experienceService";
 
+import {
+  publishPlayerStatePatch,
+  publishPlayerLevelUp
+} from "../playerStateEvents";
+
 
 export type HuntCombatPlayer = {
   playerId: number;
@@ -235,6 +240,28 @@ function clamp(
   );
 }
 
+
+function publishHuntPlayerVitals(
+  player: HuntCombatPlayer
+) {
+  publishPlayerStatePatch(
+    player.playerId,
+    {
+      hpoints:
+        player.hp,
+
+      maxhp:
+        player.maxHp,
+
+      spoints:
+        player.sp,
+
+      maxspoints:
+        player.maxSp
+    }
+  );
+}
+
 async function withHuntCombatLock<T>(
   encounterId: number,
   action: () => Promise<T>
@@ -319,6 +346,124 @@ export function getHuntATBFillRate(
     getHuntATBTimeSeconds(
       agility
     )
+  );
+}
+
+
+function getHuntPlayerReadyInMs(
+  player: HuntCombatPlayer,
+  now: number = Date.now()
+) {
+  if (
+    player.hp <= 0 ||
+    player.ready
+  ) {
+    return 0;
+  }
+
+  const recoveryMs =
+    Math.max(
+      0,
+      player.recoveryUntil -
+        now
+    );
+
+  const fillRate =
+    Math.max(
+      0.0001,
+      getHuntATBFillRate(
+        player.stats.agility
+      )
+    );
+
+  const remainingGauge =
+    Math.max(
+      0,
+      100 -
+        Number(
+          player.gauge || 0
+        )
+    );
+
+  const fillMs =
+    (
+      remainingGauge /
+      fillRate
+    ) *
+    1000;
+
+  return Math.max(
+    0,
+    recoveryMs +
+      fillMs
+  );
+}
+
+function getHuntEnemyReadyInMs(
+  session: HuntCombatSession,
+  now: number = Date.now()
+) {
+  const enemy =
+    session.enemy;
+
+  if (
+    enemy.hp <= 0 ||
+    enemy.ready
+  ) {
+    return 0;
+  }
+
+  const recoveryMs =
+    Math.max(
+      0,
+      enemy.recoveryUntil -
+        now
+    );
+
+  const effectiveStats =
+    getEffectiveHuntEnemyStats(
+      session,
+      now
+    );
+
+  const baseFillRate =
+    getHuntATBFillRate(
+      effectiveStats.agility
+    );
+
+  const atbRateMult =
+    getHuntEnemyAtbRateMult(
+      session,
+      now
+    );
+
+  const fillRate =
+    Math.max(
+      0.0001,
+      baseFillRate *
+        atbRateMult
+    );
+
+  const remainingGauge =
+    Math.max(
+      0,
+      100 -
+        Number(
+          enemy.gauge || 0
+        )
+    );
+
+  const fillMs =
+    (
+      remainingGauge /
+      fillRate
+    ) *
+    1000;
+
+  return Math.max(
+    0,
+    recoveryMs +
+      fillMs
   );
 }
 
@@ -2649,6 +2794,47 @@ async function castHuntSpellUnlocked(
 
 
   // =====================================================
+  // GLOBAL PLAYER STATE
+  // =====================================================
+
+  /*
+   * Shared spell handlers can change the caster,
+   * one selected ally, or the whole party.
+   *
+   * At this point those Hunt members have already
+   * been refreshed from the authoritative stat engine,
+   * so publish their vitals to each player's global HUD.
+   */
+  if (
+    targetType ===
+    "all_allies"
+  ) {
+    for (
+      const member of
+      session.players.values()
+    ) {
+      publishHuntPlayerVitals(
+        member
+      );
+    }
+  } else {
+    publishHuntPlayerVitals(
+      player
+    );
+
+    if (
+      targetPlayer &&
+      targetPlayer.playerId !==
+        player.playerId
+    ) {
+      publishHuntPlayerVitals(
+        targetPlayer
+      );
+    }
+  }
+
+
+  // =====================================================
   // COOLDOWN
   // =====================================================
 
@@ -2994,7 +3180,20 @@ enemy: {
     session.enemy.gauge,
 
   ready:
-    session.enemy.ready
+    session.enemy.ready,
+
+  recoveryMs:
+    Math.max(
+      0,
+      session.enemy.recoveryUntil -
+        now
+    ),
+
+  readyInMs:
+    getHuntEnemyReadyInMs(
+      session,
+      now
+    )
 },
 
     players:
@@ -3024,6 +3223,19 @@ enemy: {
 
         ready:
           player.ready,
+
+        recoveryMs:
+          Math.max(
+            0,
+            player.recoveryUntil -
+              now
+          ),
+
+        readyInMs:
+          getHuntPlayerReadyInMs(
+            player,
+            now
+          ),
 
         autoAttackMs:
           Math.max(
@@ -3416,6 +3628,16 @@ async function processEnemyAttack(
         target.hp,
         target.playerId
       ]
+    );
+
+
+    /*
+     * Keep this player's global HUD synchronized
+     * even though the Hunt boss action happened
+     * inside the server-owned encounter loop.
+     */
+    publishHuntPlayerVitals(
+      target
     );
 
     // =====================================================
@@ -4187,6 +4409,34 @@ async function completeHuntVictory(
      */
     session.rewards =
       pendingRewards;
+
+    /*
+     * Rewards were just committed transactionally.
+     *
+     * Reconcile every eligible player's global HUD so
+     * EXP, gold, level, stat points, skill points and
+     * any level-up HP/SP changes appear immediately.
+     */
+    for (
+      const reward of
+      pendingRewards
+    ) {
+      publishPlayerStatePatch(
+        reward.playerId,
+        {
+          refreshDerivedStats: true
+        }
+      );
+
+      if (
+        reward.levelUp
+      ) {
+        publishPlayerLevelUp(
+          reward.playerId,
+          reward.levelUp
+        );
+      }
+    }
 
     session.enemy.hp = 0;
     session.enemy.stats.hpoints = 0;

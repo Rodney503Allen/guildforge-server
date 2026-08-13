@@ -1,3 +1,4 @@
+//services/partyService.ts
 import { db } from "./db";
 import type { Party } from "./party.types";
 
@@ -628,6 +629,36 @@ export async function acceptInvite(
   }
 
   return updated;
+}
+
+
+/* =========================================================
+   GET PARTY INVITE
+========================================================= */
+
+export async function getPartyInvite(
+  inviteId: number
+) {
+  const rows: any[] = await query(
+    `
+      SELECT
+        id,
+        party_id,
+        inviter_player_id,
+        invited_player_id,
+        status,
+        created_at,
+        expires_at
+      FROM party_invites
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [inviteId]
+  );
+
+  return rows.length
+    ? rows[0]
+    : null;
 }
 
 /* =========================================================

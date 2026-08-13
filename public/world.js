@@ -108,6 +108,9 @@ function normalizeMoveDir(dir) {
     ? dir
     : "";
 }
+let lastShownHuntProgressKey =
+  null;
+
 function showHuntProgress(progress) {
   if (
     !progress ||
@@ -115,6 +118,30 @@ function showHuntProgress(progress) {
   ) {
     return;
   }
+
+  const progressKey =
+    [
+      progress.partyHuntId ?? "",
+      progress.objectiveId ?? "",
+      progress.progressCount ?? "",
+      progress.trackingProgress ?? ""
+    ].join(":");
+
+  /*
+   * Safety net only.
+   * Hunt objective notifications should normally arrive
+   * through the party socket exactly once.
+   */
+  if (
+    progressKey &&
+    progressKey ===
+      lastShownHuntProgressKey
+  ) {
+    return;
+  }
+
+  lastShownHuntProgressKey =
+    progressKey;
 
   if (!window.GFToast?.show) {
     return;
@@ -811,12 +838,6 @@ if (data.regionData) {
 
 updateNavHUD(data);
 
-if (data.huntProgress?.advanced) {
-  showHuntProgress(
-    data.huntProgress
-  );
-}
-
 if (data.inCombat && data.enemy) {
   pendingCombatEnemy =
     data.enemy;
@@ -1086,18 +1107,6 @@ async function investigateHuntClue(
 
         data.clue.description ||
           "You examine the evidence."
-      );
-    }
-
-
-    /*
-     * Shared Hunt progress notification.
-     */
-    if (
-      data.huntProgress?.advanced
-    ) {
-      showHuntProgress(
-        data.huntProgress
       );
     }
 

@@ -1,3 +1,4 @@
+//db/index.ts
 import mysql from "mysql2/promise";
 
 let dbConfig;
@@ -40,25 +41,6 @@ db.getConnection()
   .catch(err => {
     console.error("❌ MySQL connection FAILED:", err);
   });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 /*

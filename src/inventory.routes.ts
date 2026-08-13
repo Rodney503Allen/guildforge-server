@@ -32,10 +32,6 @@ router.get("/api/inventory", async (req, res) => {
   res.json(items);
 });
 
-
-
-
-
 router.get("/api/inventory/slot-check/:id", async (req, res) => {
   const pid = (req.session as any).playerId;
   const invId = Number(req.params.id);
@@ -139,34 +135,6 @@ switch (item.effect_type) {
   default:
     return res.json({ error: "This item has no effect." });
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   // ======================
   // STACK DECREMENT

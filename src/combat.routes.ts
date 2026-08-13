@@ -8,13 +8,13 @@ import { getCreatureDebuffTotals } from "./services/creatureDebuffService";
 import {
   createCombatSession,
   ensureCombatSession,
-  advanceCombatSession,
   buildCombatSnapshot,
   consumeActorTurn,
   destroyCombatSession,
   getActorReadyInMs
 } from "./services/combatSessionService";
 import { getEquippedSpells } from "./services/spellLoadoutService";
+import { emitPlayerStatePatch } from "./socketServer";
 
 const router = Router();
 
@@ -128,8 +128,39 @@ if (String(row.type) === "potion") {
   }
 
   // Persist player changes
-  if (changedHP) await db.query(`UPDATE players SET hpoints = ? WHERE id = ?`, [hp, pid]);
-  if (changedSP) await db.query(`UPDATE players SET spoints = ? WHERE id = ?`, [sp, pid]);
+  if (changedHP) {
+    await db.query(
+      `UPDATE players SET hpoints = ? WHERE id = ?`,
+      [hp, pid]
+    );
+  }
+
+  if (changedSP) {
+    await db.query(
+      `UPDATE players SET spoints = ? WHERE id = ?`,
+      [sp, pid]
+    );
+  }
+
+  if (changedHP || changedSP) {
+    emitPlayerStatePatch(
+      pid,
+      {
+        ...(changedHP
+          ? {
+              hpoints: hp,
+              maxhp
+            }
+          : {}),
+        ...(changedSP
+          ? {
+              spoints: sp,
+              maxspoints: maxsp
+            }
+          : {})
+      }
+    );
+  }
 
   // Decrement item quantity
   await db.query(
@@ -161,10 +192,35 @@ if (String(row.type) === "potion") {
 }
 
 async function getOrCreateSession(pid: number) {
-  let session = ensureCombatSession(pid);
-  if (!session) {
-    session = await createCombatSession(pid);
+  let session =
+    ensureCombatSession(
+      pid
+    );
+
+  /*
+   * Never allow a completed in-memory combat session to
+   * become the bootstrap state for a newly spawned creature.
+   */
+  if (
+    session &&
+    session.state !==
+      "active"
+  ) {
+    destroyCombatSession(
+      pid
+    );
+
+    session =
+      null;
   }
+
+  if (!session) {
+    session =
+      await createCombatSession(
+        pid
+      );
+  }
+
   return session;
 }
 
@@ -344,8 +400,12 @@ router.get("/combat/state", async (req, res) => {
       });
     }
 
-    await advanceCombatSession(session);
-
+    /*
+     * Read-only bootstrap/fallback endpoint.
+     *
+     * Continuous combat advancement is now owned by
+     * combatSocket.ts after the browser joins combat.
+     */
     return res.json({
       inCombat: session.state === "active",
       snapshot: buildCombatSnapshot(session)

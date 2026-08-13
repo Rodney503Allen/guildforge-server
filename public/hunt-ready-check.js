@@ -1,10 +1,7 @@
 (function () {
   "use strict";
 
-  const POLL_MS = 1200;
-
   let currentCheck = null;
-  let pollTimer = null;
   let countdownTimer = null;
   let requestPending = false;
   let combatOpening = false;
@@ -142,19 +139,12 @@
   }
 
   function stopTimers() {
-    if (pollTimer) {
-      window.clearTimeout(
-        pollTimer
-      );
-    }
-
     if (countdownTimer) {
       window.clearInterval(
         countdownTimer
       );
     }
 
-    pollTimer = null;
     countdownTimer = null;
   }
 
@@ -456,50 +446,6 @@
     }
   }
 
-  async function poll() {
-    if (
-      requestPending ||
-      combatOpening
-    ) {
-      schedulePoll();
-      return;
-    }
-
-    try {
-      const data =
-        await api(
-          "/hunts/ready-check"
-        );
-
-      handleResult(
-        data?.readyCheck
-      );
-    } catch (error) {
-      showError(error.message);
-    } finally {
-      if (
-        currentCheck?.status ===
-        "pending"
-      ) {
-        schedulePoll();
-      }
-    }
-  }
-
-  function schedulePoll() {
-    if (pollTimer) {
-      window.clearTimeout(
-        pollTimer
-      );
-    }
-
-    pollTimer =
-      window.setTimeout(
-        poll,
-        POLL_MS
-      );
-  }
-
   function startTimers() {
     stopTimers();
 
@@ -509,7 +455,6 @@
         250
       );
 
-    schedulePoll();
   }
 
   async function startReadyCheck(
@@ -676,7 +621,75 @@
     }
   }
 
+
+  function getHuntSocket() {
+    if (
+      window.GFSocket?.connected ||
+      window.GFSocket
+    ) {
+      return window.GFSocket;
+    }
+
+    if (
+      typeof window.io !==
+      "function"
+    ) {
+      return null;
+    }
+
+    window.GFSocket =
+      window.io();
+
+    return window.GFSocket;
+  }
+
+  function connectReadyCheckSocket() {
+    const socket =
+      getHuntSocket();
+
+    if (!socket) {
+      console.error(
+        "Hunt socket client failed to load."
+      );
+
+      return;
+    }
+
+    const subscribe = () => {
+      socket.emit(
+        "hunt:subscribe"
+      );
+    };
+
+    if (socket.connected) {
+      subscribe();
+    }
+
+    socket.on(
+      "connect",
+      subscribe
+    );
+
+    socket.on(
+      "hunt:ready-check",
+      data => {
+        handleResult(
+          data
+        );
+
+        if (
+          data?.readyCheck?.status ===
+          "pending"
+        ) {
+          startTimers();
+        }
+      }
+    );
+  }
+
   function init() {
+    connectReadyCheckSocket();
+
     byId("huntReadyToggleBtn")
       ?.addEventListener(
         "click",

@@ -22,10 +22,21 @@ import {
 
 import {
   ensureHuntCombatSessionForPlayer,
-  advanceHuntCombatSession,
   buildHuntCombatSnapshot,
   castHuntSpell
 } from "./services/huntCombatSessionService";
+
+
+
+import {
+  publishHuntChanged,
+  publishHuntReadyCheck,
+  publishHuntCombatSnapshot
+} from "./huntSocket";
+
+import {
+  getPartyByPlayer
+} from "./partyService";
 
 
 const router =
@@ -114,6 +125,11 @@ router.post(
         await startHuntReadyCheck(
           playerId
         );
+
+      publishHuntReadyCheck(
+        result.readyCheck,
+        result.encounter
+      );
 
       return res.json({
         ok: true,
@@ -210,6 +226,11 @@ router.post(
           req.body.ready
         );
 
+      publishHuntReadyCheck(
+        result.readyCheck,
+        result.encounter
+      );
+
       return res.json({
         ok: true,
         ...result
@@ -250,6 +271,11 @@ router.post(
         await cancelHuntReadyCheck(
           playerId
         );
+
+      publishHuntReadyCheck(
+        result.readyCheck,
+        result.encounter
+      );
 
       return res.json({
         ok: true,
@@ -336,10 +362,6 @@ router.get(
         });
       }
 
-      await advanceHuntCombatSession(
-        session
-      );
-
       return res.json({
         ok: true,
         encounter:
@@ -422,6 +444,12 @@ router.post(
           spellId,
           targetPlayerId
         );
+
+      if (result.snapshot) {
+        publishHuntCombatSnapshot(
+          result.snapshot
+        );
+      }
 
       if (!result.ok) {
         return res
@@ -548,6 +576,14 @@ router.post(
           huntId
         );
 
+      publishHuntChanged(
+        hunt.partyId,
+        {
+          type: "accepted",
+          partyHuntId:
+            hunt.partyHuntId
+        }
+      );
 
       return res.json({
         ok: true,
@@ -591,10 +627,31 @@ router.post(
         );
 
 
+      const party =
+        await getPartyByPlayer(
+          playerId
+        );
+
+      const active =
+        await getActivePartyHunt(
+          playerId
+        );
+
       await abandonHunt(
         playerId
       );
 
+      if (party) {
+        publishHuntChanged(
+          party.id,
+          {
+            type: "abandoned",
+            partyHuntId:
+              active?.partyHuntId ??
+              null
+          }
+        );
+      }
 
       return res.json({
         ok: true

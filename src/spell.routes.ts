@@ -17,6 +17,9 @@ import {
   pushDamageEvent
 } from "./services/combatSessionService";
 import { getEquippedSpells } from "./services/spellLoadoutService";
+import { publishWorldCombatSnapshot } from "./combatSocket";
+import { emitPlayerStatePatch, getSocketServer } from "./socketServer";
+import { publishPlayerLevelUp } from "./playerStateEvents";
 
 import type {
   SpellEnemy
@@ -617,6 +620,14 @@ const spellEnemy =
       [newSP, pid]
     );
 
+    emitPlayerStatePatch(
+      pid,
+      {
+        spoints: newSP,
+        maxspoints: session.player.maxSp
+      }
+    );
+
     // Execute the actual spell effect.
 const result =
   await handler.execute({
@@ -685,6 +696,22 @@ if (result.appliedStatus) {
     if (result.playerHP !== undefined) {
       session.player.hp = playerHP;
     }
+
+    /*
+     * Re-publish current combat vitals after the spell effect.
+     *
+     * This covers direct healing and any handler that refreshes
+     * the player's authoritative HP/SP/max values.
+     */
+    emitPlayerStatePatch(
+      pid,
+      {
+        hpoints: session.player.hp,
+        maxhp: session.player.maxHp,
+        spoints: session.player.sp,
+        maxspoints: session.player.maxSp
+      }
+    );
 
     if (
       result.enemyHP !== undefined &&
@@ -762,6 +789,26 @@ const previousEnemyHP =
         quest: reward?.quest ?? null,
         huntProgress: reward?.huntProgress ?? null
       };
+
+      /*
+       * Direct spell kills grant their rewards here.
+       * Trigger the same one-shot global HUD refresh
+       * used by auto-attack and DOT kills.
+       */
+      emitPlayerStatePatch(
+        pid,
+        {
+          refreshDerivedStats: true
+        }
+      );
+
+
+      if (reward?.levelUp) {
+        publishPlayerLevelUp(
+          pid,
+          reward.levelUp
+        );
+      }
     }
 
     if (result.log) {
@@ -794,6 +841,17 @@ const previousEnemyHP =
       }
     }
 
+    const snapshot =
+      buildCombatSnapshot(
+        session
+      );
+
+    publishWorldCombatSnapshot(
+      getSocketServer(),
+      pid,
+      snapshot,
+    );
+
     return res.json({
       log: result.log,
 
@@ -821,8 +879,7 @@ const previousEnemyHP =
 
       cooldown: cooldownSec,
 
-      snapshot:
-        buildCombatSnapshot(session)
+      snapshot
     });
   } catch (err) {
     console.error(

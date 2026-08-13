@@ -5,6 +5,8 @@ import { trySpawnEnemy } from "./services/spawnService";
 import { applyInteractProgress, applyEnterAreaProgress } from "./services/questService";
 import { maybeSpawnResourceNodeForPlayer } from "./services/gatheringSpawnService";
 import { advanceHuntObjective } from "./huntService";
+import { publishHuntReadyCheck } from "./huntSocket";
+import { getHuntReadyCheck } from "./services/huntReadyCheckService";
 
 
 const router = express.Router();
@@ -1109,6 +1111,7 @@ res.send(`
   <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
   <script src="/world.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
   <script src="/hunt-ready-check.js"></script>
   <script src="/hunt-combat.js"></script>
   <script src="/rest.js" defer></script>
@@ -1379,26 +1382,52 @@ try {
    * Moving away revokes Ready on any pending
    * Hunt ready check.
    */
-  await movementConnection.query(
-    `
-      UPDATE hunt_ready_check_players hrcp
+  const [readyResetResult]: any =
+    await movementConnection.query(
+      `
+        UPDATE hunt_ready_check_players hrcp
 
-      JOIN hunt_ready_checks hrc
-        ON hrc.id =
-           hrcp.ready_check_id
+        JOIN hunt_ready_checks hrc
+          ON hrc.id =
+             hrcp.ready_check_id
 
-      SET
-        hrcp.is_ready = 0,
-        hrcp.ready_at = NULL
+        SET
+          hrcp.is_ready = 0,
+          hrcp.ready_at = NULL
 
-      WHERE hrcp.player_id = ?
-        AND hrc.status = 'pending'
-        AND hrcp.is_ready = 1
-    `,
-    [pid]
-  );
+        WHERE hrcp.player_id = ?
+          AND hrc.status = 'pending'
+          AND hrcp.is_ready = 1
+      `,
+      [pid]
+    );
 
   await movementConnection.commit();
+
+  if (
+    Number(
+      readyResetResult.affectedRows
+    ) > 0
+  ) {
+    try {
+      const readyCheck =
+        await getHuntReadyCheck(
+          Number(pid)
+        );
+
+      if (readyCheck) {
+        publishHuntReadyCheck(
+          readyCheck,
+          null
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "Ready-check movement broadcast failed:",
+        err
+      );
+    }
+  }
 
 } catch (err) {
 
@@ -1462,6 +1491,7 @@ try {
             : undefined
       }
     );
+
 } catch (err) {
   console.warn(
     "Hunt ENTER_REGION progress failed",

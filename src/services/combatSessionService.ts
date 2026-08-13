@@ -8,6 +8,10 @@ import { getCreatureDebuffTotals } from "./creatureDebuffService";
 import {
   mitigateIncomingPlayerDamage
 } from "./playerDamageMitigationService";
+import {
+  publishPlayerStatePatch,
+  publishPlayerLevelUp,
+} from "../playerStateEvents";
 
 export type CombatActionType = "attack" | "spell" | "item";
 
@@ -399,6 +403,33 @@ async function processEnemyDots(session: CombatSession) {
       huntProgress: reward?.huntProgress ?? null
     };
 
+    /*
+     * Creature rewards can change:
+     * - gold
+     * - experience
+     * - level
+     * - stat points
+     * - HP/SP caps on level-up
+     *
+     * Tell the global stat panel to perform one
+     * authoritative reconciliation immediately.
+     * This is event-driven, not polling.
+     */
+    publishPlayerStatePatch(
+      session.playerId,
+      {
+        refreshDerivedStats: true
+      }
+    );
+
+
+    if (reward?.levelUp) {
+      publishPlayerLevelUp(
+        session.playerId,
+        reward.levelUp
+      );
+    }
+
     pushLog(session, "🏆 Enemy defeated!");
     if (reward?.expGained) pushLog(session, `✨ You gained ${reward.expGained} EXP!`);
     if (reward?.goldGained) pushLog(session, `💰 You gained ${reward.goldGained} gold!`);
@@ -499,6 +530,14 @@ async function processPlayerHots(session: CombatSession) {
     [playerHP, session.playerId]
   );
 
+  publishPlayerStatePatch(
+    session.playerId,
+    {
+      hpoints: playerHP,
+      maxhp: maxPlayerHP
+    }
+  );
+
   await db.query(
     `
     DELETE FROM player_hots
@@ -567,6 +606,14 @@ async function processPlayerAutoAttack(session: CombatSession) {
         [session.player.hp, session.playerId]
       );
 
+      publishPlayerStatePatch(
+        session.playerId,
+        {
+          hpoints: session.player.hp,
+          maxhp: session.player.maxHp
+        }
+      );
+
       pushLog(session, `🩸 You restore ${lifestealHeal} HP.`);
     }
   }
@@ -585,6 +632,33 @@ async function processPlayerAutoAttack(session: CombatSession) {
       quest: reward?.quest ?? null,
       huntProgress: reward?.huntProgress ?? null
     };
+
+    /*
+     * Creature rewards can change:
+     * - gold
+     * - experience
+     * - level
+     * - stat points
+     * - HP/SP caps on level-up
+     *
+     * Tell the global stat panel to perform one
+     * authoritative reconciliation immediately.
+     * This is event-driven, not polling.
+     */
+    publishPlayerStatePatch(
+      session.playerId,
+      {
+        refreshDerivedStats: true
+      }
+    );
+
+
+    if (reward?.levelUp) {
+      publishPlayerLevelUp(
+        session.playerId,
+        reward.levelUp
+      );
+    }
 
     pushLog(session, "🏆 Enemy defeated!");
     if (reward?.expGained) pushLog(session, `✨ You gained ${reward.expGained} EXP!`);
@@ -696,6 +770,14 @@ await db.query(
   WHERE id = ?
   `,
   [newHP, session.playerId]
+);
+
+publishPlayerStatePatch(
+  session.playerId,
+  {
+    hpoints: newHP,
+    maxhp: session.player.maxHp
+  }
 );
 
 if (result.dodged) {
@@ -1051,6 +1133,7 @@ export function buildCombatSnapshot(session: CombatSession) {
     gauge: session.player.gauge,
     ready: session.player.ready,
     recoveryMs: Math.max(0, session.player.recoveryUntil - now),
+    readyInMs: getActorReadyInMs(session.player),
     autoAttackMs: Math.max(0, session.nextPlayerAutoAttackAt - now),
     autoAttackTotalMs: PLAYER_AUTO_ATTACK_MS,
     cooldowns: session.player.cooldowns
@@ -1063,7 +1146,8 @@ export function buildCombatSnapshot(session: CombatSession) {
       maxHp: session.enemy.maxHp,
       gauge: session.enemy.gauge,
       ready: session.enemy.ready,
-      recoveryMs: Math.max(0, session.enemy.recoveryUntil - now)
+      recoveryMs: Math.max(0, session.enemy.recoveryUntil - now),
+      readyInMs: getActorReadyInMs(session.enemy)
     },
     damageEvents: session.damageEvents,
     log: session.log,

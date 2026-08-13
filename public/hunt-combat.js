@@ -1,6 +1,6 @@
 // public/hunt-combat.js
 
-let huntCombatPoll = null;
+let huntCombatSocket = null;
 let activeHuntEncounterId = null;
 
 let huntCombatPlayerId = null;
@@ -11,6 +11,463 @@ let huntPendingSpellTarget = null;
 
 let huntCombatState =
   null;
+
+
+// =======================================
+// SMOOTH HUNT COMBAT TIMERS
+// =======================================
+//
+// Hunt combat remains server-authoritative.
+// Socket snapshots provide timing anchors;
+// requestAnimationFrame fills the bars
+// smoothly between those snapshots.
+
+let huntCombatTimingFrame =
+  null;
+
+let huntCombatTimingRunning =
+  false;
+
+const huntCombatTiming = {
+  enemy: null,
+  players: new Map()
+};
+
+function clampHuntPercent(
+  value
+) {
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Number(value) || 0
+    )
+  );
+}
+
+function makeHuntATBAnchor(
+  actor
+) {
+  if (!actor) {
+    return null;
+  }
+
+  return {
+    receivedAt:
+      performance.now(),
+
+    gauge:
+      clampHuntPercent(
+        actor.gauge
+      ),
+
+    ready:
+      Boolean(
+        actor.ready
+      ),
+
+    recoveryMs:
+      Math.max(
+        0,
+        Number(
+          actor.recoveryMs ?? 0
+        ) || 0
+      ),
+
+    readyInMs:
+      Math.max(
+        0,
+        Number(
+          actor.readyInMs ?? 0
+        ) || 0
+      )
+  };
+}
+
+function makeHuntAutoAttackAnchor(
+  player
+) {
+  if (!player) {
+    return null;
+  }
+
+  return {
+    receivedAt:
+      performance.now(),
+
+    remainingMs:
+      Math.max(
+        0,
+        Number(
+          player.autoAttackMs ?? 0
+        ) || 0
+      ),
+
+    totalMs:
+      Math.max(
+        1,
+        Number(
+          player.autoAttackTotalMs ??
+          6000
+        ) || 6000
+      )
+  };
+}
+
+function getSmoothHuntATB(
+  anchor,
+  now
+) {
+  if (!anchor) {
+    return {
+      percent: 0,
+      ready: false
+    };
+  }
+
+  if (anchor.ready) {
+    return {
+      percent: 100,
+      ready: true
+    };
+  }
+
+  const elapsedMs =
+    Math.max(
+      0,
+      now -
+        anchor.receivedAt
+    );
+
+  if (
+    elapsedMs <=
+    anchor.recoveryMs
+  ) {
+    return {
+      percent:
+        anchor.gauge,
+
+      ready:
+        false
+    };
+  }
+
+  const fillElapsedMs =
+    elapsedMs -
+      anchor.recoveryMs;
+
+  const fillDurationMs =
+    Math.max(
+      1,
+      anchor.readyInMs -
+        anchor.recoveryMs
+    );
+
+  const progress =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        fillElapsedMs /
+          fillDurationMs
+      )
+    );
+
+  return {
+    percent:
+      anchor.gauge +
+      (
+        100 -
+          anchor.gauge
+      ) *
+      progress,
+
+    /*
+     * Visual prediction only. The server
+     * still decides when abilities can fire.
+     */
+    ready:
+      false
+  };
+}
+
+function setHuntBarPercent(
+  id,
+  percent
+) {
+  const bar =
+    document.getElementById(
+      id
+    );
+
+  if (!bar) {
+    return;
+  }
+
+  bar.style.width =
+    `${clampHuntPercent(
+      percent
+    )}%`;
+}
+
+function syncHuntTimingAnchors(
+  encounter
+) {
+  if (!encounter) {
+    return;
+  }
+
+  if (encounter.enemy) {
+    huntCombatTiming.enemy =
+      makeHuntATBAnchor(
+        encounter.enemy
+      );
+  }
+
+  const players =
+    Array.isArray(
+      encounter.players
+    )
+      ? encounter.players
+      : [];
+
+  const activeIds =
+    new Set();
+
+  for (
+    const player of
+    players
+  ) {
+    const playerId =
+      Number(
+        player.playerId
+      );
+
+    if (
+      !Number.isInteger(
+        playerId
+      ) ||
+      playerId <= 0
+    ) {
+      continue;
+    }
+
+    activeIds.add(
+      playerId
+    );
+
+    huntCombatTiming.players.set(
+      playerId,
+      {
+        atb:
+          makeHuntATBAnchor(
+            player
+          ),
+
+        auto:
+          makeHuntAutoAttackAnchor(
+            player
+          )
+      }
+    );
+  }
+
+  for (
+    const playerId of
+    huntCombatTiming.players.keys()
+  ) {
+    if (
+      !activeIds.has(
+        playerId
+      )
+    ) {
+      huntCombatTiming.players.delete(
+        playerId
+      );
+    }
+  }
+
+  startSmoothHuntTimers();
+}
+
+function renderSmoothHuntTimers() {
+  if (
+    !huntCombatTimingRunning
+  ) {
+    huntCombatTimingFrame =
+      null;
+
+    return;
+  }
+
+  const now =
+    performance.now();
+
+  // -----------------------
+  // Boss ATB
+  // -----------------------
+  if (
+    huntCombatTiming.enemy
+  ) {
+    const visual =
+      getSmoothHuntATB(
+        huntCombatTiming.enemy,
+        now
+      );
+
+    setHuntBarPercent(
+      "huntBossAtbBar",
+      visual.percent
+    );
+
+    setHuntText(
+      "huntBossAtbText",
+      huntCombatTiming.enemy.ready
+        ? "READY"
+        : `${Math.round(
+            visual.percent
+          )}%`
+    );
+  }
+
+  // -----------------------
+  // Party ATB + Auto
+  // -----------------------
+  for (
+    const [
+      playerId,
+      timing
+    ] of
+    huntCombatTiming.players
+  ) {
+    if (timing.atb) {
+      const visual =
+        getSmoothHuntATB(
+          timing.atb,
+          now
+        );
+
+      setHuntBarPercent(
+        `huntPartyAtbBar-${playerId}`,
+        visual.percent
+      );
+
+      setHuntText(
+        `huntPartyAtbText-${playerId}`,
+        timing.atb.ready
+          ? "READY"
+          : `${Math.round(
+              visual.percent
+            )}%`
+      );
+
+      /*
+       * Keep this player's action status
+       * moving smoothly too.
+       */
+      if (
+        Number(
+          playerId
+        ) ===
+          Number(
+            huntCombatPlayerId
+          ) &&
+        huntCombatState ===
+          "active" &&
+        !timing.atb.ready &&
+        !huntPendingSpellTarget
+      ) {
+        setHuntText(
+          "huntActionStatus",
+          `ATB ${Math.round(
+            visual.percent
+          )}%`
+        );
+      }
+    }
+
+    if (timing.auto) {
+      const elapsedMs =
+        Math.max(
+          0,
+          now -
+            timing.auto.receivedAt
+        );
+
+      const remainingMs =
+        Math.max(
+          0,
+          timing.auto.remainingMs -
+            elapsedMs
+        );
+
+      const percent =
+        (
+          1 -
+          remainingMs /
+            timing.auto.totalMs
+        ) *
+        100;
+
+      setHuntBarPercent(
+        `huntPartyAutoBar-${playerId}`,
+        percent
+      );
+
+      setHuntText(
+        `huntPartyAutoText-${playerId}`,
+        remainingMs <= 0
+          ? "Swinging"
+          : `${(
+              remainingMs /
+              1000
+            ).toFixed(1)}s`
+      );
+    }
+  }
+
+  huntCombatTimingFrame =
+    requestAnimationFrame(
+      renderSmoothHuntTimers
+    );
+}
+
+function startSmoothHuntTimers() {
+  if (
+    huntCombatTimingRunning
+  ) {
+    return;
+  }
+
+  huntCombatTimingRunning =
+    true;
+
+  huntCombatTimingFrame =
+    requestAnimationFrame(
+      renderSmoothHuntTimers
+    );
+}
+
+function stopSmoothHuntTimers() {
+  huntCombatTimingRunning =
+    false;
+
+  if (
+    huntCombatTimingFrame
+  ) {
+    cancelAnimationFrame(
+      huntCombatTimingFrame
+    );
+
+    huntCombatTimingFrame =
+      null;
+  }
+
+  huntCombatTiming.enemy =
+    null;
+
+  huntCombatTiming.players.clear();
+}
 
 /*
  * Reward chest created when a Hunt
@@ -255,6 +712,8 @@ async function openHuntCombatModal() {
     "hidden"
   );
 
+  startSmoothHuntTimers();
+
   /*
    * Identify this browser's player before
    * rendering personal ATB/hotbar state.
@@ -271,11 +730,13 @@ async function openHuntCombatModal() {
 
   await loadHuntEncounterState();
 
+  connectHuntCombatSocket();
+
   if (
     huntCombatState ===
     "active"
   ) {
-    startHuntCombatPolling();
+    joinHuntCombatChannel();
   }
 }
 
@@ -443,6 +904,10 @@ function renderHuntEncounter(
   window.__lastHuntEncounter =
   encounter;
 
+  syncHuntTimingAnchors(
+    encounter
+  );
+
   activeHuntEncounterId =
     Number(
       encounter.encounterId
@@ -485,31 +950,10 @@ function renderHuntEncounter(
     target.maxHp
     );
 
-    const bossGauge =
-  Math.max(
-    0,
-    Math.min(
-      100,
-      Number(
-        target.gauge ?? 0
-      )
-    )
-  );
-
-updateHuntBar(
-  "huntBossAtbBar",
-  bossGauge,
-  100
-);
-
-setHuntText(
-  "huntBossAtbText",
-  target.ready
-    ? "READY"
-    : `${Math.round(
-        bossGauge
-      )}%`
-);
+    /*
+     * Boss ATB is rendered continuously by the
+     * Hunt timing animation loop below.
+     */
 
   const status =
     document.getElementById(
@@ -632,7 +1076,8 @@ document
   ?.classList.remove(
     "selecting-ally"
   );
-  stopHuntCombatPolling();
+  leaveHuntCombatChannel();
+  stopSmoothHuntTimers();
 
   huntCombatCasting =
     false;
@@ -747,23 +1192,10 @@ const autoAttackTotalMs =
     )
   );
 
-const autoElapsed =
-  Math.max(
-    0,
-    autoAttackTotalMs -
-    autoAttackMs
-  );
-
-const autoPct =
-  Math.max(
-    0,
-    Math.min(
-      100,
-      autoElapsed /
-        autoAttackTotalMs *
-        100
-    )
-  );
+/*
+ * ATB and auto-attack widths are rendered
+ * continuously by requestAnimationFrame.
+ */
 
 const isSelf =
   Number(player.playerId) ===
@@ -885,12 +1317,15 @@ const clickHandler =
 
             <div class="hunt-party-track">
                 <div
+                id="huntPartyAtbBar-${Number(player.playerId)}"
                 class="hunt-party-fill atb ${ready ? "ready" : ""}"
                 style="width:${gauge}%"
                 ></div>
             </div>
 
-            <span>
+            <span
+              id="huntPartyAtbText-${Number(player.playerId)}"
+            >
                 ${
                 ready
                     ? "READY"
@@ -906,12 +1341,28 @@ const clickHandler =
 
             <div class="hunt-party-track">
                 <div
+                id="huntPartyAutoBar-${Number(player.playerId)}"
                 class="hunt-party-fill auto"
-                style="width:${autoPct}%"
+                style="width:${
+                  Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      (
+                        1 -
+                        autoAttackMs /
+                          autoAttackTotalMs
+                      ) *
+                        100
+                    )
+                  )
+                }%"
                 ></div>
             </div>
 
-            <span>
+            <span
+              id="huntPartyAutoText-${Number(player.playerId)}"
+            >
                 ${
                 autoAttackMs <= 0
                     ? "Swinging"
@@ -1858,47 +2309,121 @@ async function castHuntCombatSpell(
 
     huntCombatCasting =
       false;
-
-    /*
-     * Immediately retrieve authoritative
-     * state rather than waiting up to 500ms.
-     */
-    await loadHuntEncounterState();
   }
 }
 
 window.castHuntCombatSpell =
   castHuntCombatSpell;
 
-function startHuntCombatPolling() {
-  if (huntCombatPoll) {
-    return;
+function getSharedHuntSocket() {
+  if (window.GFSocket) {
+    return window.GFSocket;
   }
 
-  huntCombatPoll =
-    setInterval(
-      async () => {
-        await loadHuntEncounterState();
-      },
-      500
-    );
+  if (
+    typeof window.io !==
+    "function"
+  ) {
+    return null;
+  }
+
+  window.GFSocket =
+    window.io();
+
+  return window.GFSocket;
 }
 
-function stopHuntCombatPolling() {
-  if (!huntCombatPoll) {
+function connectHuntCombatSocket() {
+  const socket =
+    getSharedHuntSocket();
+
+  if (!socket) {
+    console.error(
+      "Hunt combat socket client failed to load."
+    );
+
     return;
   }
 
-  clearInterval(
-    huntCombatPoll
+  if (
+    huntCombatSocket ===
+    socket
+  ) {
+    return;
+  }
+
+  huntCombatSocket =
+    socket;
+
+  huntCombatSocket.on(
+    "hunt:combat-state",
+    snapshot => {
+      if (!snapshot) return;
+
+      if (
+        activeHuntEncounterId &&
+        Number(
+          snapshot.encounterId
+        ) !==
+          Number(
+            activeHuntEncounterId
+          )
+      ) {
+        return;
+      }
+
+      renderHuntEncounter(
+        snapshot
+      );
+    }
   );
 
-  huntCombatPoll = null;
+  huntCombatSocket.on(
+    "connect",
+    () => {
+      if (
+        activeHuntEncounterId
+      ) {
+        joinHuntCombatChannel();
+      }
+    }
+  );
+}
+
+function joinHuntCombatChannel() {
+  connectHuntCombatSocket();
+
+  if (
+    !huntCombatSocket
+  ) {
+    return;
+  }
+
+  huntCombatSocket.emit(
+    "hunt:combat:join",
+    response => {
+      if (
+        response?.ok &&
+        response.snapshot
+      ) {
+        renderHuntEncounter(
+          response.snapshot
+        );
+      }
+    }
+  );
+}
+
+function leaveHuntCombatChannel() {
+  huntCombatSocket?.emit(
+    "hunt:combat:leave"
+  );
 }
 
 async function closeHuntCombatModal() {
 
-  stopHuntCombatPolling();
+  leaveHuntCombatChannel();
+  stopSmoothHuntTimers();
 
 
   /*

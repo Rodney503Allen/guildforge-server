@@ -8,11 +8,81 @@
   <title>Guildforge | Tavern</title>
 
   <link rel="stylesheet" href="/statpanel.css">
+  <link rel="stylesheet" href="/ui/itemTooltip.css">
   <link rel="stylesheet" href="/tavern.css">
+  <link rel="stylesheet" href="/ui/toast.css">
 
   <script defer src="/statpanel.js"></script>
   <script defer src="/world-chat.js"></script>
+  <script defer src="/socket.io/socket.io.js"></script>
+  <script defer src="/ui/itemTooltip.js"></script>
+  <script defer src="/ui/toast.js"></script>
   <script defer src="/tavern.js"></script>
+
+  <style>
+    .online-players-card {
+      min-height: 0;
+    }
+
+    .online-players-body {
+      padding-top: 8px;
+    }
+
+    .onlinePlayersList {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      max-height: 260px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .onlinePlayerRow {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+      padding: 6px 9px;
+      border: 1px solid rgba(210, 171, 92, 0.20);
+      background: rgba(0, 0, 0, 0.10);
+    }
+
+    .onlinePlayerInfo {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .onlinePlayerInfo strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .onlinePlayerInfo span {
+      font-size: 11px;
+      opacity: 0.72;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .onlinePlayerStatus {
+      flex: 0 0 auto;
+      font-size: 10px;
+      padding: 2px 6px;
+    }
+
+    @media (max-width: 900px) {
+      .onlinePlayersList {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
 </head>
 
 <body>
@@ -75,20 +145,26 @@
     </div>
   </div>
 </section>
-<section class="card tavern-tip-card frame-host">
+
+<section class="card frame-host online-players-card" id="onlinePlayersCard">
   <span class="frame-border panel" aria-hidden="true"></span>
 
-  <div class="cardBody tavern-tip-body">
-    <div>
-      <h3>Tavern Tip</h3>
-      <p>
-        Not all heroes seek glory. Some just want a warm meal and a listening ear.
-      </p>
+  <div class="cardHeader compact">
+    <div class="cardTitle">
+      <h2>Players Online</h2>
+      <p>Travelers currently connected to Guildforge.</p>
+    </div>
+    <span class="badge good" id="onlinePlayersBadge">0 Online</span>
+  </div>
+
+  <div class="cardBody online-players-body">
+    <div class="onlinePlayersList" id="onlinePlayersList" aria-live="polite">
+      <div class="empty"><i>Checking the tavern...</i></div>
     </div>
   </div>
 </section>
 
-        </div>
+</div>
 
         <aside class="right-stack">
 
@@ -144,8 +220,7 @@
               <div id="turninList"></div>
             </div>
           </section>
-
-          <section class="card frame-host">
+<section class="card frame-host">
   <span class="frame-border panel" aria-hidden="true"></span>
             <div class="cardHeader compact">
               <div class="cardTitle">
@@ -182,14 +257,23 @@
                   <button class="btn disabled" disabled type="button">Soon</button>
                 </div>
 
-                <div class="socialRow frame-host">
-  <span class="frame-border sub" aria-hidden="true"></span>
-                  <div>
-                    <strong>Trade Table</strong>
-                    <span>Player offers and crafting material requests.</span>
-                  </div>
-                  <button class="btn disabled" disabled type="button">Soon</button>
-                </div>
+<button
+  class="socialRow socialRow--active tradeTableTrigger"
+  id="tradeTableBtn"
+  type="button"
+>
+  <span>
+    <strong>Trade Table</strong>
+    <span>Find another traveler and make a secure offer.</span>
+  </span>
+
+  <span class="tradeTableAction">
+    <span class="badge good" id="tradeRequestBadge" hidden>0 Requests</span>
+    <span class="badge">Open</span>
+  </span>
+
+  <span class="frame-border panel"></span>
+</button>
 
                 <div class="socialRow frame-host">
   <span class="frame-border sub" aria-hidden="true"></span>
@@ -214,5 +298,109 @@
 
     </div>
   </main>
+  <div class="tradeModal" id="tradeSearchModal" hidden>
+  <div class="tradeModalPanel frame-host">
+    <button class="tradeModalClose" type="button" data-close-trade-modal="tradeSearchModal">×</button>
+
+    <div class="tradeModalHeader">
+      <div>
+        <span class="tradeEyebrow">Dice and Deeds</span>
+        <h2>Trade Table</h2>
+        <p>Find a traveler in your current location.</p>
+      </div>
+    </div>
+
+    <div class="tradeSearchRow">
+      <input
+        class="input"
+        id="tradePlayerSearch"
+        type="search"
+        minlength="2"
+        placeholder="Search player name..."
+        autocomplete="off"
+      />
+      <button class="btn primary" id="tradeSearchBtn" type="button">Search</button>
+    </div>
+
+    <div class="tradeRequestList" id="tradeIncomingRequests"></div>
+    <div class="tradeSearchResults" id="tradeSearchResults">
+      <div class="empty"><i>Search for a player to begin a trade request.</i></div>
+    </div>
+
+    <div class="tradeNotice" id="tradeSearchNotice" hidden></div>
+
+    <span class="frame-border panel"></span>
+  </div>
+</div>
+
+<div class="tradeModal" id="tradeWindowModal" hidden>
+  <div class="tradeModalPanel tradeWindowPanel frame-host">
+    <button class="tradeModalClose" type="button" data-close-trade-modal="tradeWindowModal">×</button>
+
+    <div class="tradeModalHeader">
+      <div>
+        <span class="tradeEyebrow">Secure Exchange</span>
+        <h2 id="tradeWindowTitle">Trade</h2>
+        <p id="tradeWindowStatus">Preparing the trade table…</p>
+      </div>
+
+      <div class="tradeStatusPill" id="tradeStatusPill">Pending</div>
+    </div>
+
+    <div class="tradeWindowGrid">
+      <section class="tradeOfferColumn">
+        <div class="tradeOfferHeading">
+          <div>
+            <span class="tradeEyebrow">Your Offer</span>
+            <h3 id="tradeYourName">You</h3>
+          </div>
+          <span class="tradeConfirmState" id="tradeYourState"></span>
+        </div>
+
+        <div class="tradeGoldRow">
+          <label for="tradeGoldInput">Gold offered</label>
+          <input class="input" id="tradeGoldInput" type="number" min="0" step="1" value="0" />
+        </div>
+
+        <div class="tradeOfferSlots" id="tradeYourItems" data-trade-dropzone="offer" aria-label="Your offered items"></div>
+
+        <div class="tradeInventoryHeading">
+          <div>
+            <span class="tradeEyebrow">Your Inventory</span>
+            <p>Double-click, right-click, or drag an item into your offer.</p>
+          </div>
+          <span id="tradeOfferCount">0 / 12</span>
+        </div>
+
+        <div class="tradeInventory" id="tradeInventoryList" data-trade-dropzone="inventory" aria-label="Tradable inventory"></div>
+
+        <div class="tradeAutosaveStatus" id="tradeAutosaveStatus" role="status" aria-live="polite">Changes save automatically</div>
+      </section>
+
+      <section class="tradeOfferColumn">
+        <div class="tradeOfferHeading">
+          <div>
+            <span class="tradeEyebrow">Their Offer</span>
+            <h3 id="tradeOtherName">Traveler</h3>
+          </div>
+          <span class="tradeConfirmState" id="tradeOtherState"></span>
+        </div>
+
+        <div class="tradeGoldDisplay" id="tradeOtherGold">0 gold</div>
+        <div class="tradeOfferSlots tradeOfferSlots--readonly" id="tradeOtherItems" aria-label="Other player's offered items"></div>
+      </section>
+    </div>
+
+    <div class="tradeNotice" id="tradeWindowNotice" hidden></div>
+
+    <div class="tradeWindowActions">
+      <button class="btn danger" id="tradeCancelBtn" type="button">Cancel Trade</button>
+      <button class="btn" id="tradeConfirmBtn" type="button">Confirm Offer</button>
+      <button class="btn primary" id="tradeAcceptBtn" type="button" disabled>Accept Trade</button>
+    </div>
+
+    <span class="frame-border panel"></span>
+  </div>
+</div>
 </body>
 </html>

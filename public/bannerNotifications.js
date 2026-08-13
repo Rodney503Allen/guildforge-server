@@ -283,4 +283,250 @@ function handleLevelUpPayload(payload) {
 
   setTimeout(pollTurnInReady, 1200);
   setInterval(pollTurnInReady, 8000);
+
+  // ==========================================
+  // LIVE LEVEL-UP NOTIFICATIONS
+  // ==========================================
+  //
+  // HTTP responses are still intercepted above for legacy
+  // routes, but server-driven combat can now level the
+  // player without any fetch response containing levelUp.
+  //
+  // Listen to the authenticated global Guildforge socket
+  // and feed the event through the SAME dedupe/banner/sound
+  // path already used by HTTP responses.
+
+  let levelUpSocketBound = false;
+
+  function bindLevelUpSocket(socket) {
+    if (
+      levelUpSocketBound ||
+      !socket ||
+      typeof socket.on !== "function"
+    ) {
+      return;
+    }
+
+    levelUpSocketBound = true;
+
+    socket.on(
+      "player:level-up",
+      payload => {
+        handleLevelUpPayload(
+          payload
+        );
+      }
+    );
+  }
+
+  if (window.GFSocket) {
+    bindLevelUpSocket(
+      window.GFSocket
+    );
+  }
+
+  if (window.GFSocketReady) {
+    Promise.resolve(
+      window.GFSocketReady
+    )
+      .then(bindLevelUpSocket)
+      .catch(() => {});
+  }
+
+  window.addEventListener(
+    "guildforge:socket-connected",
+    event => {
+      bindLevelUpSocket(
+        event?.detail?.socket ||
+        window.GFSocket
+      );
+    }
+  );
+
+
+  // ==========================================
+  // LIVE PARTY HUNT PROGRESS
+  // ==========================================
+  //
+  // Every player joins their current party's Hunt room.
+  // Objective progress is then pushed by the server and
+  // displayed through the existing world Hunt toast UI.
+
+  let huntSocketBound = false;
+  let huntSubscribedSocketId = null;
+
+  function showLiveHuntProgress(progress) {
+    if (
+      !progress ||
+      !progress.advanced
+    ) {
+      return;
+    }
+
+    /*
+     * world.js already owns the Hunt toast appearance.
+     * Reuse it so local and remote party progress look
+     * exactly the same.
+     */
+    if (
+      typeof window.showHuntProgress ===
+      "function"
+    ) {
+      window.showHuntProgress(
+        progress
+      );
+
+      return;
+    }
+
+    /*
+     * Fallback for any authenticated page that has
+     * GFToast but does not load world.js.
+     */
+    if (!window.GFToast?.show) {
+      return;
+    }
+
+    const trackingText =
+      `${progress.trackingProgress}/${progress.trackingRequired} Tracking`;
+
+    window.GFToast.show(
+      progress.objectiveComplete
+        ? "Hunt Objective Complete"
+        : "Hunt Progress",
+
+      `+${progress.trackingGain} Tracking • ${trackingText}`,
+
+      {
+        type: "success",
+        durationMs:
+          progress.objectiveComplete
+            ? 3000
+            : 2400
+      }
+    );
+
+    if (
+      progress.targetRevealed
+    ) {
+      setTimeout(
+        () => {
+          window.GFToast.show(
+            "Quarry Located",
+            "The trail is complete. Your party has discovered its target.",
+            {
+              type: "success",
+              durationMs: 4500
+            }
+          );
+        },
+        650
+      );
+    }
+  }
+
+  function subscribeToHuntUpdates(
+    socket
+  ) {
+    if (
+      !socket ||
+      typeof socket.emit !== "function"
+    ) {
+      return;
+    }
+
+    /*
+     * Re-subscribe after reconnects because Socket.IO
+     * room membership belongs to the socket connection.
+     */
+    if (
+      huntSubscribedSocketId ===
+      socket.id
+    ) {
+      return;
+    }
+
+    socket.emit(
+      "hunt:subscribe",
+      response => {
+        if (!response?.ok) {
+          console.warn(
+            "Unable to subscribe to Hunt updates:",
+            response?.error ||
+            "Unknown error"
+          );
+
+          return;
+        }
+
+        huntSubscribedSocketId =
+          socket.id;
+      }
+    );
+  }
+
+  function bindHuntSocket(
+    socket
+  ) {
+    if (
+      !socket ||
+      typeof socket.on !== "function"
+    ) {
+      return;
+    }
+
+    if (!huntSocketBound) {
+      huntSocketBound = true;
+
+      socket.on(
+        "hunt:progress",
+        progress => {
+          showLiveHuntProgress(
+            progress
+          );
+        }
+      );
+
+      socket.on(
+        "connect",
+        () => {
+          huntSubscribedSocketId =
+            null;
+
+          subscribeToHuntUpdates(
+            socket
+          );
+        }
+      );
+    }
+
+    subscribeToHuntUpdates(
+      socket
+    );
+  }
+
+  if (window.GFSocket) {
+    bindHuntSocket(
+      window.GFSocket
+    );
+  }
+
+  if (window.GFSocketReady) {
+    Promise.resolve(
+      window.GFSocketReady
+    )
+      .then(bindHuntSocket)
+      .catch(() => {});
+  }
+
+  window.addEventListener(
+    "guildforge:socket-connected",
+    event => {
+      bindHuntSocket(
+        event?.detail?.socket ||
+        window.GFSocket
+      );
+    }
+  );
+
 })();

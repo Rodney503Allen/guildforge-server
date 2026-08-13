@@ -1,5 +1,6 @@
 import express from "express";
 import session from "express-session";
+import { createServer } from "http";
 import shopRoutes from "./shop.routes";
 import authRoutes from "./auth.routes";
 import playerRoutes from "./player.routes";
@@ -16,7 +17,6 @@ import combatRoutes from "./combat.routes";
 import spellRoutes from "./spell.routes";
 import { startStatusHeartbeat } from "./services/statusHeartbeat";
 import { db } from "./db";
-import combatPollRoutes from "./combatPoll.routes";
 import sellRoutes from "./sell.routes";
 import questRoutes from "./quest.routes";
 import tavernRoutes from "./tavern.routes";
@@ -34,8 +34,11 @@ import restRoutes from "./rest.routes";
 import spellLoadoutRoutes from "./spellLoadout.routes";
 import partyRoutes from "./party.routes";
 import huntRoutes from "./hunt.routes";
+import tradeRoutes from "./trade.routes";
+import { initializeSocketServer } from "./socketServer";
 
 const app = express();
+const server = createServer(app);
 
 app.get("/api/test", (_req, res) => {
   res.json({ status: "API OK" });
@@ -49,12 +52,18 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(express.static("public"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(session({
+const sessionMiddleware = session({
   secret: "guildforge_secret_change_me",
   resave: false,
   saveUninitialized: false,
   cookie: { secure: false }
-}));
+});
+
+app.use(sessionMiddleware);
+initializeSocketServer(
+  server,
+  sessionMiddleware,
+);
 
 // =======================
 // GLOBAL DEATH CHECK
@@ -126,7 +135,6 @@ app.use(chatRoutes);
 app.use(characterRoutes);
 app.use(combatRoutes);
 app.use(spellRoutes);
-app.use(combatPollRoutes);
 app.use(sellRoutes);
 app.use("/api", questRoutes);
 app.use("/api", tavernRoutes);
@@ -144,6 +152,7 @@ app.use("/rest", restRoutes);
 app.use(spellLoadoutRoutes);
 app.use(partyRoutes);
 app.use(huntRoutes);
+app.use("/api",tradeRoutes);
 
 // =======================
 // MAIN PAGE
@@ -221,7 +230,7 @@ app.get("/logout", (req, res) => {
 // =======================
 // START
 // =======================
-app.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Guildforge engine running on port ${PORT}`);
   startStatusHeartbeat();
 });

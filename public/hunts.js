@@ -587,7 +587,8 @@ async function acceptHunt(
     );
 
 
-    await loadHuntsPage();
+    await connectHuntBoardSocket();
+loadHuntsPage();
 
 
   } catch (err) {
@@ -642,8 +643,68 @@ async function abandonHunt() {
 }
 
 
+
+/* =========================================
+   LIVE HUNT SOCKET
+========================================= */
+
+let huntBoardSocket = null;
+
+function connectHuntBoardSocket() {
+  if (
+    typeof window.io !==
+    "function"
+  ) {
+    console.error(
+      "Hunt Board socket client failed to load."
+    );
+
+    return;
+  }
+
+  huntBoardSocket =
+    window.GFSocket ||
+    window.io();
+
+  window.GFSocket =
+    huntBoardSocket;
+
+  const subscribe = () => {
+    huntBoardSocket.emit(
+      "hunt:subscribe"
+    );
+  };
+
+  if (
+    huntBoardSocket.connected
+  ) {
+    subscribe();
+  }
+
+  huntBoardSocket.on(
+    "connect",
+    subscribe
+  );
+
+  huntBoardSocket.on(
+    "hunt:changed",
+    () => {
+      loadHuntsPage();
+    }
+  );
+
+  huntBoardSocket.on(
+    "hunt:progress",
+    () => {
+      loadHuntsPage();
+    }
+  );
+}
+
+
 /* =========================================
    START
 ========================================= */
 
+connectHuntBoardSocket();
 loadHuntsPage();

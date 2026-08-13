@@ -1,5 +1,6 @@
 //src/services/buffService.ts
 import { db } from "../db";
+import { publishPlayerStatePatch } from "../playerStateEvents";
 
 export type Buff = {
   stat: string;
@@ -7,6 +8,126 @@ export type Buff = {
   expires_at: Date;
   source?: string;
 };
+
+const buffExpiryTimers =
+  new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+
+function getBuffTimerKey(
+  playerId: number,
+  stat: string,
+  source?: string | null
+) {
+  return [
+    playerId,
+    String(stat || "")
+      .toLowerCase(),
+    source ?? "__null__"
+  ].join(":");
+}
+
+function clearBuffExpiryTimer(
+  playerId: number,
+  stat: string,
+  source?: string | null
+) {
+  const key =
+    getBuffTimerKey(
+      playerId,
+      stat,
+      source
+    );
+
+  const timer =
+    buffExpiryTimers.get(
+      key
+    );
+
+  if (!timer) {
+    return;
+  }
+
+  clearTimeout(
+    timer
+  );
+
+  buffExpiryTimers.delete(
+    key
+  );
+}
+
+function scheduleBuffExpiry(
+  playerId: number,
+  stat: string,
+  durationSeconds: number,
+  source?: string | null
+) {
+  clearBuffExpiryTimer(
+    playerId,
+    stat,
+    source
+  );
+
+  const key =
+    getBuffTimerKey(
+      playerId,
+      stat,
+      source
+    );
+
+  const delayMs =
+    Math.max(
+      0,
+      Math.round(
+        Number(
+          durationSeconds
+        ) * 1000
+      )
+    ) + 75;
+
+  const timer =
+    setTimeout(
+      async () => {
+        buffExpiryTimers.delete(
+          key
+        );
+
+        try {
+          const buffs =
+            await getActiveBuffs(
+              playerId
+            );
+
+          publishPlayerStatePatch(
+            playerId,
+            {
+              buffs,
+              refreshDerivedStats:
+                true
+            }
+          );
+        } catch (error) {
+          console.error(
+            "Failed to publish expired buff state:",
+            {
+              playerId,
+              stat,
+              source,
+              error
+            }
+          );
+        }
+      },
+      delayMs
+    );
+
+  buffExpiryTimers.set(
+    key,
+    timer
+  );
+}
 
 /**
  * Get all ACTIVE buffs for a player
@@ -20,6 +141,30 @@ export async function getActiveBuffs(playerId: number): Promise<Buff[]> {
   `, [playerId]);
 
   return rows;
+}
+
+
+async function publishActiveBuffs(
+  playerId: number,
+  refreshDerivedStats = false,
+) {
+  const buffs =
+    await getActiveBuffs(
+      playerId
+    );
+
+  publishPlayerStatePatch(
+    playerId,
+    {
+      buffs,
+      ...(refreshDerivedStats
+        ? {
+            refreshDerivedStats:
+              true
+          }
+        : {})
+    }
+  );
 }
 
 /**
@@ -60,6 +205,18 @@ export async function applyBuff(
     durationSeconds,
     normalizedSource
   ]);
+
+  scheduleBuffExpiry(
+    playerId,
+    normalizedStat,
+    durationSeconds,
+    normalizedSource
+  );
+
+  await publishActiveBuffs(
+    playerId,
+    true
+  );
 }
 
 /**
@@ -69,15 +226,70 @@ export async function removeBuffs(
   playerId: number,
   stat?: string
 ) {
-  if (stat) {
+  const normalizedStat =
+    stat
+      ? stat.toLowerCase()
+      : null;
+
+  if (normalizedStat) {
     await db.query(`
       DELETE FROM player_buffs
       WHERE player_id = ? AND stat = ?
-    `, [playerId, stat.toLowerCase()]);
+    `, [
+      playerId,
+      normalizedStat
+    ]);
+
+    for (
+      const [
+        key,
+        timer
+      ] of buffExpiryTimers
+    ) {
+      if (
+        key.startsWith(
+          `${playerId}:${normalizedStat}:`
+        )
+      ) {
+        clearTimeout(
+          timer
+        );
+
+        buffExpiryTimers.delete(
+          key
+        );
+      }
+    }
   } else {
     await db.query(`
       DELETE FROM player_buffs
       WHERE player_id = ?
     `, [playerId]);
+
+    for (
+      const [
+        key,
+        timer
+      ] of buffExpiryTimers
+    ) {
+      if (
+        key.startsWith(
+          `${playerId}:`
+        )
+      ) {
+        clearTimeout(
+          timer
+        );
+
+        buffExpiryTimers.delete(
+          key
+        );
+      }
+    }
   }
+
+  await publishActiveBuffs(
+    playerId,
+    true
+  );
 }

@@ -1,6 +1,8 @@
+//public/party.js
 let currentParty = null;
 let searchTimer = null;
 let currentPlayerId = null;
+let partySocket = null;
 
 
 /* =========================================
@@ -165,6 +167,177 @@ async function loadPartyPage() {
     );
 
   }
+}
+
+
+
+/* =========================================
+   SOCKET REFRESH HELPERS
+========================================= */
+
+async function refreshPartyOnly() {
+  try {
+    const partyResponse =
+      await api("/party");
+
+    currentPlayerId =
+      Number(
+        partyResponse.currentPlayerId
+      );
+
+    currentParty =
+      partyResponse.party;
+
+    renderParty();
+
+    if (partySocket?.connected) {
+      partySocket.emit(
+        "party:join-current"
+      );
+    }
+  } catch (err) {
+    console.error(
+      "Party refresh failed:",
+      err
+    );
+  }
+}
+
+async function refreshInvitesOnly() {
+  try {
+    const response =
+      await api(
+        "/party/invites"
+      );
+
+    renderInvites(
+      response.invites || []
+    );
+  } catch (err) {
+    console.error(
+      "Party invite refresh failed:",
+      err
+    );
+  }
+}
+
+function connectPartySocket() {
+  if (
+    typeof window.io !==
+    "function"
+  ) {
+    console.error(
+      "Party socket client failed to load."
+    );
+
+    return;
+  }
+
+  partySocket =
+    window.io();
+
+  partySocket.on(
+    "connect",
+    () => {
+      partySocket.emit(
+        "party:join-current"
+      );
+    }
+  );
+
+  partySocket.on(
+    "party:invite",
+    event => {
+      refreshInvitesOnly();
+
+      const inviter =
+        event?.inviterName ||
+        "Another adventurer";
+
+      if (
+        window.GFToast &&
+        typeof window.GFToast.show ===
+          "function"
+      ) {
+        window.GFToast.show(
+          "Party Invitation",
+          `${inviter} invited you to a party.`,
+          {
+            type: "info",
+            durationMs: 5000
+          }
+        );
+      }
+    }
+  );
+
+  partySocket.on(
+    "party:invites-changed",
+    () => {
+      refreshInvitesOnly();
+    }
+  );
+
+  partySocket.on(
+    "party:changed",
+    async () => {
+      await refreshPartyOnly();
+      await refreshInvitesOnly();
+    }
+  );
+
+  partySocket.on(
+    "party:removed",
+    async event => {
+      currentParty = null;
+
+      await connectPartySocket();
+loadPartyPage();
+
+      if (
+        event?.reason === "kicked"
+      ) {
+        alert(
+          "You were removed from the party."
+        );
+      }
+
+      if (
+        event?.reason ===
+        "disbanded"
+      ) {
+        alert(
+          "The party was disbanded."
+        );
+      }
+    }
+  );
+
+  partySocket.on(
+    "party:disbanded",
+    async () => {
+      currentParty = null;
+      await loadPartyPage();
+    }
+  );
+
+  partySocket.on(
+    "party:invite-declined",
+    () => {
+      // This is currently informational only.
+      // The party itself has not changed.
+    }
+  );
+
+  partySocket.on(
+    "connect_error",
+    err => {
+      console.error(
+        "Party socket connection failed:",
+        err.message
+      );
+    }
+  );
 }
 
 
@@ -979,4 +1152,5 @@ async function invitePlayer(
    INITIAL LOAD
 ========================================= */
 
+connectPartySocket();
 loadPartyPage();
