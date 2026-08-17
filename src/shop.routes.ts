@@ -32,7 +32,7 @@ const CLASS_LOADOUTS: Record<string, ClassShopLoadout> = {
     offhandSlots: ["offhand"]
   },
 
-  hunter: {
+  warden: {
     armorWeights: ["medium"],
     weaponSlots: ["weapon"],
     offhandSlots: []
