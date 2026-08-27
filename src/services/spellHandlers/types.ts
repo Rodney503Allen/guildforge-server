@@ -201,6 +201,10 @@ export type SpellHandlerResult = {
   crit?: boolean;
   dodged?: boolean;
 
+  // Applied by the owning combat session after the
+  // caster's action has been consumed.
+  partyGaugeGain?: number;
+
   [key: string]: any;
 };
 

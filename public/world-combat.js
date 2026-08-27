@@ -4,6 +4,7 @@
 // =======================================
 
 let currentEnemy = null;
+let combatHotbarSpells = [];
 const spellCooldowns = {};
 const savedSpellCds = JSON.parse(localStorage.getItem("gf_spell_cooldowns") || "{}");
 Object.assign(spellCooldowns, savedSpellCds);
@@ -1372,6 +1373,29 @@ async function castSpell(spellId) {
   }
 
   /*
+   * The server accepted the cast, so this is the point
+   * where the browser may safely play the spell SFX.
+   *
+   * The spell object is already cached from /combat/spells,
+   * including its database-backed `audio` key.
+   */
+  const castSpellData =
+    combatHotbarSpells.find(
+      spell =>
+        Number(spell?.id) ===
+        Number(spellId)
+    );
+
+  if (
+    castSpellData?.audio &&
+    window.GFSpellEvents?.emitCast
+  ) {
+    window.GFSpellEvents.emitCast(
+      castSpellData
+    );
+  }
+
+  /*
    * /spells/cast returns the authoritative session
    * after consumeActorTurn(), so apply its ATB reset
    * immediately instead of waiting for the next poll.
@@ -1484,9 +1508,13 @@ async function loadHotbarSpells() {
 
     console.log("Mapped combat spells:", spells);
 
+    combatHotbarSpells =
+      spells.filter(Boolean);
+
     renderHotbarSpells(spells);
   } catch (err) {
     console.error("Hotbar spells load failed:", err);
+    combatHotbarSpells = [];
     renderHotbarSpells([]);
   }
 }

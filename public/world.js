@@ -108,9 +108,6 @@ function normalizeMoveDir(dir) {
     ? dir
     : "";
 }
-let lastShownHuntProgressKey =
-  null;
-
 function showHuntProgress(progress) {
   if (
     !progress ||
@@ -118,30 +115,6 @@ function showHuntProgress(progress) {
   ) {
     return;
   }
-
-  const progressKey =
-    [
-      progress.partyHuntId ?? "",
-      progress.objectiveId ?? "",
-      progress.progressCount ?? "",
-      progress.trackingProgress ?? ""
-    ].join(":");
-
-  /*
-   * Safety net only.
-   * Hunt objective notifications should normally arrive
-   * through the party socket exactly once.
-   */
-  if (
-    progressKey &&
-    progressKey ===
-      lastShownHuntProgressKey
-  ) {
-    return;
-  }
-
-  lastShownHuntProgressKey =
-    progressKey;
 
   if (!window.GFToast?.show) {
     return;
@@ -796,6 +769,58 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+
+async function syncWorldAudio(region, terrain) {
+  let audio = window.GFAudio;
+
+  if (
+    !audio ||
+    typeof audio.playRegionMusic !== "function" ||
+    typeof audio.playTerrainAmbience !== "function"
+  ) {
+    try {
+      audio = await window.GFAudioReady;
+    } catch (err) {
+      console.warn(
+        "Unable to initialize Guildforge world audio:",
+        err
+      );
+      return;
+    }
+  }
+
+  if (!audio) return;
+
+  const tasks = [];
+
+  if (
+    region &&
+    typeof audio.playRegionMusic === "function"
+  ) {
+    tasks.push(
+      audio.playRegionMusic(region)
+    );
+  }
+
+  if (
+    terrain &&
+    typeof audio.playTerrainAmbience === "function"
+  ) {
+    tasks.push(
+      audio.playTerrainAmbience(terrain)
+    );
+  }
+
+  if (document.body && terrain) {
+    document.body.dataset.gfTerrain =
+      String(terrain);
+  }
+
+  if (!tasks.length) return;
+
+  await Promise.allSettled(tasks);
+}
+
 async function moveWorld(dir) {
   if (isInCombat()) return;
 
@@ -817,6 +842,18 @@ async function moveWorld(dir) {
 
     if (!data?.success) return;
 
+    // Keep soundtrack + environment ambience synchronized
+    // with the tile the player actually moved onto.
+    syncWorldAudio(
+      data.region,
+      data.terrain
+    ).catch(err => {
+      console.warn(
+        "Unable to sync world audio after movement:",
+        err
+      );
+    });
+
     // Use bundled data from the single move response — no extra fetches
 if (data.world) {
   renderWorldFromData(
@@ -837,6 +874,12 @@ if (data.regionData) {
 }
 
 updateNavHUD(data);
+
+if (data.huntProgress?.advanced) {
+  showHuntProgress(
+    data.huntProgress
+  );
+}
 
 if (data.inCombat && data.enemy) {
   pendingCombatEnemy =
@@ -1107,6 +1150,18 @@ async function investigateHuntClue(
 
         data.clue.description ||
           "You examine the evidence."
+      );
+    }
+
+
+    /*
+     * Shared Hunt progress notification.
+     */
+    if (
+      data.huntProgress?.advanced
+    ) {
+      showHuntProgress(
+        data.huntProgress
       );
     }
 

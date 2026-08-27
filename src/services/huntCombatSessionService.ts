@@ -2873,6 +2873,33 @@ async function castHuntSpellUnlocked(
     HUNT_SPELL_RECOVERY_MS;
 
 
+  // Party-wide ATB advances are applied after consuming
+  // the caster's action so the caster also ends at the
+  // configured post-cast gauge instead of being reset to 0.
+  const partyGaugeGain =
+    Math.max(
+      0,
+      Number(result.partyGaugeGain) || 0
+    );
+
+
+  if (partyGaugeGain > 0) {
+    for (const member of session.players.values()) {
+      if (member.hp <= 0) {
+        continue;
+      }
+
+      member.gauge = Math.min(
+        100,
+        member.gauge + partyGaugeGain
+      );
+
+      member.ready =
+        member.gauge >= 100;
+    }
+  }
+
+
   // =====================================================
   // COMBAT LOG
   // =====================================================

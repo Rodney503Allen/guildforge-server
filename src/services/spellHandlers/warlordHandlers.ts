@@ -1,6 +1,8 @@
 // src/services/spellHandlers/warlordHandlers.ts
 
 import { applyBuff } from "../buffService";
+import { db } from "../../db";
+import { publishPlayerStatePatch } from "../../playerStateEvents";
 
 import {
   SpellEnemy,
@@ -22,7 +24,12 @@ import {
 
 function getLivingAllies(
   playerId: number,
-  allies?: any[]
+  allies?: any[],
+  fallback?: {
+    hp?: number;
+    maxHp?: number;
+    stats?: any;
+  }
 ) {
 
   if (
@@ -45,7 +52,10 @@ function getLivingAllies(
    */
   return [
     {
-      playerId
+      playerId,
+      hp: Number(fallback?.hp ?? 1),
+      maxHp: Number(fallback?.maxHp ?? 1),
+      stats: fallback?.stats
     }
   ];
 }
@@ -55,8 +65,8 @@ function getLivingAllies(
 //
 // target_type = all_allies
 //
-// Grants the configured flat Defense bonus to every
-// living ally. In solo combat, it applies to the caster.
+// Reduces damage taken by every living ally.
+// In solo combat, it applies to the caster.
 // =====================================================
 
 export const holdTheLineHandler:
@@ -67,15 +77,15 @@ export const holdTheLineHandler:
     const buff =
       getConfiguredBuff(spell);
 
-    if (buff.stat !== "defense") {
+    if (buff.stat !== "damage_reduction") {
       return (
-        `${spell.name} must use the defense buff stat`
+        `${spell.name} must use damage_reduction`
       );
     }
 
     if (buff.value <= 0) {
       return (
-        `${spell.name} has an invalid Defense bonus`
+        `${spell.name} has an invalid damage reduction value`
       );
     }
 
@@ -137,12 +147,12 @@ export const holdTheLineHandler:
         targets.length > 1
           ? (
               `🛡️ You order your company to hold the line, ` +
-              `granting ${buff.value} Defense for ` +
+              `reducing damage taken by ${buff.value}% for ` +
               `${buff.duration}s!`
             )
           : (
-              `🛡️ You hold your ground, gaining ` +
-              `${buff.value} Defense for ` +
+              `🛡️ You hold your ground, reducing damage taken ` +
+              `by ${buff.value}% for ` +
               `${buff.duration}s!`
             ),
 
@@ -154,8 +164,8 @@ export const holdTheLineHandler:
 // =====================================================
 // RALLYING CRY
 //
-// Grants the configured Attack percentage bonus to
-// every living ally. In solo combat, targets the caster.
+// Restores a percentage of maximum HP and increases
+// healing received for every living ally.
 // =====================================================
 
 export const rallyingCryHandler:
@@ -166,15 +176,24 @@ export const rallyingCryHandler:
     const buff =
       getConfiguredBuff(spell);
 
-    if (buff.stat !== "attack_pct") {
+    const healPercent =
+      Number(spell.heal) || 0;
+
+    if (healPercent <= 0) {
       return (
-        `${spell.name} must use attack_pct`
+        `${spell.name} has an invalid maximum-HP heal percentage`
+      );
+    }
+
+    if (buff.stat !== "healing_received_pct") {
+      return (
+        `${spell.name} must use healing_received_pct`
       );
     }
 
     if (buff.value <= 0) {
       return (
-        `${spell.name} has an invalid Attack bonus`
+        `${spell.name} has an invalid healing received bonus`
       );
     }
 
@@ -190,7 +209,10 @@ export const rallyingCryHandler:
   async execute({
     playerId,
     spell,
-    allies
+    player,
+    allies,
+    currentPlayerHP,
+    maxPlayerHP
   }): Promise<SpellHandlerResult> {
     const buff =
       getConfiguredBuff(spell);
@@ -198,7 +220,12 @@ export const rallyingCryHandler:
     const targets =
       getLivingAllies(
         playerId,
-        allies
+        allies,
+        {
+          hp: currentPlayerHP,
+          maxHp: maxPlayerHP,
+          stats: player
+        }
       );
 
     const validTargets =
@@ -222,31 +249,92 @@ export const rallyingCryHandler:
       };
     }
 
+    const healPercent =
+      Math.max(0, Number(spell.heal) || 0);
+
+    let casterHP: number | undefined;
+    let totalHealing = 0;
+
     for (const ally of validTargets) {
+      const allyPlayerId =
+        Number(ally.playerId);
+
+      const maxHp =
+        Math.max(1, Number(ally.maxHp) || 1);
+
+      const currentHp =
+        Math.max(0, Number(ally.hp) || 0);
+
+      const healingReceivedMult =
+        Math.max(
+          0,
+          Number(ally.stats?.healingReceivedMult) || 1
+        );
+
+      const requestedHealing =
+        Math.max(
+          1,
+          Math.floor(
+            maxHp *
+            (healPercent / 100) *
+            healingReceivedMult
+          )
+        );
+
+      const newHp =
+        Math.min(maxHp, currentHp + requestedHealing);
+
+      const actualHealing =
+        Math.max(0, newHp - currentHp);
+
+      await db.query(
+        `UPDATE players SET hpoints = ? WHERE id = ?`,
+        [newHp, allyPlayerId]
+      );
+
+      publishPlayerStatePatch(
+        allyPlayerId,
+        {
+          hpoints: newHp,
+          maxhp: maxHp
+        }
+      );
+
       await applyBuff(
-        Number(ally.playerId),
+        allyPlayerId,
         buff.stat,
         buff.value,
         buff.duration,
         `spell:${spell.id}`
       );
+
+      totalHealing += actualHealing;
+
+      if (allyPlayerId === playerId) {
+        casterHP = newHp;
+      }
     }
 
     return {
       log:
         validTargets.length > 1
           ? (
-              `📣 You sound ${spell.name}, granting your ` +
-              `company ${buff.value}% Attack for ` +
+              `📣 You sound ${spell.name}, restoring your ` +
+              `company's health and increasing healing received by ` +
+              `${buff.value}% for ` +
               `${buff.duration}s!`
             )
           : (
-              `📣 You sound ${spell.name}, gaining ` +
-              `${buff.value}% Attack for ` +
+              `📣 You sound ${spell.name}, restoring ${totalHealing} ` +
+              `health and increasing healing received by ${buff.value}% for ` +
               `${buff.duration}s!`
             ),
 
-      appliedStatus: true
+      appliedStatus: true,
+      healing: totalHealing,
+      ...(casterHP !== undefined
+        ? { playerHP: casterHP }
+        : {})
     };
   }
 };
@@ -562,10 +650,10 @@ SpellHandlerDefinition = {
 
 
     const attackBonus =
-      15;
+      Math.max(0, Number(spell.buff_value) || 0);
 
 
-    const defenseBonus =
+    const damageReductionBonus =
       10;
 
 
@@ -607,10 +695,10 @@ SpellHandlerDefinition = {
 
       await applyBuff(
         ally.playerId,
-        "defense",
-        defenseBonus,
+        "damage_reduction",
+        damageReductionBonus,
         duration,
-        `spell:${spell.id}:defense`
+        `spell:${spell.id}:damage_reduction`
       );
     }
 
@@ -620,12 +708,12 @@ SpellHandlerDefinition = {
         targets.length > 1
           ? (
               `🚩 You plant ${spell.name}, granting your company ` +
-              `${attackBonus}% Attack and ${defenseBonus} Defense ` +
+              `${attackBonus}% Attack and ${damageReductionBonus}% damage reduction ` +
               `for ${duration}s!`
             )
           : (
               `🚩 You plant ${spell.name}, gaining ` +
-              `${attackBonus}% Attack and ${defenseBonus} Defense ` +
+              `${attackBonus}% Attack and ${damageReductionBonus}% damage reduction ` +
               `for ${duration}s!`
             ),
 
@@ -641,10 +729,8 @@ SpellHandlerDefinition = {
 //
 // target_type = all_allies
 //
-// Grants:
-// - +20% Attack
-// - +10% critical chance
-// - +15% ATB speed
+// Immediately advances each ally's ATB gauge by 50,
+// then grants critical chance and faster ATB generation.
 //
 // Applies to every living ally.
 // =====================================================
@@ -690,16 +776,16 @@ SpellHandlerDefinition = {
       ) || 10;
 
 
-    const attackBonus =
-      20;
-
-
     const critBonus =
-      10;
+      Math.max(0, Number(spell.buff_value) || 0);
 
 
     const atbBonus =
-      15;
+      25;
+
+
+    const gaugeGain =
+      50;
 
 
     const targets =
@@ -731,15 +817,6 @@ SpellHandlerDefinition = {
 
       await applyBuff(
         ally.playerId,
-        "attack_pct",
-        attackBonus,
-        duration,
-        `spell:${spell.id}:attack`
-      );
-
-
-      await applyBuff(
-        ally.playerId,
         "crit_chance",
         critBonus,
         duration,
@@ -762,17 +839,20 @@ SpellHandlerDefinition = {
         targets.length > 1
           ? (
               `📯 You sound ${spell.name}, granting your company ` +
-              `${attackBonus}% Attack, ${critBonus}% critical chance, ` +
+              `${gaugeGain} ATB, ${critBonus}% critical chance, ` +
               `and ${atbBonus}% ATB speed for ${duration}s!`
             )
           : (
               `📯 You sound ${spell.name}, gaining ` +
-              `${attackBonus}% Attack, ${critBonus}% critical chance, ` +
+              `${gaugeGain} ATB, ${critBonus}% critical chance, ` +
               `and ${atbBonus}% ATB speed for ${duration}s!`
             ),
 
       appliedStatus:
-        true
+        true,
+
+      partyGaugeGain:
+        gaugeGain
     };
   }
 };

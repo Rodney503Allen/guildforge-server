@@ -778,6 +778,22 @@ const previousEnemyHP =
       450
     );
 
+    const partyGaugeGain =
+      Math.max(
+        0,
+        Number(result.partyGaugeGain) || 0
+      );
+
+    if (partyGaugeGain > 0) {
+      session.player.gauge = Math.min(
+        100,
+        session.player.gauge + partyGaugeGain
+      );
+
+      session.player.ready =
+        session.player.gauge >= 100;
+    }
+
     if (reward) {
       session.state = "victory";
 

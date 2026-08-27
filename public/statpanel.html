@@ -92,26 +92,224 @@
   </div>
 </section>
 
-  <nav class="right-actions" aria-label="Game navigation">
-    <div class="nav-primary">
-      <a id="quest-journal-btn" class="nav-action-btn" href="/journal">
-        <span class="nav-action-icon"><img src="/icons/ui/quest_log.webp" alt=""></span>
-        <span>Quest Log</span>
-      </a>
+<nav class="right-actions" aria-label="Game navigation">
+  <div class="nav-primary">
+    <a id="quest-journal-btn" class="nav-action-btn" href="/journal">
+      <span class="nav-action-icon">
+        <img src="/icons/ui/quest_log.webp" alt="">
+      </span>
+      <span>Quest Log</span>
+    </a>
 
-      <a id="professions-btn" class="nav-action-btn" href="/professions">
-        <span class="nav-action-icon"><img src="/icons/ui/professions.webp" alt=""></span>
-        <span>Professions</span>
-      </a>
+    <a id="professions-btn" class="nav-action-btn" href="/professions">
+      <span class="nav-action-icon">
+        <img src="/icons/ui/professions.webp" alt="">
+      </span>
+      <span>Professions</span>
+    </a>
 
-      <a id="bestiary-btn" class="nav-action-btn" href="/codex">
-        <span class="nav-action-icon"><img src="/icons/ui/bestiary.webp" alt=""></span>
-        <span>Bestiary</span>
-      </a>
-    </div>
+    <a id="bestiary-btn" class="nav-action-btn" href="/codex">
+      <span class="nav-action-icon">
+        <img src="/icons/ui/bestiary.webp" alt="">
+      </span>
+      <span>Bestiary</span>
+    </a>
 
-    <div class="statpanel-utilities">
-      <a id="logout-btn" class="action-btn" href="/logout">Logout</a>
-    </div>
-  </nav>
+    <button
+      id="audio-settings-btn"
+      class="nav-action-btn audio-nav-action"
+      type="button"
+      aria-haspopup="dialog"
+      aria-controls="audio-settings-modal"
+    >
+      <span class="nav-action-icon audio-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48">
+          <path d="M9 20h8l11-9v26l-11-9H9z"></path>
+          <path d="M33 18c2 2 3 4 3 6s-1 4-3 6"></path>
+          <path d="M37 13c4 3 6 7 6 11s-2 8-6 11"></path>
+        </svg>
+      </span>
+
+      <span>Audio</span>
+    </button>
+  </div>
+
+  <div class="statpanel-utilities">
+    <a id="logout-btn" class="action-btn" href="/logout">
+      Logout
+    </a>
+  </div>
+</nav>
 </header>
+<div
+  id="audio-settings-modal"
+  class="gf-audio-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="audio-settings-title"
+  aria-hidden="true"
+>
+  <div class="gf-audio-modal-backdrop"></div>
+
+  <section class="gf-audio-dialog">
+    <div
+      class="gf-audio-dialog-ornament"
+      aria-hidden="true"
+    ></div>
+
+    <header class="gf-audio-header">
+      <div>
+        <div class="gf-audio-kicker">
+          Guildforge
+        </div>
+
+        <h2 id="audio-settings-title">
+          Audio Settings
+        </h2>
+
+        <p>
+          Shape the sounds of your adventure.
+        </p>
+      </div>
+
+      <button
+        id="audio-settings-close"
+        class="gf-audio-close"
+        type="button"
+        aria-label="Close audio settings"
+      >
+        ×
+      </button>
+    </header>
+
+    <div
+      class="gf-audio-divider"
+      aria-hidden="true"
+    ></div>
+
+    <div class="gf-audio-controls">
+
+      <label
+        class="gf-audio-control"
+        for="gf-music-volume"
+      >
+        <span
+          class="gf-audio-control-icon"
+          aria-hidden="true"
+        >
+          ♫
+        </span>
+
+        <span class="gf-audio-control-copy">
+          <strong>Music</strong>
+          <small>
+            Region soundtracks and musical themes
+          </small>
+        </span>
+
+        <input
+          id="gf-music-volume"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="100"
+        >
+
+        <output
+          id="gf-music-volume-value"
+          for="gf-music-volume"
+        >
+          100%
+        </output>
+      </label>
+
+      <label
+        class="gf-audio-control"
+        for="gf-sfx-volume"
+      >
+        <span
+          class="gf-audio-control-icon"
+          aria-hidden="true"
+        >
+          ⚔
+        </span>
+
+        <span class="gf-audio-control-copy">
+          <strong>Sound Effects</strong>
+          <small>
+            Spells, creatures, combat, loot,
+            and UI sounds
+          </small>
+        </span>
+
+        <input
+          id="gf-sfx-volume"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="100"
+        >
+
+        <output
+          id="gf-sfx-volume-value"
+          for="gf-sfx-volume"
+        >
+          100%
+        </output>
+      </label>
+
+      <label
+        class="gf-audio-control"
+        for="gf-environment-volume"
+      >
+        <span
+          class="gf-audio-control-icon"
+          aria-hidden="true"
+        >
+          ❧
+        </span>
+
+        <span class="gf-audio-control-copy">
+          <strong>Environment</strong>
+          <small>
+            Wind, forests, swamps, weather,
+            and terrain ambience
+          </small>
+        </span>
+
+        <input
+          id="gf-environment-volume"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="100"
+        >
+
+        <output
+          id="gf-environment-volume-value"
+          for="gf-environment-volume"
+        >
+          100%
+        </output>
+      </label>
+
+    </div>
+
+    <footer class="gf-audio-footer">
+      <span>
+        Settings are saved automatically.
+      </span>
+
+      <button
+        class="gf-audio-done"
+        type="button"
+        data-audio-close="true"
+      >
+        Done
+      </button>
+    </footer>
+  </section>
+</div>

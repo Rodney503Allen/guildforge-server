@@ -337,13 +337,58 @@ router.get("/world", async (req, res) => {
   // Load player
   const [[player]]: any = await db.query(
     `
-    SELECT map_x, map_y, level, steps_since_encounter
+    SELECT map_x, map_y, level, steps_since_encounter, location
     FROM players
     WHERE id=?
     LIMIT 1
     `,
     [pid]
   );
+
+  // Keep players.location synchronized with the current tile.
+  // Town tiles use their town name; all other tiles use the region name.
+  const [[currentRegionTile]]: any = await db.query(
+    `
+      SELECT
+        CASE
+          WHEN wm.terrain = 'town'
+            THEN COALESCE(wm.region_name, r.name, 'Unknown Region')
+          ELSE COALESCE(r.name, wm.region_name, 'Unknown Region')
+        END AS location_name
+      FROM world_map wm
+      LEFT JOIN regions r ON r.id = wm.region_id
+      WHERE wm.x = ?
+        AND wm.y = ?
+      LIMIT 1
+    `,
+    [
+      Number(player.map_x),
+      Number(player.map_y)
+    ]
+  );
+
+  const currentLocationName =
+    String(currentRegionTile?.location_name || "");
+
+  if (
+    currentLocationName &&
+    currentLocationName !== "Unknown Region" &&
+    String(player.location || "") !== currentLocationName
+  ) {
+    await db.query(
+      `
+        UPDATE players
+        SET location = ?
+        WHERE id = ?
+      `,
+      [
+        currentLocationName,
+        pid
+      ]
+    );
+
+    player.location = currentLocationName;
+  }
 
   const minX = player.map_x - 3;
   const maxX = player.map_x + 3;
@@ -392,6 +437,13 @@ router.get("/world", async (req, res) => {
   const tileMap: any = {};
   tiles.forEach((t: any) => tileMap[`${t.x},${t.y}`] = t);
 
+  const currentTerrain =
+    String(
+      tileMap[
+        `${Number(player.map_x)},${Number(player.map_y)}`
+      ]?.terrain || ""
+    );
+
 res.send(`
 <!DOCTYPE html>
 <html lang="en">
@@ -409,7 +461,7 @@ res.send(`
   <link rel="stylesheet" href="/hunt-combat.css">
 </head>
 
-<body>
+<body data-gf-terrain="${currentTerrain}">
   <div class="world-frame">
     <span class="frame-border main" aria-hidden="true"></span>
 
@@ -1331,6 +1383,11 @@ const [[tile]]: any = await db.query(
     wm.terrain,
     wm.region_id,
     COALESCE(r.name, wm.region_name, 'Unknown Region') AS region_name,
+    CASE
+      WHEN wm.terrain = 'town'
+        THEN COALESCE(wm.region_name, r.name, 'Unknown Region')
+      ELSE COALESCE(r.name, wm.region_name, 'Unknown Region')
+    END AS location_name,
     COALESCE(r.level_min, 1) AS level_min,
     COALESCE(r.level_max, 1) AS level_max,
     r.controlling_guild_id
@@ -1359,13 +1416,15 @@ try {
 
         SET
           map_x = ?,
-          map_y = ?
+          map_y = ?,
+          location = ?
 
         WHERE id = ?
       `,
       [
         newX,
         newY,
+        String(tile.location_name || "Unknown Region"),
         pid
       ]
     );

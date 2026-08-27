@@ -1,0 +1,395 @@
+/* Guildforge Audio Settings */
+
+.audio-nav-action {
+  appearance: none;
+  border-top: 0;
+  border-bottom: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.audio-nav-icon svg {
+  width: 38px;
+  height: 38px;
+  overflow: visible;
+  fill: #b4aa91;
+  stroke: #b4aa91;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: saturate(.72) drop-shadow(0 4px 4px #000);
+  transition: filter .15s ease, fill .15s ease, stroke .15s ease;
+}
+
+.audio-nav-action:hover .audio-nav-icon svg {
+  fill: #eee1c7;
+  stroke: #eee1c7;
+  filter: saturate(1) brightness(1.12) drop-shadow(0 0 6px rgba(182,75,46,.45));
+}
+
+.gf-audio-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .18s ease, visibility .18s ease;
+}
+
+.gf-audio-modal.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.gf-audio-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(182,75,46,.09), transparent 38%),
+    rgba(2,3,4,.76);
+  backdrop-filter: blur(3px);
+}
+
+.gf-audio-dialog {
+  position: relative;
+  width: min(600px, calc(100vw - 32px));
+  overflow: hidden;
+  color: var(--gf-parchment, #eee1c7);
+  border: 1px solid #3b4246;
+  border-top-color: rgba(214,173,85,.58);
+  background:
+    radial-gradient(ellipse at 50% -15%, rgba(214,173,85,.09), transparent 48%),
+    repeating-linear-gradient(92deg, rgba(255,255,255,.012) 0 1px, transparent 1px 6px),
+    linear-gradient(180deg, #171c20 0%, #0b0f12 74%, #07090b 100%);
+  box-shadow: 0 35px 90px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05);
+  transform: translateY(10px) scale(.985);
+  transition: transform .18s ease;
+}
+
+.gf-audio-modal.is-open .gf-audio-dialog {
+  transform: translateY(0) scale(1);
+}
+
+.gf-audio-dialog::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  pointer-events: none;
+  border: 1px solid rgba(107,117,122,.2);
+}
+
+.gf-audio-dialog-ornament {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translateX(-50%) rotate(45deg);
+  border: 1px solid #665330;
+  background: #101417;
+  box-shadow: inset 0 0 0 3px #090b0d;
+}
+
+.gf-audio-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 25px 28px 19px;
+}
+
+.gf-audio-kicker {
+  margin-bottom: 3px;
+  color: var(--gf-ember-hot, #dd7045);
+  font-family: Georgia, serif;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.gf-audio-header h2 {
+  margin: 0;
+  color: var(--gf-bone, #d3c09d);
+  font-family: Cinzel, Georgia, serif;
+  font-size: 24px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 #000;
+}
+
+.gf-audio-header p {
+  margin: 5px 0 0;
+  color: var(--gf-muted, #92989d);
+  font-family: Georgia, serif;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.gf-audio-close {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0 0 3px;
+  color: #9fa5a8;
+  font-family: Georgia, serif;
+  font-size: 25px;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid #353c40;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.2));
+}
+
+.gf-audio-close:hover {
+  color: #f3dfd2;
+  border-color: var(--gf-ember, #b64b2e);
+  background: rgba(114,31,29,.28);
+}
+
+.gf-audio-divider {
+  position: relative;
+  z-index: 1;
+  height: 1px;
+  margin: 0 28px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(182,75,46,.55),
+    rgba(214,173,85,.32),
+    rgba(182,75,46,.55),
+    transparent
+  );
+}
+
+.gf-audio-controls {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  padding: 18px 28px 22px;
+}
+
+.gf-audio-control {
+  --gf-audio-level: 100%;
+  display: grid;
+  grid-template-columns: 42px minmax(155px, 1fr) minmax(150px, .9fr) 48px;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-left: 2px solid rgba(182,75,46,.42);
+  background: linear-gradient(
+    90deg,
+    rgba(114,31,29,.12),
+    rgba(255,255,255,.018) 35%,
+    rgba(0,0,0,.13)
+  );
+}
+
+.gf-audio-control-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--gf-gold, #d6ad55);
+  font-family: Georgia, serif;
+  font-size: 20px;
+  border: 1px solid rgba(214,173,85,.2);
+  background: #090c0e;
+  box-shadow: inset 0 0 10px #000;
+}
+
+.gf-audio-control-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gf-audio-control-copy strong {
+  color: var(--gf-bone, #d3c09d);
+  font-family: Cinzel, Georgia, serif;
+  font-size: 11px;
+  letter-spacing: .9px;
+  text-transform: uppercase;
+}
+
+.gf-audio-control-copy small {
+  overflow: hidden;
+  color: #777f83;
+  font-family: Georgia, serif;
+  font-size: 10px;
+  font-style: italic;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gf-audio-control input[type="range"] {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  appearance: none;
+  cursor: pointer;
+  outline: none;
+  background: transparent;
+}
+
+.gf-audio-control input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border: 1px solid #30373a;
+  border-radius: 1px;
+  background: linear-gradient(
+    90deg,
+    var(--gf-ember, #b64b2e) 0,
+    var(--gf-gold, #d6ad55) var(--gf-audio-level),
+    #111518 var(--gf-audio-level),
+    #111518 100%
+  );
+  box-shadow: inset 0 1px 3px #000;
+}
+
+.gf-audio-control input[type="range"]::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  appearance: none;
+  border: 1px solid #796642;
+  border-radius: 2px;
+  background: linear-gradient(145deg, #dfc580, #8e7338);
+  box-shadow: 0 2px 5px #000, inset 0 1px 0 rgba(255,255,255,.4);
+}
+
+.gf-audio-control input[type="range"]::-moz-range-track {
+  height: 6px;
+  border: 1px solid #30373a;
+  background: #111518;
+}
+
+.gf-audio-control input[type="range"]::-moz-range-progress {
+  height: 6px;
+  background: linear-gradient(90deg, var(--gf-ember, #b64b2e), var(--gf-gold, #d6ad55));
+}
+
+.gf-audio-control input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #796642;
+  border-radius: 2px;
+  background: #c3a35d;
+  box-shadow: 0 2px 5px #000;
+}
+
+.gf-audio-control output {
+  color: #c7b98e;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gf-audio-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 28px 18px;
+  border-top: 1px solid rgba(255,255,255,.05);
+  background: rgba(0,0,0,.15);
+}
+
+.gf-audio-footer span {
+  color: #6f767a;
+  font-family: Georgia, serif;
+  font-size: 10px;
+  font-style: italic;
+}
+
+.gf-audio-done {
+  min-width: 92px;
+  padding: 7px 16px;
+  color: #e1d4bd;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid #5c3a2f;
+  background: linear-gradient(180deg, rgba(182,75,46,.34), rgba(57,21,17,.55));
+}
+
+.gf-audio-done:hover {
+  color: #fff0df;
+  border-color: var(--gf-ember-hot, #dd7045);
+}
+
+@media (max-width: 760px) {
+  .gf-audio-control {
+    grid-template-columns: 38px minmax(0, 1fr) 48px;
+  }
+
+  .gf-audio-control input[type="range"] {
+    grid-column: 1 / -1;
+  }
+
+  .gf-audio-control-copy small {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 590px) {
+  .audio-nav-action {
+    min-width: 52px;
+    padding-inline: 3px;
+  }
+
+  .audio-nav-action > span:last-child {
+    display: none;
+  }
+
+  .audio-nav-icon,
+  .audio-nav-icon svg {
+    width: 38px;
+    height: 38px;
+  }
+
+  .gf-audio-modal {
+    padding: 12px;
+  }
+
+  .gf-audio-header {
+    padding: 22px 20px 16px;
+  }
+
+  .gf-audio-divider {
+    margin-inline: 20px;
+  }
+
+  .gf-audio-controls {
+    padding: 15px 20px 18px;
+  }
+
+  .gf-audio-footer {
+    padding: 13px 20px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gf-audio-modal,
+  .gf-audio-dialog {
+    transition: none !important;
+  }
+}

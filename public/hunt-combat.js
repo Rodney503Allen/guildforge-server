@@ -2293,6 +2293,32 @@ async function castHuntCombatSpell(
       return;
     }
 
+    /*
+     * The Hunt server accepted the cast.
+     * Resolve the spell from the already-loaded six-slot
+     * hotbar and emit the same global cast event used by
+     * normal world combat.
+     */
+    const castSpellEntry =
+      huntCombatSpells.find(
+        entry =>
+          Number(entry.spell?.id) ===
+          Number(spellId)
+      );
+
+    const castSpellData =
+      castSpellEntry?.spell ??
+      null;
+
+    if (
+      castSpellData?.audio &&
+      window.GFSpellEvents?.emitCast
+    ) {
+      window.GFSpellEvents.emitCast(
+        castSpellData
+      );
+    }
+
     if (data.snapshot) {
       renderHuntEncounter(
         data.snapshot
