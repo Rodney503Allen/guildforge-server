@@ -8,7 +8,7 @@ import {
 
 import {
   applyHealingReceivedMultiplier,
-  calculateScaledSpellAmount,
+  calculateScaledHealingAmount,
   getConfiguredBuff
 } from "./helpers";
 
@@ -102,7 +102,7 @@ SpellHandlerDefinition = {
      * Healing power comes from caster.
      */
     const baseScaledHealing =
-      calculateScaledSpellAmount(
+      calculateScaledHealingAmount(
         player,
         baseHeal
       );
@@ -151,6 +151,29 @@ SpellHandlerDefinition = {
       `spell:${spell.id}`
     );
 
+    const rankConfig = (spell.rank_config && typeof spell.rank_config === "object")
+      ? spell.rank_config as Record<string, any>
+      : {};
+    const revivePercent = Math.max(1, Number(rankConfig.interventionRevivePercent) || 35);
+    const charges = Math.max(1, Math.floor(Number(rankConfig.interventionCharges) || 1));
+    const protectionDuration = buff.duration + Math.max(0, Number(rankConfig.interventionDurationBonus) || 0);
+    const expiresAt = new Date(Date.now() + protectionDuration * 1000);
+    await db.query(`
+      INSERT INTO player_status_effects
+        (player_id,effect_key,charges,value,expires_at,source)
+      VALUES (?, 'priest_death_protection', ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE charges=VALUES(charges),value=VALUES(value),expires_at=VALUES(expires_at)
+    `, [targetId, charges, revivePercent, expiresAt, `spell:${spell.id}`]);
+
+    if (Number(rankConfig.interventionTriggerDamagePercent) > 0) {
+      await db.query(`
+        INSERT INTO player_status_effects
+          (player_id,effect_key,charges,value,expires_at,source)
+        VALUES (?, 'priest_vengeful_resurrection', ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE charges=VALUES(charges),value=VALUES(value),expires_at=VALUES(expires_at)
+      `, [targetId, charges, Number(rankConfig.interventionTriggerDamagePercent), expiresAt, `spell:${spell.id}`]);
+    }
+
     const targetingSelf =
       Number(targetId) ===
       Number(playerId);
@@ -185,6 +208,12 @@ SpellHandlerDefinition = {
     return {
       log,
       healing: actualHealing,
+      potentialHealing: scaledHealing,
+      overhealing: Math.max(0, scaledHealing - actualHealing),
+      healedTargetId: Number(targetId),
+      healedTargetMaxHP: maximumHP,
+      healedTargetHPBefore: currentHP,
+      healedTargetHPAfter: finalHP,
       appliedStatus: true
     };
   }
@@ -266,7 +295,7 @@ SpellHandlerDefinition = {
      * Healing power comes from caster.
      */
     const baseScaledHealing =
-      calculateScaledSpellAmount(
+      calculateScaledHealingAmount(
         player,
         baseTotalHealing
       );
@@ -362,7 +391,11 @@ SpellHandlerDefinition = {
               `${expectedHealing} HP over ${duration}s!`
             ),
 
-      appliedStatus: true
+      appliedStatus: true,
+      healedTargetId: Number(targetId),
+      renewHealingPerTick: healingPerTick,
+      renewTickInterval: tickInterval,
+      renewDuration: duration
     };
   }
 };
@@ -383,29 +416,34 @@ SpellHandlerDefinition = {
   async execute({
     playerId,
     spell,
-    targetPlayerId
+    targetPlayerId,
+    allies
   }): Promise<SpellHandlerResult> {
 
     const targetId =
       targetPlayerId ??
       playerId;
 
-    const [result]: any =
-      await db.query(
+    const targets = String(spell.target_type).toLowerCase() === "all_allies"
+      ? (allies ?? []).filter(ally => Number(ally.hp) > 0).map(ally => Number(ally.playerId))
+      : [Number(targetId)];
+    if (!targets.includes(Number(targetId)) && String(spell.target_type).toLowerCase() === "all_allies") targets.push(Number(targetId));
+
+    let cleansedCount = 0;
+    const cleansedTargetIds: number[] = [];
+    for (const cleanseTargetId of targets) {
+      const [result]: any = await db.query(
         `
           DELETE FROM player_buffs
           WHERE player_id = ?
             AND value < 0
         `,
-        [
-          targetId
-        ]
+        [cleanseTargetId]
       );
-
-    const cleansedCount =
-      Number(
-        result.affectedRows
-      ) || 0;
+      const removed = Number(result.affectedRows) || 0;
+      cleansedCount += removed;
+      if (removed > 0) cleansedTargetIds.push(cleanseTargetId);
+    }
 
     const targetingSelf =
       Number(targetId) ===
@@ -437,6 +475,9 @@ SpellHandlerDefinition = {
 
     return {
       log,
+      cleansedCount,
+      cleansedTargetIds,
+      healedTargetId: Number(targetId),
       appliedStatus:
         cleansedCount > 0
     };

@@ -1,4 +1,4 @@
-//public/register.html
+<!-- public/register.html | compact three-column framed layout -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -58,13 +58,18 @@
     }
 
     .box{
-      width: min(440px, 92vw);
-      padding: 22px 20px 18px;
-      border-radius: 14px;
+      width: min(980px, 96vw);
+      padding: 26px 28px 22px;
+      border-radius: 0;
       text-align:center;
       position:relative;
 
-      border: 1px solid rgba(43,52,64,.95);
+      border: 1px solid transparent;
+      border-image-source: url("/images/ui/panel_border.png");
+      border-image-slice: 16;
+      border-image-width: 16px;
+      border-image-outset: 0;
+      border-image-repeat: stretch;
       background:
         radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.12), transparent 60%),
         linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.22)),
@@ -141,6 +146,142 @@
       font-size: 14px;
     }
 
+    .account-details{
+      width:min(680px, 100%);
+      margin:0 auto 16px;
+      padding:16px 18px 14px;
+      position:relative;
+      z-index:1;
+      border:1px solid transparent;
+      border-image-source:url("/images/ui/panel_border.png");
+      border-image-slice:16;
+      border-image-width:10px;
+      border-image-outset:0;
+      border-image-repeat:stretch;
+      background:rgba(0,0,0,.20);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+    }
+
+    .account-title{
+      margin:0 0 8px;
+      color:var(--bone);
+      font-family:'Cinzel', ui-serif, Georgia, "Times New Roman", serif;
+      font-size:12px;
+      font-weight:900;
+      letter-spacing:1.5px;
+      text-transform:uppercase;
+    }
+
+    .account-fields{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:10px;
+    }
+
+    .account-fields input,
+    .account-fields select{
+      width:100%;
+      min-width:0;
+      min-height:42px;
+      margin:0;
+      padding:11px 12px;
+      font-size:13px;
+    }
+
+    .account-fields select{
+      grid-column:auto;
+    }
+
+    .creation-header{
+      margin-bottom:18px;
+      position:relative;
+      z-index:1;
+    }
+
+    .creation-header h2{
+      margin-bottom:5px;
+    }
+
+    .creation-subtitle{
+      color:rgba(215,219,226,.66);
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size:12px;
+      letter-spacing:.35px;
+    }
+
+    .creation-layout{
+      display:grid;
+      grid-template-columns:minmax(330px, .82fr) minmax(0, 1.45fr);
+      gap:16px;
+      align-items:stretch;
+      position:relative;
+      z-index:1;
+    }
+
+    .creation-column{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .section-kicker{
+      margin-bottom:10px;
+      color:rgba(200,163,75,.88);
+      font-family:'Cinzel', ui-serif, Georgia, "Times New Roman", serif;
+      font-size:10px;
+      font-weight:900;
+      letter-spacing:1.25px;
+      text-transform:uppercase;
+    }
+
+    .path-panel{
+      flex:1;
+      padding:18px 16px 15px;
+      position:relative;
+      border:1px solid transparent;
+      border-image-source:url("/images/ui/panel_border.png");
+      border-image-slice:16;
+      border-image-width:14px;
+      border-image-outset:0;
+      border-image-repeat:stretch;
+      background:
+        radial-gradient(620px 190px at 50% 0%, rgba(200,163,75,.10), transparent 62%),
+        linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.22)),
+        rgba(7,10,14,.80);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+    }
+
+    .action-footer{
+      display:grid;
+      grid-template-columns:1fr minmax(300px, 420px) 1fr;
+      align-items:center;
+      gap:16px;
+      margin-top:16px;
+      padding-top:15px;
+      border-top:1px solid rgba(200,163,75,.14);
+      position:relative;
+      z-index:1;
+    }
+
+    .action-footer .register-button{
+      grid-column:2;
+      margin:0;
+    }
+
+    .action-footer .login-link{
+      grid-column:3;
+      justify-self:end;
+      margin:0;
+    }
+
+    .action-footer #msg{
+      grid-column:1;
+      grid-row:1;
+      margin:0;
+      text-align:left;
+    }
+
     input::placeholder{ color: rgba(154,163,175,.85); }
 
     input:focus, select:focus{
@@ -183,6 +324,28 @@
       cursor:pointer;
       transition: .12s ease;
       box-shadow: 0 14px 28px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.12);
+    }
+
+    .register-button{
+      width:min(420px, 100%);
+      min-height: 50px;
+      padding: 12px 18px;
+      border: 1px solid transparent;
+      border-image-source: url("/images/ui/button_border2.png");
+      border-image-slice: 18;
+      border-image-width: 14px;
+      border-image-outset: 1px;
+      border-image-repeat: stretch;
+      border-radius: 0;
+      background: linear-gradient(
+        180deg,
+        #b34735 0%,
+        #963528 45%,
+        #76261f 100%
+      );
+      font-family: 'Cinzel', ui-serif, Georgia, "Times New Roman", serif;
+      font-size: 14px;
+      letter-spacing: 1px;
     }
 
     button:hover{
@@ -241,10 +404,15 @@
 
 /* --- CLASS INFO PANEL --- */
 .class-panel{
-  margin-top: 14px;
-  padding: 15px 14px 13px;
-  border-radius: 14px;
-  border: 1px solid rgba(200,163,75,.18);
+  margin-top:0;
+  padding:18px 16px 15px;
+  border-radius: 0;
+  border: 1px solid transparent;
+  border-image-source: url("/images/ui/panel_border.png");
+  border-image-slice: 16;
+  border-image-width: 14px;
+  border-image-outset: 0;
+  border-image-repeat: stretch;
 
   background:
     radial-gradient(520px 160px at 50% 0%, rgba(200,163,75,.12), transparent 58%),
@@ -297,17 +465,22 @@
   font-size:12px;
   line-height:1.45;
   margin:0 auto 12px;
-  max-width:360px;
+  max-width:420px;
   text-align:center;
 }
 
 .class-grid{
   display:grid;
-  grid-template-columns:1fr 1fr 1fr;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
   gap:9px;
 }
 
+.class-grid .class-block:first-child{
+  grid-column:1 / -1;
+}
+
 .class-block{
+  min-width:0;
   padding:10px 9px;
   border-radius:12px;
   border:1px solid rgba(255,255,255,.07);
@@ -320,7 +493,7 @@
     inset 0 1px 0 rgba(255,255,255,.045),
     0 8px 18px rgba(0,0,0,.22);
 
-  text-align:center;
+  text-align:left;
 }
 
 .class-label{
@@ -338,6 +511,7 @@
   font-size:11px;
   font-weight:700;
   line-height:1.35;
+  overflow-wrap:anywhere;
 }
 
 .class-stats{
@@ -402,15 +576,6 @@
   color:#f1e7d6;
 }
 
-.scaling-row{
-  margin-top:11px;
-  padding-top:11px;
-  border-top:1px solid rgba(255,255,255,.055);
-  font-size:12px;
-  display:flex;
-  justify-content:center;
-}
-
 .tip{
   position:absolute;
   left:50%;
@@ -454,20 +619,21 @@
 }
 
 .discipline-preview{
-  margin-top:12px;
-  padding-top:11px;
-  border-top:1px solid rgba(255,255,255,.06);
+  margin-top:0;
+  padding-top:0;
+  border-top:0;
 }
 
 .discipline-list{
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:repeat(3, minmax(180px, 1fr));
   gap:9px;
   margin-top:9px;
 }
 
 .discipline-card{
-  padding:10px 9px;
+  min-width:0;
+  padding:13px 12px;
   border-radius:12px;
   border:1px solid rgba(200,163,75,.14);
   background:
@@ -488,11 +654,27 @@
   font-size:11px;
   line-height:1.35;
   color:rgba(215,219,226,.82);
+  overflow-wrap:anywhere;
 }
-    /* responsive: stack blocks on small screens */
-    @media (max-width: 420px){
-      .class-grid{ grid-template-columns: 1fr; }
-      .box{ padding: 18px 16px 16px; }
+    /* Keep the class information in columns; allow horizontal scrolling only
+       on genuinely narrow screens instead of turning it into a tall stack. */
+    @media (max-width: 640px){
+      .box{ width:96vw; padding:18px 14px 16px; }
+      .account-fields{ grid-template-columns:1fr; }
+      .account-fields select{ grid-column:auto; }
+      .creation-layout{ grid-template-columns:1fr; }
+      .class-grid{ grid-template-columns:1fr; }
+      .class-grid .class-block:first-child{ grid-column:auto; }
+      .discipline-list{ grid-template-columns:1fr; }
+      .action-footer{ grid-template-columns:1fr; }
+      .action-footer #msg,
+      .action-footer .register-button,
+      .action-footer .login-link{
+        grid-column:1;
+        grid-row:auto;
+        justify-self:stretch;
+        text-align:center;
+      }
       h2{ font-size: 18px; letter-spacing: 2px; }
     }
   </style>
@@ -500,75 +682,77 @@
 
 <body>
   <div class="box">
-    <h2>Create Adventurer</h2>
+    <header class="creation-header">
+      <h2>Create Adventurer</h2>
+      <div class="creation-subtitle">Choose who you are, how you fight, and where your legend begins.</div>
+    </header>
 
-    <input id="name" placeholder="Username">
-    <input id="email" placeholder="Email">
+    <main class="creation-layout">
+      <div class="creation-column">
+        <section class="account-details">
+          <div class="section-kicker">1 · Account Details</div>
+          <div class="account-fields">
+            <input id="name" placeholder="Username">
+            <input id="email" placeholder="Email">
+            <input type="password" id="pass1" placeholder="Password">
+            <input type="password" id="pass2" placeholder="Confirm Password">
 
-    <select id="class">
-      <option disabled selected>Loading Classes...</option>
-    </select>
+            <select id="class">
+              <option disabled selected>Loading Classes...</option>
+            </select>
+          </div>
+        </section>
 
+        <section class="class-panel" id="classPanel" aria-live="polite">
+          <div class="section-kicker">2 · Class Identity</div>
+          <div class="class-title" id="classTitle">Choose your path</div>
+          <div class="class-tagline" id="classTagline">A name alone does not forge a legend.</div>
 
-    <input type="password" id="pass1" placeholder="Password">
-    <input type="password" id="pass2" placeholder="Confirm Password">
+          <div class="class-grid">
+            <div class="class-block">
+              <div class="class-label">Role</div>
+              <div class="class-value" id="classRole">—</div>
+            </div>
 
-    <!-- Class panel moved directly under class selection -->
-    <div class="class-panel" id="classPanel" aria-live="polite">
-      <div class="class-title" id="classTitle">Choose your path</div>
-      <div class="class-tagline" id="classTagline">A name alone does not forge a legend.</div>
+            <div class="class-block">
+              <div class="class-label">Strengths</div>
+              <div class="class-value" id="classStrengths">—</div>
+            </div>
 
-      <div class="class-grid">
-        <div class="class-block">
-          <div class="class-label">Role</div>
-          <div class="class-value" id="classRole">—</div>
-        </div>
-
-
-        <div class="class-block">
-          <div class="class-label">Strengths</div>
-          <div class="class-value" id="classStrengths">—</div>
-        </div>
-
-        <div class="class-block">
-          <div class="class-label">Weakness</div>
-          <div class="class-value" id="classWeakness">—</div>
-        </div>
-      </div>
-
-        <div class="discipline-preview">
-          <div class="class-title" style="margin-top:12px;">Disciplines</div>
-          <div class="discipline-list" id="disciplineList"></div>
-        </div>
-
-      <div class="class-stats">
-        <div class="class-title" style="margin-top:10px;">Starting Attributes</div>
-
-        <div class="stats-row" id="statsRow"></div>
-
-        <div class="scaling-row">
-          <div class="stat-chip">
-            <span class="stat-name">Damage Scaling</span>
-            <span class="stat-val" id="damageScaling">—</span>
-            <div class="tip">
-              <div class="tip-title">Damage Scaling</div>
-              <div class="tip-body" id="damageScalingTip">
-                Determines which attribute increases the damage of your attacks and skills.
-              </div>
+            <div class="class-block">
+              <div class="class-label">Weaknesses</div>
+              <div class="class-value" id="classWeakness">—</div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
-    </div>
 
+      <div class="creation-column">
+        <section class="path-panel">
+          <div class="section-kicker">3 · Discipline Preview</div>
+          <div class="discipline-preview">
+            <div class="class-title">Available Paths</div>
+            <div class="class-tagline">Your discipline is chosen later; this is the direction your class can grow.</div>
+          <div class="discipline-list" id="disciplineList"></div>
+          </div>
 
-    <button onclick="register()">Forge Character</button>
+          <div class="class-stats">
+            <div class="class-title">Starting Attributes</div>
 
-    <div id="msg"></div>
+            <div class="stats-row" id="statsRow"></div>
 
-    <div class="login-link">
-      <a href="/login.html">Return to Gate</a>
-    </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="action-footer">
+      <div id="msg"></div>
+      <button class="register-button" onclick="register()">Forge Character</button>
+      <div class="login-link">
+        <a href="/login.html">Return to Gate</a>
+      </div>
+    </footer>
   </div>
 
   <script>
@@ -576,34 +760,34 @@
 const CLASS_INFO = {
   Warrior: {
     title: "Warrior",
-    tagline: "A martial combatant who relies on strength, armor, weapons, and battlefield discipline.",
-    role: "Protector / Damage / Support",
-    strengths: "🛡 Strong defense, ❤️ High HP, ⚔ Martial versatility",
-    weakness: "✨ Limited magical utility"
+    tagline: "A battle-hardened martial combatant who controls the front line through armor, aggression, and command.",
+    role: "Frontline Protector, Melee Damage, or Battle Leader",
+    strengths: "Durability, close-range pressure, threat control, and party-wide commands",
+    weakness: "Limited magical reach, cleansing, and dedicated healing"
   },
 
   Cleric: {
     title: "Cleric",
-    tagline: "A divine combatant who channels sacred power to heal, protect, and judge their enemies.",
-    role: "Protector / Damage / Heal",
-    strengths: "✨ Healing, 🛡 Divine protection, ⚔ Holy offense",
-    weakness: "🏃 Lower agility"
+    tagline: "A divine champion who protects life, restores the wounded, and condemns enemies with sacred power.",
+    role: "Holy Protector, Divine Damage, or Primary Healer",
+    strengths: "Powerful healing, barriers, death prevention, cleansing, and holy combinations",
+    weakness: "Lower agility and strong reliance on mana and cooldown timing"
   },
 
   Mage: {
     title: "Mage",
-    tagline: "An arcane practitioner who manipulates elemental, vital, and void energies.",
-    role: "Protector / Damage / Heal",
-    strengths: "🧠 High intellect, ✨ Powerful spells, 🔮 Arcane versatility",
-    weakness: "❤️ Lower physical durability"
+    tagline: "An arcane specialist who bends elemental, void, and vital forces into powerful battlefield magic.",
+    role: "Arcane Protector, Spell Damage, or Unconventional Healer",
+    strengths: "Burst damage, area attacks, magical control, barriers, and life manipulation",
+    weakness: "Low physical durability and heavy dependence on mana and spell cooldowns"
   },
 
   Warden: {
     title: "Warden",
-    tagline: "A guardian of the wild who combines survival, ranged combat, natural resilience, and restorative wisdom.",
-    role: "Protector / Damage / Heal",
-    strengths: "🏹 Ranged combat, 🌿 Natural support, 🏃 High agility",
-    weakness: "🛡 Moderate armor"
+    tagline: "A guardian of the wild who fights through natural resilience, ranged precision, and restorative growth.",
+    role: "Nature Protector, Ranged Damage, or Sustained Healer",
+    strengths: "High agility, regeneration, battlefield control, ranged pressure, and durable support",
+    weakness: "Moderate armor and many abilities favor setup or sustained combat over instant impact"
   }
 };
 
@@ -611,60 +795,60 @@ const DISCIPLINE_INFO = {
   Warrior: [
     {
       name: "Knight",
-      desc: "A defensive warrior focused on shields, interception, and protecting allies."
+      desc: "A shield-bearing tank who weakens enemies, guards allies, intercepts attacks, and anchors the party behind powerful defensive formations."
     },
     {
       name: "Berserker",
-      desc: "An aggressive warrior focused on rage, bleeding, and relentless melee damage."
+      desc: "A relentless melee fighter who embraces risk, bleeding, frenzy, and wounded-target executions to overwhelm enemies before they can recover."
     },
     {
       name: "Warlord",
-      desc: "A tactical warrior focused on commands, banners, and empowering allies."
+      desc: "A battlefield commander who rallies allies, controls threat, marks priority targets, plants war banners, and accelerates the entire party toward victory."
     }
   ],
 
   Cleric: [
     {
       name: "Paladin",
-      desc: "A holy protector focused on sacred barriers, mitigation, and defensive blessings."
+      desc: "A holy tank who builds threat with sacred strikes, shields allies, strengthens party damage, reduces devastating attacks, and prevents death itself."
     },
     {
       name: "Templar",
-      desc: "An offensive cleric focused on judgment, holy strikes, and divine punishment."
+      desc: "A divine damage dealer who brands enemies with Judgment, burns them with sacred fire, exploits their sentence, and finishes the condemned with powerful executions."
     },
     {
       name: "Priest",
-      desc: "A restorative cleric focused on healing, cleansing, blessings, and divine support."
+      desc: "A dedicated healer who combines efficient healing, regeneration, fortifying blessings, cleansing, and life-saving intervention when an ally nears defeat."
     }
   ],
 
   Mage: [
     {
       name: "Voidwalker",
-      desc: "A protective mage focused on void barriers, spatial manipulation, and damage suppression."
+      desc: "An arcane protector who absorbs damage with void barriers, slows enemy actions, redirects harm through folded space, and suppresses entire battlefields."
     },
     {
       name: "Elementalist",
-      desc: "A destructive mage focused on fire, frost, lightning, and elemental combinations."
+      desc: "An explosive spellcaster who combines quick arcane attacks, freezing control, heavy fire damage, chain lightning, burning fields, and catastrophic area destruction."
     },
     {
       name: "Bloodweaver",
-      desc: "A restorative mage focused on blood magic, life transfer, bonds, and healing."
+      desc: "A life-manipulating healer who mends through blood magic, sustains allies with vital bonds, converts enemy health into healing, and risks their own vitality to save others."
     }
   ],
 
   Warden: [
     {
       name: "Sentinel",
-      desc: "A natural protector focused on resilience, roots, defensive spirits, and battlefield control."
+      desc: "A nature-bound tank who weakens and roots enemies, hardens allies with living bark, shelters the party beneath ancient spirits, and becomes an enduring forest guardian."
     },
     {
       name: "Ranger",
-      desc: "A ranged attacker focused on precision shots, poison, mobility, and survival tactics."
+      desc: "A precise ranged attacker who maintains pressure with rapid shots and poison, strikes vulnerable targets, rains arrows across groups, pierces armor, and executes weakened prey."
     },
     {
       name: "Sage",
-      desc: "A natural healer focused on regeneration, herbs, cleansing, and restorative magic."
+      desc: "A sustained nature healer who restores allies directly and over time, cleanses physical ailments, nurtures group regeneration, and calls upon the wild for sweeping recovery."
     }
   ]
 };
@@ -693,7 +877,7 @@ const DISCIPLINE_INFO = {
 
       intellect: {
         label: "Intellect",
-        desc: "Increases maximum mana and spell critical hit chance."
+        desc: "Increases maximum mana, spell damage, spell healing, and spell critical hit chance."
       },
 
       crit: {
@@ -702,27 +886,17 @@ const DISCIPLINE_INFO = {
       },
 
       hpoints: {
-        label: "HP",
+        label: "Health",
         desc: "Health Points. When this reaches 0, you are defeated."
       },
 
       spoints: {
-        label: "SP",
+        label: "Mana",
         desc: "Mana used to cast abilities. "
       }    };
 
     // DB rows keyed by class name
     const DB_CLASSES = new Map();
-
-    // Damage scaling rule (front-end). Recommended: move to DB as damage_stat later.
-    function getDamageScalingStat(className) {
-      const row = DB_CLASSES.get(className);
-      if (row?.damage_stat) {
-        return String(row.damage_stat).charAt(0).toUpperCase() + String(row.damage_stat).slice(1);
-      }
-
-      return "Attack";
-    }
 
     function renderStatsFromDb(dbRow) {
       const statsRow = document.getElementById("statsRow");
@@ -770,17 +944,6 @@ const DISCIPLINE_INFO = {
       renderStatsFromDb(dbRow);
       renderDisciplines(className);
 
-      const scale = getDamageScalingStat(className);
-      document.getElementById("damageScaling").textContent = scale;
-
-      const scalingDescriptions = {
-        Attack: "Your martial attacks and physical skills gain additional damage from Attack.",
-        Agility: "Your precision attacks and Warden skills gain additional damage from Agility.",
-        Intellect: "Your spells and magical skills gain additional damage from Intellect."
-      };
-
-      document.getElementById("damageScalingTip").textContent =
-        scalingDescriptions[scale] || `${scale} increases the effectiveness of your primary attacks and skills.`;
     }
 
     async function loadClasses() {

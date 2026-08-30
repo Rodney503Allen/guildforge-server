@@ -182,6 +182,18 @@ export async function applyBuff(
   const normalizedStat = stat.toLowerCase();
   const normalizedSource = source ?? null;
 
+  // Until player debuffs have their own table/service, negative player
+  // stat effects are represented by player_buffs. Purify's Sacred Immunity
+  // uses this stable gate now and can later be moved into playerDebuffService.
+  if (Number(value) < 0) {
+    const [immunity]: any = await db.query(`
+      SELECT id FROM player_status_effects
+      WHERE player_id = ? AND effect_key = 'cleanse_immunity_all'
+        AND expires_at > NOW(3) LIMIT 1
+    `, [playerId]);
+    if (immunity?.length) return;
+  }
+
   // 1️⃣ Remove existing buff from SAME source on SAME stat
   await db.query(`
     DELETE FROM player_buffs

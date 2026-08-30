@@ -1,6 +1,11 @@
 //src/trainer.routes.ts
 import express from "express";
 import { db } from "./db";
+import {
+  learnSpellTalent,
+  SpellProgressionError,
+  trainNextSpellRank
+} from "./services/spellProgressionService";
 
 const router = express.Router();
 
@@ -189,6 +194,8 @@ router.get("/", requireLogin, async (req: any, res: any) => {
   const playerSkillPoints = Number(player.skill_points || 0);
   const playerLevel = Number(player.level || 1);
   const classColor = String(player.class_color || "#c8a34b");
+  const trainerSuccess = String(req.query?.success || "").trim();
+  const trainerError = String(req.query?.error || "").trim();
 
   const [spells]: any = await db.query(
       `
@@ -209,11 +216,117 @@ router.get("/", requireLogin, async (req: any, res: any) => {
   );
 
   const [knownRows]: any = await db.query(
-    `SELECT spell_id FROM player_spells WHERE player_id=?`,
+    `
+      SELECT spell_id, skill_level
+      FROM player_spells
+      WHERE player_id = ?
+    `,
     [pid]
   );
 
-  const known = new Set<number>(knownRows.map((r: any) => Number(r.spell_id)));
+  const knownRanks = new Map<number, number>();
+
+  for (const row of knownRows) {
+    knownRanks.set(
+      Number(row.spell_id),
+      Math.max(1, Number(row.skill_level) || 1)
+    );
+  }
+
+  const [rankRows]: any = await db.query(
+    `
+      SELECT
+        sr.spell_id,
+        sr.spell_rank,
+        sr.required_level,
+        sr.skill_point_cost
+      FROM players p
+      JOIN disciplines d
+        ON d.class_id = p.class_id
+       AND d.is_active = 1
+      JOIN spells s
+        ON s.discipline_id = d.id
+      JOIN spell_ranks sr
+        ON sr.spell_id = s.id
+      WHERE p.id = ?
+    `,
+    [pid]
+  );
+
+  const rankDefinitions = new Map<string, any>();
+
+  for (const row of rankRows) {
+    rankDefinitions.set(
+      `${Number(row.spell_id)}:${Number(row.spell_rank)}`,
+      row
+    );
+  }
+
+  const [talentRows]: any = await db.query(
+    `
+      SELECT
+        st.id,
+        st.spell_id,
+        st.name,
+        st.description,
+        st.required_level,
+        st.required_spell_rank,
+        st.skill_point_cost,
+        st.tier,
+        st.position,
+        st.choice_group,
+        st.prerequisite_talent_id,
+        CASE
+          WHEN pst.talent_id IS NULL THEN 0
+          ELSE 1
+        END AS selected
+      FROM players p
+      JOIN disciplines d
+        ON d.class_id = p.class_id
+       AND d.is_active = 1
+      JOIN spells s
+        ON s.discipline_id = d.id
+      JOIN spell_talents st
+        ON st.spell_id = s.id
+       AND st.is_active = 1
+      LEFT JOIN player_spell_talents pst
+        ON pst.player_id = p.id
+       AND pst.talent_id = st.id
+      WHERE p.id = ?
+      ORDER BY
+        st.spell_id,
+        st.tier,
+        st.position,
+        st.id
+    `,
+    [pid]
+  );
+
+  const selectedTalentIds = new Set<number>();
+  const selectedChoiceGroups = new Map<string, number>();
+  const talentsBySpell = new Map<number, any[]>();
+
+  for (const talent of talentRows) {
+    const talentId = Number(talent.id);
+    const spellId = Number(talent.spell_id);
+
+    if (!talentsBySpell.has(spellId)) {
+      talentsBySpell.set(spellId, []);
+    }
+
+    talentsBySpell.get(spellId)!.push(talent);
+
+    if (Number(talent.selected) === 1) {
+      selectedTalentIds.add(talentId);
+
+      if (talent.choice_group) {
+        selectedChoiceGroups.set(
+          `${spellId}:${String(talent.choice_group)}`,
+          talentId
+        );
+      }
+    }
+  }
 
   const spellsByDiscipline = new Map<string, any>();
 
@@ -234,13 +347,26 @@ router.get("/", requireLogin, async (req: any, res: any) => {
 const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
   const cards = group.spells.map((s: any, index: number) => {
     const sid = Number(s.id);
-    const reqLevel = Number(s.level || 1);
-    const skillPointCost = Number(s.skill_point_cost || 1);
-    const learned = known.has(sid);
+    const currentRank = knownRanks.get(sid) ?? 0;
+    const nextRank = Math.min(3, currentRank + 1);
+    const mastered = currentRank >= 3;
+    const nextRankDefinition = rankDefinitions.get(`${sid}:${nextRank}`);
+    const reqLevel = Number(
+      nextRankDefinition?.required_level ?? s.level ?? 1
+    );
+    const skillPointCost = Number(
+      nextRankDefinition?.skill_point_cost ?? s.skill_point_cost ?? 1
+    );
     const meetsLevel = playerLevel >= reqLevel;
     const canAfford = playerSkillPoints >= skillPointCost;
 
-    const state = learned ? "learned" : !meetsLevel ? "locked" : !canAfford ? "cantafford" : "available";
+    const state = mastered
+      ? "learned"
+      : !meetsLevel
+        ? "locked"
+        : !canAfford
+          ? "cantafford"
+          : "available";
     const name = titleCaseName(s.name);
     const desc = s.description || "A mysterious spell known by class trainers.";
     const icon = resolveIcon(s.icon);
@@ -248,19 +374,20 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
     const meta = buildSpellMeta(s);
     const rows = buildSpellRows(s);
 
-    const actionHtml = learned
-      ? `<div class="status learned"><span class="dot"></span>Learned</div>`
+    const actionHtml = mastered
+      ? `<div class="status learned"><span class="dot"></span>Rank 3 Mastered</div>`
       : !meetsLevel
-        ? `<div class="status locked"><span class="dot"></span>Requires Lv ${reqLevel}</div>`
+        ? `<div class="status locked"><span class="dot"></span>Rank ${nextRank} requires Lv ${reqLevel}</div>`
         : !canAfford
           ? `<div class="status locked"><span class="dot"></span>Need ${skillPointCost} Skill Point${skillPointCost === 1 ? "" : "s"}</div>`
-          : `<a class="btn train-btn" href="/trainer/learn/${sid}">Learn Skill</a>`;
+          : `<a class="btn train-btn" href="/trainer/learn/${sid}">${currentRank === 0 ? "Learn Skill" : `Upgrade to Rank ${nextRank}`}</a>`;
 
     return `
       <article
         class="spell-card ${index === 0 ? "is-selected" : ""}"
         tabindex="0"
         data-spell-card="1"
+        data-spell-id="${sid}"
         data-state="${esc(state)}"
         data-type="${esc(String(s.type || ""))}"
         data-icon="${attr(icon)}"
@@ -288,6 +415,7 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
             </div>
             <div class="spell-sub">
               <span class="pillMini">Lv ${reqLevel}</span>
+              <span class="pillMini">Rank ${currentRank}/3</span>
               <span class="pillMini">${skillPointCost} SPt</span>
               <span class="pillMini">${esc(String(s.type || "skill"))}</span>
             </div>
@@ -315,6 +443,186 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
     </section>
   `;
 }).join("");
+
+  function getTalentState(talent: any) {
+    const talentId = Number(talent.id);
+    const spellId = Number(talent.spell_id);
+    const currentSpellRank = knownRanks.get(spellId) ?? 0;
+    const selected = selectedTalentIds.has(talentId);
+    const requiredLevel = Number(talent.required_level || 1);
+    const requiredRank = Number(talent.required_spell_rank || 1);
+    const cost = Number(talent.skill_point_cost || 1);
+
+    const selectedInGroup = talent.choice_group
+      ? selectedChoiceGroups.get(
+          `${spellId}:${String(talent.choice_group)}`
+        )
+      : undefined;
+
+    if (selected) {
+      return { state: "selected", reason: "Selected", cost };
+    }
+
+    if (currentSpellRank === 0) {
+      return { state: "locked", reason: "Learn the spell first", cost };
+    }
+
+    if (playerLevel < requiredLevel) {
+      return { state: "locked", reason: `Requires Level ${requiredLevel}`, cost };
+    }
+
+    if (currentSpellRank < requiredRank) {
+      return { state: "locked", reason: `Requires Rank ${requiredRank}`, cost };
+    }
+
+    if (
+      talent.prerequisite_talent_id !== null &&
+      !selectedTalentIds.has(Number(talent.prerequisite_talent_id))
+    ) {
+      return { state: "locked", reason: "Previous talent required", cost };
+    }
+
+    if (selectedInGroup && selectedInGroup !== talentId) {
+      return { state: "conflict", reason: "Alternate choice selected", cost };
+    }
+
+    if (playerSkillPoints < cost) {
+      return { state: "locked", reason: `Requires ${cost} skill point${cost === 1 ? "" : "s"}`, cost };
+    }
+
+    return { state: "available", reason: "Available", cost };
+  }
+
+  function renderTalentNode(talent: any, major = false) {
+    if (!talent) {
+      return `<div class="talent-node talent-node-empty locked" aria-hidden="true">—</div>`;
+    }
+
+    const status = getTalentState(talent);
+    const label = `${talent.name}: ${talent.description} — ${status.reason}`;
+    const symbol = status.state === "selected"
+      ? "✓"
+      : status.state === "available"
+        ? "+"
+        : "🔒";
+
+    return `
+      <button
+        type="button"
+        class="talent-node ${esc(status.state)} ${major ? "major" : ""}"
+        data-talent-node="1"
+        data-talent-id="${Number(talent.id)}"
+        data-talent-name="${attr(talent.name)}"
+        data-talent-description="${attr(talent.description)}"
+        data-talent-state="${esc(status.state)}"
+        data-talent-reason="${attr(status.reason)}"
+        data-talent-level="${Number(talent.required_level)}"
+        data-talent-rank="${Number(talent.required_spell_rank)}"
+        data-talent-cost="${Number(talent.skill_point_cost)}"
+        title="${attr(label)}"
+        aria-label="${attr(label)}"
+      >${symbol}</button>
+    `;
+  }
+
+  function renderTalentPanel(spell: any, initial: boolean) {
+    const spellId = Number(spell.id);
+    const talents = talentsBySpell.get(spellId) ?? [];
+    const tierOne = talents
+      .filter(talent => Number(talent.tier) === 1)
+      .sort((a, b) => Number(a.position) - Number(b.position));
+
+    const rootLeft = tierOne[0] ?? null;
+    const rootRight = tierOne[1] ?? null;
+
+    const childrenFor = (parent: any) => talents
+      .filter(
+        talent =>
+          Number(talent.tier) > 1 &&
+          parent &&
+          Number(talent.prerequisite_talent_id) === Number(parent.id)
+      )
+      .sort((a, b) => Number(a.position) - Number(b.position))
+      .slice(0, 2);
+
+    const leftChildren = childrenFor(rootLeft);
+    const rightChildren = childrenFor(rootRight);
+
+    return `
+      <div
+        class="spell-talent-panel"
+        data-talent-panel="${spellId}"
+        ${initial ? "" : "hidden"}
+      >
+        <div class="talent-selected-spell">
+          <strong>${esc(titleCaseName(spell.name))}</strong>
+          <span>Rank ${knownRanks.get(spellId) ?? 0}/3</span>
+        </div>
+
+        ${talents.length === 0
+          ? `<div class="empty">No talents have been configured for this spell yet.</div>`
+          : `
+            <div class="talent-preview talent-branch-tree">
+              <div class="talent-tier talent-tier-one">
+                <div class="talent-path path-left">
+                  ${renderTalentNode(rootLeft, true)}
+                </div>
+                <div class="talent-path path-right">
+                  ${renderTalentNode(rootRight, true)}
+                </div>
+              </div>
+
+              <div class="talent-connector left-child-one"></div>
+              <div class="talent-connector left-child-two"></div>
+              <div class="talent-connector right-child-one"></div>
+              <div class="talent-connector right-child-two"></div>
+
+              <div class="talent-tier talent-tier-two">
+                <div class="talent-child-group left-children">
+                  ${renderTalentNode(leftChildren[0])}
+                  ${renderTalentNode(leftChildren[1])}
+                </div>
+                <div class="talent-child-group right-children">
+                  ${renderTalentNode(rightChildren[0])}
+                  ${renderTalentNode(rightChildren[1])}
+                </div>
+              </div>
+            </div>
+
+            <section class="talent-inspector" data-talent-inspector>
+              <div class="talent-inspector-copy">
+                <span class="talent-inspector-kicker">Select a talent node</span>
+                <h3 data-talent-detail-name>Talent Details</h3>
+                <p data-talent-detail-description>
+                  Choose a node above to review its effect and requirements.
+                </p>
+                <div class="talent-inspector-meta" data-talent-detail-meta></div>
+                <div class="talent-inspector-status" data-talent-detail-status></div>
+              </div>
+
+              <form
+                class="talent-apply-form"
+                data-talent-apply-form
+                method="post"
+                action=""
+                hidden
+              >
+                <button class="btn train-btn" type="submit" data-talent-apply-button>
+                  Apply Skill Point
+                </button>
+              </form>
+            </section>
+
+          `}
+      </div>
+    `;
+  }
+
+  const talentPanels = spells
+    .map((spell: any, index: number) =>
+      renderTalentPanel(spell, index === 0)
+    )
+    .join("");
 
   const firstSpell = spells[0];
   const firstName = firstSpell ? titleCaseName(firstSpell.name) : "Select a Spell";
@@ -357,6 +665,13 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
           <a class="btn danger" href="/town">Return to Town</a>
         </div>
       </header>
+
+      ${trainerSuccess
+        ? `<div class="trainer-message success">${esc(trainerSuccess)}</div>`
+        : ""}
+      ${trainerError
+        ? `<div class="trainer-message error">${esc(trainerError)}</div>`
+        : ""}
 
       <div class="trainer-grid">
         <section class="card spellbook-card frame-host">
@@ -419,105 +734,12 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
             <div class="cardHeader compact">
               <div class="cardTitle">
                 <h2>Talent Tree</h2>
-                <p>Unlock passive class power through future Talent Points.</p>
+                <p>Customize this spell using your shared Skill Points.</p>
               </div>
-              <span class="badge warn">Coming Soon</span>
+              <span class="badge good">Active</span>
             </div>
             <div class="cardBody">
-<div class="talent-preview talent-branch-tree">
-
-  <div class="talent-root" title="Selected Skill">
-    ✦
-  </div>
-
-  <div class="talent-connector root-left"></div>
-  <div class="talent-connector root-right"></div>
-
-  <div class="talent-tier talent-tier-one">
-
-    <div class="talent-path path-left">
-      <div
-        class="talent-node major locked"
-        data-talent-path="left"
-        data-talent-tier="1"
-        title="Primary Talent Path A"
-      >
-        🔒
-      </div>
-    </div>
-
-    <div class="talent-path path-right">
-      <div
-        class="talent-node major locked"
-        data-talent-path="right"
-        data-talent-tier="1"
-        title="Primary Talent Path B"
-      >
-        🔒
-      </div>
-    </div>
-
-  </div>
-
-  <div class="talent-connector left-child-one"></div>
-  <div class="talent-connector left-child-two"></div>
-  <div class="talent-connector right-child-one"></div>
-  <div class="talent-connector right-child-two"></div>
-
-  <div class="talent-tier talent-tier-two">
-
-    <div class="talent-child-group left-children">
-      <div
-        class="talent-node locked"
-        data-talent-path="left"
-        data-talent-tier="2"
-        data-talent-choice="1"
-        title="Path A Upgrade 1"
-      >
-        🔒
-      </div>
-
-      <div
-        class="talent-node locked"
-        data-talent-path="left"
-        data-talent-tier="2"
-        data-talent-choice="2"
-        title="Path A Upgrade 2"
-      >
-        🔒
-      </div>
-    </div>
-
-    <div class="talent-child-group right-children">
-      <div
-        class="talent-node locked"
-        data-talent-path="right"
-        data-talent-tier="2"
-        data-talent-choice="1"
-        title="Path B Upgrade 1"
-      >
-        🔒
-      </div>
-
-      <div
-        class="talent-node locked"
-        data-talent-path="right"
-        data-talent-tier="2"
-        data-talent-choice="2"
-        title="Path B Upgrade 2"
-      >
-        🔒
-      </div>
-    </div>
-
-  </div>
-
-</div>              </div>
-
-              <div class="talent-note">
-                <strong>Passive Skill Tree</strong>
-                <p>Talents will let each class specialize through passive bonuses, spell modifiers, and build-defining effects.</p>
-              </div>
+              ${talentPanels}
             </div>
           </section>
         </aside>
@@ -536,118 +758,56 @@ router.get("/learn/:id", requireLogin, async (req: any, res: any) => {
     return res.redirect("/trainer");
   }
 
-  const conn = await db.getConnection();
-
   try {
-    await conn.beginTransaction();
+    const result = await trainNextSpellRank(pid, spellId);
 
-    const [[player]]: any = await conn.query(
-      `
-        SELECT
-          class_id,
-          skill_points,
-          level
-        FROM players
-        WHERE id = ?
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [pid]
+    return res.redirect(
+      `/trainer?success=${encodeURIComponent(`Spell advanced to Rank ${result.newRank}.`)}`
     );
-
-    if (!player) {
-      await conn.rollback();
-      return res.redirect("/login.html");
-    }
-
-    const [[spell]]: any = await conn.query(
-      `
-        SELECT
-          s.id,
-          s.level,
-          s.skill_point_cost
-        FROM disciplines d
-        JOIN spells s
-          ON s.discipline_id = d.id
-        WHERE d.class_id = ?
-          AND d.is_active = 1
-          AND s.id = ?
-        LIMIT 1
-      `,
-      [player.class_id, spellId]
-    );
-
-    if (!spell) {
-      await conn.rollback();
-      return res.redirect("/trainer");
-    }
-
-    const [[known]]: any = await conn.query(
-      `
-        SELECT spell_id
-        FROM player_spells
-        WHERE player_id = ?
-          AND spell_id = ?
-        LIMIT 1
-      `,
-      [pid, spellId]
-    );
-
-    if (known) {
-      await conn.rollback();
-      return res.redirect("/trainer");
-    }
-
-    const requiredLevel = Number(spell.level || 1);
-    const skillPointCost = Number(spell.skill_point_cost || 1);
-    const playerLevel = Number(player.level || 1);
-    const availableSkillPoints = Number(player.skill_points || 0);
-
-    if (
-      playerLevel < requiredLevel ||
-      availableSkillPoints < skillPointCost
-    ) {
-      await conn.rollback();
-      return res.redirect("/trainer");
-    }
-
-    const [spendResult]: any = await conn.query(
-      `
-        UPDATE players
-        SET skill_points = skill_points - ?
-        WHERE id = ?
-          AND skill_points >= ?
-      `,
-      [skillPointCost, pid, skillPointCost]
-    );
-
-    if (spendResult.affectedRows !== 1) {
-      throw new Error("Failed to spend skill points");
-    }
-
-    const [learnResult]: any = await conn.query(
-      `
-        INSERT IGNORE INTO player_spells
-          (player_id, spell_id)
-        VALUES
-          (?, ?)
-      `,
-      [pid, spellId]
-    );
-
-    if (learnResult.affectedRows !== 1) {
-      throw new Error("Failed to learn skill");
-    }
-
-    await conn.commit();
   } catch (err) {
-    await conn.rollback();
-    console.error("Failed to learn skill:", err);
-  } finally {
-    conn.release();
-  }
+    if (err instanceof SpellProgressionError) {
+      return res.redirect(
+        `/trainer?error=${encodeURIComponent(err.message)}`
+      );
+    }
 
-  return res.redirect("/trainer");
+    console.error("Failed to train spell rank:", err);
+    return res.redirect(
+      `/trainer?error=${encodeURIComponent("Unable to train that spell right now.")}`
+    );
+  }
 });
+
+router.post(
+  "/talents/learn/:id",
+  requireLogin,
+  async (req: any, res: any) => {
+    const pid = Number(req.session.playerId);
+    const talentId = Number(req.params.id);
+
+    if (!Number.isInteger(talentId) || talentId <= 0) {
+      return res.redirect("/trainer");
+    }
+
+    try {
+      await learnSpellTalent(pid, talentId);
+
+      return res.redirect(
+        `/trainer?success=${encodeURIComponent("Talent learned.")}`
+      );
+    } catch (err) {
+      if (err instanceof SpellProgressionError) {
+        return res.redirect(
+          `/trainer?error=${encodeURIComponent(err.message)}`
+        );
+      }
+
+      console.error("Failed to learn spell talent:", err);
+      return res.redirect(
+        `/trainer?error=${encodeURIComponent("Unable to learn that talent right now.")}`
+      );
+    }
+  }
+);
 
 export default router;

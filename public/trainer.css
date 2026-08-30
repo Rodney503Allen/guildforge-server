@@ -635,7 +635,7 @@ body::before{
 .talent-branch-tree {
   position: relative;
   width: 100%;
-  min-height: 310px;
+  min-height: 210px;
   padding: 22px 18px 18px;
 
   display: flex;
@@ -643,34 +643,6 @@ body::before{
   align-items: center;
 
   overflow: hidden;
-}
-
-.talent-root {
-  position: relative;
-  z-index: 3;
-
-  width: 58px;
-  height: 58px;
-
-  display: grid;
-  place-items: center;
-
-  border: 1px solid rgba(200, 163, 75, .75);
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle,
-      rgba(200, 163, 75, .22),
-      rgba(0, 0, 0, .58)
-    );
-
-  color: #e5c66f;
-  font-size: 25px;
-
-  box-shadow:
-    0 0 20px rgba(200, 163, 75, .20),
-    inset 0 0 14px rgba(0, 0, 0, .72);
 }
 
 .talent-tier {
@@ -686,7 +658,7 @@ body::before{
   gap: 90px;
 
   max-width: 360px;
-  margin-top: 46px;
+  margin-top: 0;
 }
 
 .talent-tier-two {
@@ -788,6 +760,125 @@ body::before{
     inset 0 0 13px rgba(0, 0, 0, .65);
 }
 
+.talent-node.conflict {
+  cursor: not-allowed;
+  opacity: .48;
+  filter: grayscale(.7);
+  border-color: rgba(130, 138, 150, .55);
+}
+
+.talent-node-empty {
+  visibility: hidden;
+}
+
+.talent-node-form {
+  display: contents;
+  margin: 0;
+}
+
+.talent-node-form button {
+  font: inherit;
+}
+
+.spell-talent-panel[hidden] {
+  display: none !important;
+}
+
+.talent-selected-spell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(200, 163, 75, .22);
+  background: rgba(0, 0, 0, .22);
+}
+
+.talent-selected-spell strong {
+  color: var(--class-color);
+  font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
+}
+
+.talent-selected-spell span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.talent-summary-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.talent-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  background: rgba(0, 0, 0, .20);
+}
+
+.talent-summary.selected {
+  border-color: rgba(59, 209, 138, .30);
+  background: rgba(59, 209, 138, .06);
+}
+
+.talent-summary.available {
+  border-color: rgba(200, 163, 75, .30);
+}
+
+.talent-summary.conflict,
+.talent-summary.locked {
+  opacity: .72;
+}
+
+.talent-summary-copy strong {
+  color: var(--ink);
+}
+
+.talent-summary-copy p {
+  margin: 4px 0 6px;
+  color: rgba(215, 219, 226, .88);
+  line-height: 1.4;
+  font-size: 13px;
+}
+
+.talent-summary-copy span,
+.talent-summary-state {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.talent-summary.selected .talent-summary-state {
+  color: rgba(59, 209, 138, .98);
+}
+
+.talent-summary.available .talent-summary-state {
+  color: rgba(229, 198, 111, .98);
+}
+
+.trainer-message {
+  margin: 0 18px 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(0, 0, 0, .28);
+  font-weight: 800;
+}
+
+.trainer-message.success {
+  color: rgba(59, 209, 138, .98);
+  border-color: rgba(59, 209, 138, .30);
+}
+
+.trainer-message.error {
+  color: rgba(255, 118, 118, .98);
+  border-color: rgba(255, 118, 118, .30);
+}
+
 /* Branch lines */
 .talent-connector {
   position: absolute;
@@ -798,43 +889,29 @@ body::before{
   transform-origin: left center;
 }
 
-.root-left {
-  top: 94px;
-  left: 50%;
-  width: 112px;
-  transform: rotate(150deg);
-}
-
-.root-right {
-  top: 94px;
-  left: 50%;
-  width: 112px;
-  transform: rotate(30deg);
-}
-
 .left-child-one {
-  top: 194px;
+  top: 90px;
   left: calc(50% - 109px);
   width: 86px;
   transform: rotate(135deg);
 }
 
 .left-child-two {
-  top: 194px;
+  top: 90px;
   left: calc(50% - 109px);
   width: 86px;
   transform: rotate(45deg);
 }
 
 .right-child-one {
-  top: 194px;
+  top: 90px;
   left: calc(50% + 109px);
   width: 86px;
   transform: rotate(135deg);
 }
 
 .right-child-two {
-  top: 194px;
+  top: 90px;
   left: calc(50% + 109px);
   width: 86px;
   transform: rotate(45deg);
@@ -861,6 +938,11 @@ body::before{
   .talent-node.major {
     width: 52px;
     height: 52px;
+  }
+
+  .talent-summary {
+    grid-template-columns: 1fr;
+    gap: 7px;
   }
 }
 .empty{
@@ -1066,4 +1148,99 @@ body::before{
 
 .spell-card[data-state="locked"] .status{
   background:rgba(0,0,0,.38);
+}
+
+/* =========================
+   TALENT INSPECTOR
+   ========================= */
+
+.talent-node,
+.talent-node.selected,
+.talent-node.conflict,
+.talent-node.locked {
+  cursor: pointer;
+}
+
+.talent-node.is-inspected {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--class-color) 24%, transparent),
+    0 0 22px color-mix(in srgb, var(--class-color) 30%, transparent),
+    inset 0 0 13px rgba(0, 0, 0, .70);
+}
+
+.talent-summary.is-inspected {
+  border-color: color-mix(in srgb, var(--class-color) 58%, transparent);
+  background: color-mix(in srgb, var(--class-color) 8%, rgba(0, 0, 0, .20));
+}
+
+.talent-inspector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--class-color) 34%, transparent);
+  background: rgba(0, 0, 0, .28);
+}
+
+.talent-inspector-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.talent-inspector h3 {
+  margin: 0 0 6px;
+  color: var(--class-color);
+  font-family: Cinzel, ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 17px;
+}
+
+.talent-inspector p {
+  margin: 0;
+  color: rgba(215, 219, 226, .92);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.talent-inspector-meta {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.talent-inspector-status {
+  margin-top: 5px;
+  color: rgba(255, 204, 102, .98);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.talent-inspector-status[data-state="available"] {
+  color: rgba(229, 198, 111, .98);
+}
+
+.talent-inspector-status[data-state="selected"] {
+  color: rgba(59, 209, 138, .98);
+}
+
+.talent-apply-form[hidden] {
+  display: none !important;
+}
+
+.talent-apply-form {
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .talent-inspector {
+    grid-template-columns: 1fr;
+  }
 }

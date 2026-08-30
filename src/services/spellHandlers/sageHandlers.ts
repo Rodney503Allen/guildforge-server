@@ -4,858 +4,529 @@ import { db } from "../../db";
 import { applyBuff } from "../buffService";
 
 import {
+  SpellFriendlyTarget,
+  SpellHandlerContext,
   SpellHandlerDefinition,
   SpellHandlerResult
 } from "./types";
 
 import {
   applyHealingReceivedMultiplier,
-  calculateScaledSpellAmount,
+  calculateScaledHealingAmount,
   getConfiguredBuff
 } from "./helpers";
 
-
-// =====================================================
-// SHARED PLAYER HP NORMALIZATION
-// =====================================================
-
-function getCurrentPlayerHP(
-  player: any,
-  currentPlayerHP?: number
-): number {
-
-  return Math.max(
-    0,
-    Number(
-      currentPlayerHP ??
-      player?.hpoints ??
-      player?.hp ??
-      0
-    ) || 0
-  );
+function rankNumber(spell: any, key: string, fallback = 0): number {
+  const value = Number(spell?.rank_config?.[key]);
+  return Number.isFinite(value) ? value : fallback;
 }
 
+function singleTarget(context: SpellHandlerContext): SpellFriendlyTarget {
+  const targetId = Number(context.targetPlayerId ?? context.playerId);
+  const targetingSelf = targetId === Number(context.playerId);
+  const target = context.targetPlayer ?? context.player;
 
-function getMaximumPlayerHP(
-  player: any,
-  maxPlayerHP?: number
-): number {
-
-  return Math.max(
-    1,
-    Number(
-      maxPlayerHP ??
-      player?.maxhp ??
-      player?.maxHp ??
-      1
-    ) || 1
-  );
+  return {
+    playerId: targetId,
+    name: target?.name,
+    stats: target,
+    hp: Math.max(
+      0,
+      Number(
+        targetingSelf
+          ? context.currentPlayerHP ?? context.player?.hpoints ?? 0
+          : context.currentTargetHP ?? target?.hpoints ?? 0
+      ) || 0
+    ),
+    maxHp: Math.max(
+      1,
+      Number(
+        targetingSelf
+          ? context.maxPlayerHP ?? context.player?.maxhp ?? 1
+          : context.maxTargetHP ?? target?.maxhp ?? 1
+      ) || 1
+    ),
+    sp: Math.max(0, Number(target?.spoints) || 0),
+    maxSp: Math.max(0, Number(target?.maxspoints) || 0)
+  };
 }
 
+function livingTargets(context: SpellHandlerContext): SpellFriendlyTarget[] {
+  const allies = (context.allies ?? []).filter(ally => Number(ally.hp) > 0);
+  return allies.length > 0 ? allies : [singleTarget(context)];
+}
 
-// =====================================================
-// HERBAL REMEDY
-//
-// target_type = ally
-//
-// Removes physical harmful effects from the selected
-// ally.
-//
-// Falls back to caster in normal solo combat.
-// =====================================================
+async function healTarget(
+  target: SpellFriendlyTarget,
+  caster: any,
+  baseHealing: number
+) {
+  const scaled = calculateScaledHealingAmount(caster, baseHealing);
+  const potential = applyHealingReceivedMultiplier(target.stats, scaled);
+  const currentHP = Math.max(0, Number(target.hp) || 0);
+  const maxHP = Math.max(1, Number(target.maxHp) || 1);
+  const finalHP = Math.min(maxHP, currentHP + potential);
+  const actual = Math.max(0, finalHP - currentHP);
 
-export const herbalRemedyHandler:
-SpellHandlerDefinition = {
+  await db.query(
+    `UPDATE players SET hpoints = ? WHERE id = ?`,
+    [finalHP, target.playerId]
+  );
 
-  requiresEnemy:
-    false,
+  target.hp = finalHP;
+  if (target.stats) target.stats.hpoints = finalHP;
 
+  return {
+    actual,
+    potential,
+    overhealing: Math.max(0, potential - actual),
+    finalHP
+  };
+}
+
+async function applyHot(
+  target: SpellFriendlyTarget,
+  caster: any,
+  spell: any,
+  totalHealing: number,
+  sourceSuffix = ""
+) {
+  const duration = Math.max(0.1, Number(spell.dot_duration) || 1);
+  const tickInterval = Math.max(0.1, Number(spell.dot_tick_rate) || 1);
+  const totalTicks = Math.max(1, Math.floor(duration / tickInterval));
+  const scaledTotal = calculateScaledHealingAmount(caster, totalHealing);
+  const recipientTotal = applyHealingReceivedMultiplier(target.stats, scaledTotal);
+  const healingPerTick = Math.max(1, Math.floor(recipientTotal / totalTicks));
+  const source = `spell:${spell.id}${sourceSuffix}`;
+
+  await db.query(
+    `DELETE FROM player_hots WHERE player_id = ? AND source = ?`,
+    [target.playerId, source]
+  );
+
+  await db.query(
+    `
+      INSERT INTO player_hots
+        (player_id, healing, tick_interval, next_tick_at, expires_at, source, display_name)
+      VALUES
+        (?, ?, ?, DATE_ADD(NOW(3), INTERVAL ? SECOND),
+         DATE_ADD(NOW(3), INTERVAL ? SECOND), ?, ?)
+    `,
+    [
+      target.playerId,
+      healingPerTick,
+      tickInterval,
+      tickInterval,
+      duration,
+      source,
+      spell.name
+    ]
+  );
+
+  return healingPerTick * totalTicks;
+}
+
+async function bloomPlayerHots(
+  playerId: number,
+  bloomTicks: number,
+  extensionSeconds: number
+) {
+  const [rows]: any = await db.query(
+    `
+      SELECT ph.healing, p.hpoints, p.maxhp
+      FROM player_hots ph
+      JOIN players p ON p.id = ph.player_id
+      WHERE ph.player_id = ?
+        AND ph.expires_at > NOW(3)
+    `,
+    [playerId]
+  );
+
+  const currentHP = Math.max(0, Number(rows?.[0]?.hpoints) || 0);
+  const maxHP = Math.max(1, Number(rows?.[0]?.maxhp) || 1);
+  const rawBloom = (rows ?? []).reduce(
+    (sum: number, row: any) => sum + Math.max(0, Number(row.healing) || 0),
+    0
+  ) * Math.max(0, bloomTicks);
+  const finalHP = Math.min(maxHP, currentHP + rawBloom);
+  const actualHealing = Math.max(0, finalHP - currentHP);
+
+  if (actualHealing > 0) {
+    await db.query(`UPDATE players SET hpoints = ? WHERE id = ?`, [finalHP, playerId]);
+  }
+
+  if (extensionSeconds > 0) {
+    await db.query(
+      `
+        UPDATE player_hots
+        SET expires_at = DATE_ADD(expires_at, INTERVAL ? SECOND)
+        WHERE player_id = ?
+          AND expires_at > NOW(3)
+      `,
+      [extensionSeconds, playerId]
+    );
+  }
+
+  return {
+    actualHealing,
+    activeHots: (rows ?? []).length,
+    finalHP
+  };
+}
+
+async function acceleratePlayerHots(playerId: number, percent: number) {
+  const multiplier = Math.max(0.1, 1 - Math.max(0, percent) / 100);
+  const [rows]: any = await db.query(
+    `
+      SELECT id, tick_interval
+      FROM player_hots
+      WHERE player_id = ?
+        AND expires_at > NOW(3)
+    `,
+    [playerId]
+  );
+
+  for (const row of rows ?? []) {
+    const newInterval = Math.max(0.1, Number(row.tick_interval || 1) * multiplier);
+    await db.query(
+      `
+        UPDATE player_hots
+        SET tick_interval = ?,
+            next_tick_at = LEAST(
+              next_tick_at,
+              DATE_ADD(NOW(3), INTERVAL ? SECOND)
+            )
+        WHERE id = ?
+      `,
+      [newInterval, newInterval, row.id]
+    );
+  }
+
+  return (rows ?? []).length;
+}
+
+export const naturesTouchHandler: SpellHandlerDefinition = {
+  requiresEnemy: false,
 
   validate(spell) {
-
-    const buff =
-      getConfiguredBuff(
-        spell
-      );
-
-
-    if (
-      buff.stat !==
-      "cleanse_physical"
-    ) {
-
-      return (
-        `${spell.name} must use cleanse_physical`
-      );
-    }
-
-
-    return null;
+    return (Number(spell.heal) || 0) > 0
+      ? null
+      : `${spell.name} has invalid healing configuration`;
   },
 
-
-  async execute({
-    playerId,
-    spell,
-    targetPlayerId
-  }): Promise<SpellHandlerResult> {
-
-    const cleanseTargetId =
-      targetPlayerId ??
-      playerId;
-
-
-    let cleansedCount =
-      0;
-
-
-    // =================================================
-    // NEGATIVE PHYSICAL BUFFS
-    // =================================================
-
-    const [buffResult]: any =
-      await db.query(
-        `
-          DELETE FROM player_buffs
-
-          WHERE player_id = ?
-            AND value < 0
-            AND (
-              source LIKE 'poison:%'
-              OR source LIKE 'bleed:%'
-              OR source LIKE 'disease:%'
-              OR source LIKE 'physical:%'
-            )
-        `,
-        [
-          cleanseTargetId
-        ]
-      );
-
-
-    cleansedCount +=
-      Number(
-        buffResult.affectedRows
-      ) || 0;
-
-
-    // =================================================
-    // PHYSICAL STATUS EFFECTS
-    // =================================================
-
-    const [statusResult]: any =
-      await db.query(
-        `
-          DELETE FROM player_status_effects
-
-          WHERE player_id = ?
-            AND effect_key IN (
-              'poison',
-              'bleed',
-              'disease',
-              'physical_debuff'
-            )
-        `,
-        [
-          cleanseTargetId
-        ]
-      );
-
-
-    cleansedCount +=
-      Number(
-        statusResult.affectedRows
-      ) || 0;
-
-
-    // =================================================
-    // RESULT
-    // =================================================
-
-    const targetingSelf =
-      Number(
-        cleanseTargetId
-      ) ===
-      Number(
-        playerId
-      );
-
-
-    let log:
-      string;
-
-
-    if (
-      cleansedCount > 0
-    ) {
-
-      log =
-        targetingSelf
-          ? (
-              `🌿 You cast ${spell.name} and cleanse ` +
-              `${cleansedCount} physical ` +
-              `${
-                cleansedCount === 1
-                  ? "ailment"
-                  : "ailments"
-              }!`
-            )
-          : (
-              `🌿 You cast ${spell.name} and cleanse ` +
-              `${cleansedCount} physical ` +
-              `${
-                cleansedCount === 1
-                  ? "ailment"
-                  : "ailments"
-              } from your ally!`
-            );
-
-    } else {
-
-      log =
-        targetingSelf
-          ? (
-              `🌿 You cast ${spell.name}, but you have ` +
-              `no physical ailments to cleanse.`
-            )
-          : (
-              `🌿 You cast ${spell.name}, but your ally has ` +
-              `no physical ailments to cleanse.`
-            );
-    }
-
+  async execute(context): Promise<SpellHandlerResult> {
+    const target = singleTarget(context);
+    const healing = await healTarget(target, context.player, Number(context.spell.heal));
+    const gauge = Math.max(0, rankNumber(context.spell, "casterGaugeGain", 8));
 
     return {
-      log,
-
-      appliedStatus:
-        cleansedCount > 0
+      log: `🌿 ${context.spell.name} restores ${healing.actual} HP and grants ${gauge} action gauge!`,
+      healing: healing.actual,
+      potentialHealing: healing.potential,
+      overhealing: healing.overhealing,
+      healedTargetId: target.playerId,
+      healedTargetMaxHP: target.maxHp,
+      healedTargetHPAfter: healing.finalHP,
+      casterGaugeGain: gauge
     };
   }
 };
 
-
-// =====================================================
-// FLOURISH
-//
-// target_type = all_allies
-//
-// Grants increased healing received to every living
-// ally and strengthens each ally's active HoTs.
-// =====================================================
-
-export const flourishHandler:
-SpellHandlerDefinition = {
-
-  requiresEnemy:
-    false,
-
+export const rejuvenationHandler: SpellHandlerDefinition = {
+  requiresEnemy: false,
 
   validate(spell) {
-
-    const buff =
-      getConfiguredBuff(
-        spell
-      );
-
-
-    if (
-      buff.stat !==
-      "healing_received_pct"
-    ) {
-
-      return (
-        `${spell.name} must use healing_received_pct`
-      );
-    }
-
-
-    if (
-      buff.value <= 0
-    ) {
-
-      return (
-        `${spell.name} has an invalid healing bonus`
-      );
-    }
-
-
-    if (
-      buff.duration <= 0
-    ) {
-
-      return (
-        `${spell.name} has an invalid duration`
-      );
-    }
-
-
+    if ((Number(spell.heal) || 0) <= 0) return `${spell.name} has invalid healing`;
+    if ((Number(spell.dot_duration) || 0) <= 0) return `${spell.name} has invalid duration`;
+    if ((Number(spell.dot_tick_rate) || 0) <= 0) return `${spell.name} has invalid tick rate`;
     return null;
   },
 
+  async execute(context): Promise<SpellHandlerResult> {
+    const target = singleTarget(context);
+    const expectedHealing = await applyHot(
+      target,
+      context.player,
+      context.spell,
+      Number(context.spell.heal)
+    );
 
-  async execute({
-    playerId,
-    spell,
-    allies
-  }): Promise<SpellHandlerResult> {
-
-    const buff =
-      getConfiguredBuff(
-        spell
-      );
-
-
-    /*
-     * Hunt combat supplies allies[].
-     *
-     * Normal combat falls back to the caster.
-     */
-    const targetIds =
-      allies &&
-      allies.length > 0
-        ? allies
-            .filter(
-              ally =>
-                Number(
-                  ally.hp
-                ) > 0
+    return {
+      log: `🌱 ${context.spell.name} will restore up to ${expectedHealing} HP over ${context.spell.dot_duration}s!`,
+      healing: 0,
+      expectedHotHealing: expectedHealing,
+      hotHealingPerTick: Math.max(
+        1,
+        Math.floor(
+          expectedHealing /
+          Math.max(
+            1,
+            Math.floor(
+              Number(context.spell.dot_duration) /
+              Number(context.spell.dot_tick_rate)
             )
-            .map(
-              ally =>
-                Number(
-                  ally.playerId
-                )
-            )
-        : [
-            Number(
-              playerId
-            )
-          ];
+          )
+        )
+      ),
+      hotDuration: Number(context.spell.dot_duration),
+      healedTargetId: target.playerId,
+      healedTargetMaxHP: target.maxHp,
+      appliedStatus: true
+    };
+  }
+};
 
+export const herbalRemedyHandler: SpellHandlerDefinition = {
+  requiresEnemy: false,
 
-    if (
-      targetIds.length === 0
-    ) {
+  validate(spell) {
+    const buff = getConfiguredBuff(spell);
+    if (buff.stat !== "cleanse_physical") return `${spell.name} must use cleanse_physical`;
+    if ((Number(spell.heal) || 0) <= 0) return `${spell.name} has invalid healing`;
+    return null;
+  },
 
-      return {
-        log:
-          `🌸 You cast ${spell.name}, but there are ` +
-          `no living allies to affect.`,
+  async execute(context): Promise<SpellHandlerResult> {
+    const allTargets = String(context.spell.target_type).toLowerCase() === "all_allies";
+    const targets = allTargets ? livingTargets(context) : [singleTarget(context)];
+    const primaryId = Number(context.targetPlayerId ?? context.playerId);
+    const secondaryPercent = Math.max(0, rankNumber(context.spell, "secondaryHealingPercent", 60));
+    const cleanseAll = Boolean(context.spell.rank_config?.cleanseAllRemovable);
+    let cleansedCount = 0;
+    let totalHealing = 0;
+    let totalPotential = 0;
+    let totalOverhealing = 0;
+    const cleansedTargetIds: number[] = [];
+    const targetGaugeGains: Array<{ playerId: number; amount: number }> = [];
 
-        appliedStatus:
-          false
-      };
+    for (const target of targets) {
+      let targetCleansed = 0;
+
+    const [buffResult]: any = await db.query(
+      `
+        DELETE FROM player_buffs
+        WHERE player_id = ?
+          AND value < 0
+          AND ( ? = 1 OR
+            source LIKE 'poison:%' OR source LIKE 'bleed:%'
+            OR source LIKE 'disease:%' OR source LIKE 'physical:%'
+          )
+      `,
+      [target.playerId, cleanseAll ? 1 : 0]
+    );
+    targetCleansed += Number(buffResult.affectedRows) || 0;
+
+    const [statusResult]: any = await db.query(
+      `
+        DELETE FROM player_status_effects
+        WHERE player_id = ?
+          AND effect_key IN (
+            'poison', 'bleed', 'disease', 'physical_debuff',
+            'curse', 'magic_debuff', 'silence', 'stun', 'root', 'slow'
+          )
+          AND (? = 1 OR effect_key IN ('poison', 'bleed', 'disease', 'physical_debuff'))
+      `,
+      [target.playerId, cleanseAll ? 1 : 0]
+    );
+    targetCleansed += Number(statusResult.affectedRows) || 0;
+
+    const baseHeal = Number(context.spell.heal) * (
+      allTargets && target.playerId !== primaryId ? secondaryPercent / 100 : 1
+    );
+    const healing = await healTarget(target, context.player, baseHeal);
+    const gauge = targetCleansed > 0
+      ? Math.max(0, rankNumber(context.spell, "successfulCleanseTargetGaugeGain", 10))
+      : 0;
+
+    cleansedCount += targetCleansed;
+    totalHealing += healing.actual;
+    totalPotential += healing.potential;
+    totalOverhealing += healing.overhealing;
+    if (targetCleansed > 0) cleansedTargetIds.push(target.playerId);
+    if (gauge > 0) targetGaugeGains.push({ playerId: target.playerId, amount: gauge });
     }
 
+    return {
+      log: cleansedCount > 0
+        ? `🌿 ${context.spell.name} restores ${totalHealing} HP and cleanses ${cleansedCount} ailment${cleansedCount === 1 ? "" : "s"}.`
+        : `🌿 ${context.spell.name} restores ${totalHealing} HP, but finds no removable ailments.`,
+      healing: totalHealing,
+      potentialHealing: totalPotential,
+      overhealing: totalOverhealing,
+      healedTargetId: primaryId,
+      targetGaugeGain: targetGaugeGains.find(gain => gain.playerId === primaryId)?.amount ?? 0,
+      targetGaugePlayerId: primaryId,
+      targetGaugeGains,
+      cleansedCount,
+      cleansedTargetIds,
+      healedPlayerIds: targets.map(target => target.playerId),
+      appliedStatus: cleansedCount > 0
+    };
+  }
+};
 
-    let strengthenedHots =
-      0;
+export const tranquilityHandler: SpellHandlerDefinition = {
+  requiresEnemy: false,
 
+  validate(spell) {
+    return (Number(spell.heal) || 0) > 0
+      ? null
+      : `${spell.name} has invalid healing configuration`;
+  },
 
-    // =================================================
-    // APPLY BUFF + STRENGTHEN HOTS
-    // =================================================
+  async execute(context): Promise<SpellHandlerResult> {
+    const targets = livingTargets(context);
+    let totalHealing = 0;
 
-    for (
-      const targetId of
-      targetIds
-    ) {
+    for (const target of targets) {
+      totalHealing += (await healTarget(target, context.player, Number(context.spell.heal))).actual;
+    }
+
+    return {
+      log: `🌊 ${context.spell.name} restores ${totalHealing} total HP across ${targets.length} living ${targets.length === 1 ? "ally" : "allies"}!`,
+      healing: totalHealing,
+      healedPlayerIds: targets.map(target => target.playerId)
+    };
+  }
+};
+
+export const flourishHandler: SpellHandlerDefinition = {
+  requiresEnemy: false,
+
+  validate(spell) {
+    const buff = getConfiguredBuff(spell);
+    if (buff.stat !== "healing_received_pct") return `${spell.name} must use healing_received_pct`;
+    if (buff.value <= 0 || buff.duration <= 0) return `${spell.name} has invalid buff configuration`;
+    return null;
+  },
+
+  async execute(context): Promise<SpellHandlerResult> {
+    const targets = livingTargets(context);
+    const buff = getConfiguredBuff(context.spell);
+    const bloomTicks = Math.max(0, rankNumber(context.spell, "hotBloomTicks", 1));
+    const extension = Math.max(0, rankNumber(context.spell, "hotDurationExtensionSeconds", 4));
+    let totalBloomHealing = 0;
+    let bloomedHots = 0;
+    const bloomHealingByTarget: Record<number, number> = {};
+    const activeHotsByTarget: Record<number, number> = {};
+    const chainRequired = Math.max(0, rankNumber(context.spell, "chainBloomRequiredHots", 0));
+    const chainTicks = Math.max(0, rankNumber(context.spell, "chainBloomAdditionalTicks", 0));
+    const sharedRenewalPercent = Math.max(0, rankNumber(context.spell, "sharedRenewalPercent", 0));
+
+    let rejuvenation: any = null;
+    if (sharedRenewalPercent > 0) {
+      const [[row]]: any = await db.query(
+        `SELECT s.id, s.name,
+                COALESCE(sr.heal, s.heal) AS heal,
+                COALESCE(sr.dot_duration, s.dot_duration) AS dot_duration,
+                COALESCE(sr.dot_tick_rate, s.dot_tick_rate) AS dot_tick_rate
+         FROM spells s
+         LEFT JOIN player_spells ps ON ps.player_id = ? AND ps.spell_id = s.id
+         LEFT JOIN spell_ranks sr ON sr.spell_id = s.id
+           AND sr.spell_rank = COALESCE(ps.skill_level, 1)
+         WHERE s.id = 68 LIMIT 1`,
+        [context.playerId]
+      );
+      rejuvenation = row ?? null;
+    }
+
+    for (const target of targets) {
+      const bloom = await bloomPlayerHots(target.playerId, bloomTicks, extension);
+      let targetBloomHealing = bloom.actualHealing;
+      if (chainTicks > 0 && bloom.activeHots >= chainRequired) {
+        const chain = await bloomPlayerHots(target.playerId, chainTicks, 0);
+        targetBloomHealing += chain.actualHealing;
+        bloom.finalHP = chain.finalHP;
+      }
+      totalBloomHealing += targetBloomHealing;
+      bloomedHots += bloom.activeHots;
+      bloomHealingByTarget[target.playerId] = targetBloomHealing;
+      activeHotsByTarget[target.playerId] = bloom.activeHots;
+      target.hp = bloom.finalHP || target.hp;
 
       await applyBuff(
-        targetId,
+        target.playerId,
         buff.stat,
         buff.value,
         buff.duration,
-        `spell:${spell.id}`
+        `spell:${context.spell.id}`
       );
 
-
-      /*
-       * Existing HoTs were calculated before Flourish
-       * was applied, so strengthen their remaining
-       * ticks directly.
-       */
-      const [hotResult]: any =
-        await db.query(
-          `
-            UPDATE player_hots
-
-            SET healing =
-              GREATEST(
-                1,
-                FLOOR(
-                  healing * ?
-                )
-              )
-
-            WHERE player_id = ?
-              AND expires_at > NOW(3)
-          `,
-          [
-            1 +
-              buff.value /
-              100,
-
-            targetId
-          ]
+      if (rejuvenation) {
+        const [[existing]]: any = await db.query(
+          `SELECT id FROM player_hots WHERE player_id = ? AND source = 'spell:68' AND expires_at > NOW(3) LIMIT 1`,
+          [target.playerId]
         );
-
-
-      strengthenedHots +=
-        Number(
-          hotResult.affectedRows
-        ) || 0;
-    }
-
-
-    // =================================================
-    // LOG
-    // =================================================
-
-    let log =
-      targetIds.length > 1
-        ? (
-            `🌸 You cast ${spell.name}, increasing healing received ` +
-            `by ${buff.value}% for your party for ${buff.duration}s!`
-          )
-        : (
-            `🌸 You cast ${spell.name}, increasing healing received ` +
-            `by ${buff.value}% for ${buff.duration}s!`
+        if (!existing) {
+          await applyHot(
+            target,
+            context.player,
+            rejuvenation,
+            Number(rejuvenation.heal) * sharedRenewalPercent / 100
           );
-
-
-    if (
-      strengthenedHots > 0
-    ) {
-
-      log +=
-        ` ${strengthenedHots} active ` +
-        `${
-          strengthenedHots === 1
-            ? "regeneration effect blooms"
-            : "regeneration effects bloom"
-        }!`;
+        }
+      }
     }
-
 
     return {
-      log,
-
-      appliedStatus:
-        true
+      log: `🌸 ${context.spell.name} blooms ${bloomedHots} active regeneration effect${bloomedHots === 1 ? "" : "s"} for ${totalBloomHealing} immediate healing, extends them by ${extension}s, and grants ${buff.value}% increased healing received!`,
+      healing: totalBloomHealing,
+      appliedStatus: true,
+      bloomHealingByTarget,
+      activeHotsByTarget,
+      healedPlayerIds: targets.map(target => target.playerId)
     };
   }
 };
 
-
-// =====================================================
-// HARMONY OF THE WILD
-//
-// target_type = all_allies
-//
-// Every living ally receives:
-//
-// - an immediate heal
-// - a healing-over-time effect
-//
-// Spell scaling comes from the caster.
-// Healing-received modifiers come from each recipient.
-// =====================================================
-
-export const harmonyOfTheWildHandler:
-SpellHandlerDefinition = {
-
-  requiresEnemy:
-    false,
-
+export const harmonyOfTheWildHandler: SpellHandlerDefinition = {
+  requiresEnemy: false,
 
   validate(spell) {
-
-    const baseHealing =
-      Number(
-        spell.heal
-      ) || 0;
-
-
-    const duration =
-      Number(
-        spell.dot_duration
-      ) || 0;
-
-
-    const tickInterval =
-      Number(
-        spell.dot_tick_rate
-      ) || 0;
-
-
-    if (
-      baseHealing <= 0
-    ) {
-
-      return (
-        `${spell.name} has invalid healing configuration`
-      );
-    }
-
-
-    if (
-      duration <= 0
-    ) {
-
-      return (
-        `${spell.name} has an invalid HOT duration`
-      );
-    }
-
-
-    if (
-      tickInterval <= 0
-    ) {
-
-      return (
-        `${spell.name} has an invalid HOT interval`
-      );
-    }
-
-
+    if ((Number(spell.heal) || 0) <= 0) return `${spell.name} has invalid immediate healing`;
+    if ((Number(spell.dot_duration) || 0) <= 0) return `${spell.name} has invalid HOT duration`;
+    if ((Number(spell.dot_tick_rate) || 0) <= 0) return `${spell.name} has invalid HOT interval`;
+    if (rankNumber(spell, "hotTotalHealing", 0) <= 0) return `${spell.name} has invalid HOT healing`;
     return null;
   },
 
+  async execute(context): Promise<SpellHandlerResult> {
+    const targets = livingTargets(context);
+    const bloomTicks = Math.max(0, rankNumber(context.spell, "hotBloomTicks", 1));
+    const acceleration = Math.max(0, rankNumber(context.spell, "hotAccelerationPercent", 25));
+    const hotTotal = Math.max(1, rankNumber(context.spell, "hotTotalHealing", 80));
+    const partyGaugeGain = Math.max(0, rankNumber(context.spell, "partyGaugeGain", 20));
+    let immediateHealing = 0;
+    let bloomHealing = 0;
+    let expectedHotHealing = 0;
+    let acceleratedHots = 0;
 
-  async execute({
-    playerId,
-    spell,
-    player,
-    currentPlayerHP,
-    maxPlayerHP,
-    allies
-  }): Promise<SpellHandlerResult> {
+    for (const target of targets) {
+      const bloom = await bloomPlayerHots(target.playerId, bloomTicks, 0);
+      bloomHealing += bloom.actualHealing;
+      target.hp = bloom.finalHP || target.hp;
 
-    const baseHealing =
-      Number(
-        spell.heal
-      ) || 0;
+      acceleratedHots += await acceleratePlayerHots(target.playerId, acceleration);
 
+      const direct = await healTarget(target, context.player, Number(context.spell.heal));
+      immediateHealing += direct.actual;
 
-    const duration =
-      Number(
-        spell.dot_duration
-      ) || 0;
-
-
-    const tickInterval =
-      Math.max(
-        0.1,
-        Number(
-          spell.dot_tick_rate
-        ) || 1
+      expectedHotHealing += await applyHot(
+        target,
+        context.player,
+        context.spell,
+        hotTotal,
+        ":harmony"
       );
-
-
-    const totalTicks =
-      Math.max(
-        1,
-        Math.floor(
-          duration /
-          tickInterval
-        )
-      );
-
-
-    /*
-     * Caster controls base spell scaling.
-     */
-    const baseScaledHealing =
-      calculateScaledSpellAmount(
-        player,
-        baseHealing
-      );
-
-
-    /*
-     * Hunt combat supplies allies[].
-     *
-     * Normal solo combat falls back to caster.
-     */
-    const targets =
-      allies &&
-      allies.length > 0
-        ? allies.filter(
-            ally =>
-              Number(
-                ally.hp
-              ) > 0
-          )
-        : [
-            {
-              playerId:
-                Number(
-                  playerId
-                ),
-
-              hp:
-                getCurrentPlayerHP(
-                  player,
-                  currentPlayerHP
-                ),
-
-              maxHp:
-                getMaximumPlayerHP(
-                  player,
-                  maxPlayerHP
-                ),
-
-              stats:
-                player
-            }
-          ];
-
-
-    if (
-      targets.length === 0
-    ) {
-
-      return {
-        log:
-          `🌿 You cast ${spell.name}, but there are ` +
-          `no living allies to heal.`,
-
-        healing:
-          0,
-
-        appliedStatus:
-          false
-      };
     }
-
-
-    let totalImmediateHealing =
-      0;
-
-
-    let totalExpectedHotHealing =
-      0;
-
-
-    let affectedPlayers =
-      0;
-
-
-    // =================================================
-    // APPLY TO EACH ALLY
-    // =================================================
-
-    for (
-      const ally of
-      targets
-    ) {
-
-      const targetId =
-        Number(
-          ally.playerId
-        );
-
-
-      const currentHP =
-        Math.max(
-          0,
-          Number(
-            ally.hp
-          ) || 0
-        );
-
-
-      const maximumHP =
-        Math.max(
-          1,
-          Number(
-            ally.maxHp
-          ) || 1
-        );
-
-
-      const recipientStats =
-        (ally as any).stats ??
-        player;
-
-
-      // ===============================================
-      // IMMEDIATE HEAL
-      // ===============================================
-
-      const immediateHealing =
-        applyHealingReceivedMultiplier(
-          recipientStats,
-          baseScaledHealing
-        );
-
-
-      const finalHP =
-        Math.min(
-          maximumHP,
-          currentHP +
-          immediateHealing
-        );
-
-
-      const actualImmediateHealing =
-        Math.max(
-          0,
-          finalHP -
-          currentHP
-        );
-
-
-      await db.query(
-        `
-          UPDATE players
-
-          SET hpoints = ?
-
-          WHERE id = ?
-        `,
-        [
-          finalHP,
-          targetId
-        ]
-      );
-
-
-      ally.hp =
-        finalHP;
-
-
-      // ===============================================
-      // HOT
-      // ===============================================
-
-      const totalHotHealing =
-        applyHealingReceivedMultiplier(
-          recipientStats,
-          baseScaledHealing
-        );
-
-
-      const healingPerTick =
-        Math.max(
-          1,
-          Math.floor(
-            totalHotHealing /
-            totalTicks
-          )
-        );
-
-
-      const expectedHotHealing =
-        healingPerTick *
-        totalTicks;
-
-
-      const source =
-        `spell:${spell.id}`;
-
-
-      /*
-       * Refresh this spell's HoT for this
-       * particular target instead of stacking.
-       */
-      await db.query(
-        `
-          DELETE FROM player_hots
-
-          WHERE player_id = ?
-            AND source = ?
-        `,
-        [
-          targetId,
-          source
-        ]
-      );
-
-
-      await db.query(
-        `
-          INSERT INTO player_hots
-          (
-            player_id,
-            healing,
-            tick_interval,
-            next_tick_at,
-            expires_at,
-            source,
-            display_name
-          )
-
-          VALUES
-          (
-            ?,
-            ?,
-            ?,
-            DATE_ADD(
-              NOW(3),
-              INTERVAL ? SECOND
-            ),
-            DATE_ADD(
-              NOW(3),
-              INTERVAL ? SECOND
-            ),
-            ?,
-            ?
-          )
-        `,
-        [
-          targetId,
-          healingPerTick,
-          tickInterval,
-          tickInterval,
-          duration,
-          source,
-          spell.name
-        ]
-      );
-
-
-      totalImmediateHealing +=
-        actualImmediateHealing;
-
-
-      totalExpectedHotHealing +=
-        expectedHotHealing;
-
-
-      affectedPlayers++;
-    }
-
-
-    // =================================================
-    // RESULT
-    // =================================================
-
-    const log =
-      affectedPlayers > 1
-        ? (
-            `🌿 You cast ${spell.name}, restoring ` +
-            `${totalImmediateHealing} total HP immediately across ` +
-            `the party and up to ${totalExpectedHotHealing} ` +
-            `additional HP over ${duration}s!`
-          )
-        : (
-            `🌿 You cast ${spell.name}, restoring ` +
-            `${totalImmediateHealing} HP immediately and up to ` +
-            `${totalExpectedHotHealing} HP over ${duration}s!`
-          );
-
 
     return {
-      log,
-
-      healing:
-        totalImmediateHealing,
-
-      appliedStatus:
-        true
+      log: `🌿 ${context.spell.name} restores ${immediateHealing + bloomHealing} immediate HP, grants up to ${expectedHotHealing} regeneration, accelerates ${acceleratedHots} active HoT${acceleratedHots === 1 ? "" : "s"}, and advances the party by ${partyGaugeGain} action gauge!`,
+      healing: immediateHealing + bloomHealing,
+      expectedHotHealing,
+      partyGaugeGain,
+      appliedStatus: true,
+      healedPlayerIds: targets.map(target => target.playerId)
     };
   }
 };

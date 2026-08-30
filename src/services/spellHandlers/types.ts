@@ -4,6 +4,12 @@ import type {
   DerivedStats
 } from "../statEngine";
 
+import type {
+  ActiveSpellTalent,
+  SpellCastState,
+  TalentConfig
+} from "../spellTalents/types";
+
 
 // =====================================================
 // ENEMY SOURCE
@@ -30,6 +36,10 @@ export type SpellDotApplication = {
 
   durationSeconds: number;
   tickRateSeconds: number;
+  immediateFirstTick?: boolean;
+  defenseReductionPerTick?: number;
+  defenseReductionMaxStacks?: number;
+  manaRestorePercentPerTick?: number;
 };
 
 
@@ -132,7 +142,11 @@ export type SpellEnemy = {
 
   getDebuffValue?: (
   stat: string
-) => Promise<number>;
+  ) => Promise<number>;
+
+  removeDebuff?: (
+    stat: string
+  ) => void | Promise<void>;
 };
 
 
@@ -204,6 +218,17 @@ export type SpellHandlerResult = {
   // Applied by the owning combat session after the
   // caster's action has been consumed.
   partyGaugeGain?: number;
+  casterGaugeGain?: number;
+  manaRestored?: number;
+  restoreManaPercent?: number;
+  splashDamagePercent?: number;
+
+  // Extra threat added after normal damage/healing threat.
+  threatGenerated?: number;
+
+  // Multiplies normal damage and effective-healing threat.
+  // It does not multiply threatGenerated.
+  threatMultiplier?: number;
 
   [key: string]: any;
 };
@@ -256,6 +281,25 @@ export type SpellHandlerContext = {
 
   // Party / raid friendly targets.
   allies?: SpellFriendlyTarget[];
+
+  // Prepared spell-talent runtime. These remain optional until every
+  // combat mode has moved to the shared preparation pipeline.
+  talents?: ActiveSpellTalent[];
+  castState?: SpellCastState;
+
+  hasTalent?: (
+    handlerKey: string
+  ) => boolean;
+
+  getTalent?: (
+    handlerKey: string
+  ) => ActiveSpellTalent | null;
+
+  getTalentConfig?: <
+    T extends TalentConfig = TalentConfig
+  >(
+    handlerKey: string
+  ) => T | null;
 };
 
 

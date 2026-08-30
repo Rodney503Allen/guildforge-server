@@ -9,6 +9,7 @@ import {
 
 import {
   applyHealingReceivedMultiplier,
+  calculateScaledHealingAmount,
   calculateScaledSpellAmount,
   resolveDamageAgainstEnemy,
   setSpellEnemyHP
@@ -31,7 +32,7 @@ function calculateBloodweaverHealing(
 ): number {
 
   const scaledHealing =
-    calculateScaledSpellAmount(
+    calculateScaledHealingAmount(
       caster,
       baseHealing,
       coefficient
@@ -316,12 +317,18 @@ SpellHandlerDefinition = {
     return {
       log,
 
+      damage,
+
       enemyHP,
 
       playerHP,
 
       healing:
         actualHealing,
+      potentialHealing: healing,
+      overhealing: Math.max(0, healing - actualHealing),
+      healedTargetId: Number(playerId),
+      healedTargetMaxHP: maximumHP,
 
       killedEnemy:
         enemyHP <= 0,
@@ -906,10 +913,12 @@ SpellHandlerDefinition = {
      * Blood Transfusion can never kill
      * its caster.
      */
+    const rankConfig = spell.rank_config && typeof spell.rank_config === "object" ? spell.rank_config : {};
+    const healthCostPercent = Math.max(0, 20 * (1 - (Number(rankConfig.healthCostReductionPercent) || 0) / 100));
     const rawHealthCost =
       Math.floor(
         casterCurrentHP *
-        0.2
+        healthCostPercent / 100
       );
 
 
@@ -1010,7 +1019,13 @@ SpellHandlerDefinition = {
           finalCasterHP,
 
         healing:
-          actualHealing
+          actualHealing,
+        potentialHealing: healing,
+        overhealing: Math.max(0, healing - actualHealing),
+        healedTargetId: Number(playerId),
+        healedTargetMaxHP: casterMaximumHP,
+        healthCost,
+        casterMaxHP: casterMaximumHP
       };
     }
 
@@ -1087,7 +1102,13 @@ SpellHandlerDefinition = {
         casterHPAfterCost,
 
       healing:
-        actualHealing
+        actualHealing,
+      potentialHealing: healing,
+      overhealing: Math.max(0, healing - actualHealing),
+      healedTargetId: Number(targetId),
+      healedTargetMaxHP: targetMaximumHP,
+      healthCost,
+      casterMaxHP: casterMaximumHP
     };
   }
 };

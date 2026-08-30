@@ -14,16 +14,39 @@ import {
   getActorReadyInMs,
   isCooldownReady,
   setCooldown,
-  pushDamageEvent
+  pushDamageEvent,
+  reduceOtherSpellCooldowns,
+  refreshPlayerCreatureDot
 } from "./services/combatSessionService";
 import { getEquippedSpells } from "./services/spellLoadoutService";
 import { publishWorldCombatSnapshot } from "./combatSocket";
 import { emitPlayerStatePatch, getSocketServer } from "./socketServer";
 import { publishPlayerLevelUp } from "./playerStateEvents";
 
+import {
+  prepareSpellForCast,
+  runAfterCastTalents,
+  runBeforeCastTalents,
+  validatePreparedSpellTalents
+} from "./services/spellTalents";
+
 import type {
-  SpellEnemy
+  SpellEnemy,
+  SpellHandlerContext
 } from "./services/spellHandlers/types";
+import { processJudgmentSpellHit } from "./services/spellHandlers/helpers";
+import {
+  getActiveBerserkerDamageMultiplier,
+  processBerserkerCriticalGauge,
+  convertBerserkerLifestealOverhealToShield
+} from "./services/spellTalents/handlers/berserkerTalentHandlers";
+import {
+  getWarlordNextSpellOrder,
+  consumeWarlordNextSpellOrder,
+  processWarlordMarkedHit,
+  processWarlordClaimThePrize
+} from "./services/spellTalents/handlers/warlordTalentHandlers";
+import { extendWarlordMarkDebuffs } from "./services/creatureDebuffService";
 
 import {
   applyCreatureDebuff
@@ -45,7 +68,7 @@ function buildPlayerCreatureSpellEnemy(
   enemy: any
 ): SpellEnemy {
 
-  const spellEnemy: SpellEnemy = {
+  const spellEnemy = {
     id:
       Number(enemy.id),
 
@@ -135,6 +158,14 @@ getDebuffValue:
     stat: string
   ) => {
 
+    if (String(stat).trim().toLowerCase() === "__any__") {
+      const [[anyRow]]: any = await db.query(
+        `SELECT EXISTS(SELECT 1 FROM player_creature_debuffs WHERE player_creature_id = ? AND expires_at > NOW(3)) AS value`,
+        [Number(enemy.id)]
+      );
+      return Number(anyRow?.value) || 0;
+    }
+
     const [[row]]: any =
       await db.query(
         `
@@ -160,6 +191,28 @@ getDebuffValue:
       ) || 0
     );
   },
+
+removeDebuff:
+  async (stat: string) => {
+    await db.query(
+      `DELETE FROM player_creature_debuffs WHERE player_creature_id = ? AND stat = ?`,
+      [Number(enemy.id), String(stat).trim().toLowerCase()]
+    );
+  },
+    extendWarlordMark: async (maximumExtensionSeconds: number) =>
+      extendWarlordMarkDebuffs(Number(enemy.id), maximumExtensionSeconds),
+    consumeDot: async (_sourcePlayerId: number, spellId: number) => {
+      const [[dot]]: any = await db.query(
+        `SELECT id,total_damage,total_ticks,ticks_applied FROM player_creature_dots
+         WHERE player_creature_id=? AND source LIKE ? ORDER BY id DESC LIMIT 1`,
+        [Number(enemy.id), `spell:${spellId}|%`]
+      );
+      if (!dot) return 0;
+      const dealt = Math.floor(Number(dot.total_damage || 0) * Number(dot.ticks_applied || 0) / Math.max(1, Number(dot.total_ticks || 1)));
+      const remaining = Math.max(0, Number(dot.total_damage || 0) - dealt);
+      await db.query(`DELETE FROM player_creature_dots WHERE id=?`, [dot.id]);
+      return remaining;
+    },
     // =================================================
     // DOT APPLICATION
     // =================================================
@@ -217,8 +270,16 @@ getDebuffValue:
             )
           );
 
-        const source =
-          `spell:${args.spellId}`;
+        const source = [
+          `spell:${args.spellId}`,
+          `dr:${Number(args.defenseReductionPerTick) || 0}`,
+          `ds:${Number(args.defenseReductionMaxStacks) || 0}`,
+          `mp:${Number(args.manaRestorePercentPerTick) || 0}`,
+          `ep:${Number((args as any).escalationPercentPerTick) || 0}`,
+          `ec:${Number((args as any).escalationMaxPercent) || 0}`,
+          `hr:${Number((args as any).healingReductionPercent) || 0}`
+          ,`th:${Number((args as any).tickHealingPercent) || 0}`
+        ].join("|");
 
 
         /*
@@ -230,11 +291,11 @@ getDebuffValue:
             DELETE FROM player_creature_dots
 
             WHERE player_creature_id = ?
-              AND source = ?
+              AND source LIKE ?
           `,
           [
             Number(enemy.id),
-            source
+            `spell:${args.spellId}|%`
           ]
         );
 
@@ -262,7 +323,7 @@ getDebuffValue:
               ?,
               0,
               ?,
-              NOW(3),
+              DATE_ADD(NOW(3), INTERVAL ? SECOND),
               DATE_ADD(
                 NOW(3),
                 INTERVAL ? SECOND
@@ -276,6 +337,7 @@ getDebuffValue:
             totalDamage,
             totalTicks,
             tickRateSeconds,
+            args.immediateFirstTick ? 0 : tickRateSeconds,
             durationSeconds,
             source
           ]
@@ -334,6 +396,11 @@ getDebuffValue:
             )
         };
       }
+  } as SpellEnemy & {
+    consumeDot: (
+      sourcePlayerId: number,
+      spellId: number
+    ) => Promise<number>;
   };
 
 
@@ -443,7 +510,7 @@ router.post("/spells/cast", async (req, res) => {
 
     // Verify that the spell is learned, equipped,
     // and usable in combat.
-    const [[spell]]: any = await db.query(
+    const [[baseSpell]]: any = await db.query(
       `
       SELECT
         s.*,
@@ -466,17 +533,51 @@ router.post("/spells/cast", async (req, res) => {
       [pid, spellId]
     );
 
-    if (!spell) {
+    if (!baseSpell) {
       return res.status(403).json({
         error: "Spell not equipped"
       });
     }
 
-    const manaCost =
-      Number(spell.mana_cost) || 0;
+    /*
+     * Build the authoritative spell used for this cast:
+     *
+     * base spell + purchased rank + selected talents.
+     *
+     * From this point forward, validation and execution must use
+     * the prepared spell rather than the raw database row.
+     */
+    const preparedCast =
+      await prepareSpellForCast(
+        pid,
+        baseSpell
+      );
 
-    const cooldownSec =
-      Number(spell.cooldown) || 0;
+    const spell = preparedCast.spell;
+
+    const warlordOrder = await getWarlordNextSpellOrder(pid);
+    const isDamagingSpell =
+      Number(spell.damage) > 0 ||
+      Number(spell.dot_damage) > 0 ||
+      ["damage", "dot", "damage_dot"].includes(String(spell.type));
+
+    if (isDamagingSpell && warlordOrder.damagePercent > 0) {
+      const multiplier = 1 + warlordOrder.damagePercent / 100;
+      if (Number(spell.damage) > 0) spell.damage = Math.round(Number(spell.damage) * multiplier);
+      if (Number(spell.dot_damage) > 0) spell.dot_damage = Math.round(Number(spell.dot_damage) * multiplier);
+    }
+
+    let manaCost = Math.max(
+      0,
+      Number(preparedCast.castState.manaCost) || 0
+    );
+
+    if (warlordOrder.free) manaCost = 0;
+
+    let cooldownSec = Math.max(
+      0,
+      Number(preparedCast.castState.cooldownSeconds) || 0
+    );
 
     const cooldownKey = `spell:${spellId}`;
 
@@ -595,6 +696,41 @@ const spellEnemy =
       });
     }
 
+    /*
+     * One shared handler context is used by custom spell handlers and
+     * talent lifecycle hooks. It deliberately contains combat-mode-neutral
+     * player and enemy adapters.
+     */
+    const spellContext: SpellHandlerContext = {
+      playerId: pid,
+      spell,
+      player,
+      enemy: spellEnemy,
+      currentPlayerHP: Number(session.player.hp),
+      currentPlayerSP: Number(session.player.sp),
+      maxPlayerHP: Number(session.player.maxHp),
+      maxPlayerSP: Number(session.player.maxSp),
+      talents: preparedCast.talents,
+      castState: preparedCast.castState,
+      hasTalent: preparedCast.hasTalent,
+      getTalent: preparedCast.getTalent,
+      getTalentConfig: preparedCast.getTalentConfig
+    };
+
+    // Talent-specific casting rules fail before SP or the ATB turn is spent.
+    const talentValidationError =
+      await validatePreparedSpellTalents(
+        preparedCast,
+        spellContext
+      );
+
+    if (talentValidationError) {
+      return res.json({
+        error: talentValidationError,
+        snapshot: buildCombatSnapshot(session)
+      });
+    }
+
     // SP failure does not consume the turn.
     if (
       Number(session.player.sp) < manaCost
@@ -603,6 +739,10 @@ const spellEnemy =
         error: "Not enough SP",
         snapshot: buildCombatSnapshot(session)
       });
+    }
+
+    if (warlordOrder.free || isDamagingSpell) {
+      await consumeWarlordNextSpellOrder(pid, warlordOrder);
     }
 
     // Spend SP only after all normal validation passes.
@@ -628,29 +768,101 @@ const spellEnemy =
       }
     );
 
-    // Execute the actual spell effect.
-const result =
-  await handler.execute({
-    playerId:
+    /*
+     * Side-effecting pre-cast talent hooks run only after the cast has
+     * passed validation and paid its normal SP cost.
+     */
+    spellContext.currentPlayerSP = newSP;
+
+    await runBeforeCastTalents(
+      preparedCast,
+      spellContext
+    );
+
+    const berserkerDamageMultiplier = await getActiveBerserkerDamageMultiplier(
       pid,
+      Number(session.player.hp),
+      Number(session.player.maxHp)
+    );
+    if (berserkerDamageMultiplier > 1) {
+      if (Number(spell.damage) > 0) spell.damage = Math.round(Number(spell.damage) * berserkerDamageMultiplier);
+      if (Number(spell.dot_damage) > 0) spell.dot_damage = Math.round(Number(spell.dot_damage) * berserkerDamageMultiplier);
+    }
 
-    spell,
+    // Execute the actual spell effect, then allow talents to react to it.
+    let result =
+      await handler.execute(
+        spellContext
+      );
 
-    player,
+    result = await runAfterCastTalents(
+      preparedCast,
+      spellContext,
+      result
+    );
 
-    enemy:
-      spellEnemy,
+    const berserkerCriticalGauge = await processBerserkerCriticalGauge(pid, Boolean(result.crit));
+    if (berserkerCriticalGauge > 0 && Number(result.damage) > 0) {
+      result.casterGaugeGain = (Number(result.casterGaugeGain) || 0) + berserkerCriticalGauge;
+    }
 
-    currentPlayerHP:
-      Number(
-        session.player.hp
-      ),
+    if (Number(result.damage) > 0 && Number(session.player.stats?.lifesteal || 0) > 0) {
+      const raw = Math.max(0, Math.floor(Number(result.damage) * Number(session.player.stats.lifesteal)));
+      const actual = Math.max(0, Math.min(raw, session.player.maxHp - session.player.hp));
+      const overheal = Math.max(0, raw - actual);
+      if (actual > 0) {
+        session.player.hp += actual;
+        result.playerHP = session.player.hp;
+        result.healing = (Number(result.healing) || 0) + actual;
+        await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [session.player.hp, pid]);
+      }
+      await convertBerserkerLifestealOverhealToShield(pid, overheal);
+    }
 
-    maxPlayerHP:
-      Number(
-        session.player.maxHp
-      )
-  });
+    await processJudgmentSpellHit(enemy, {
+      playerId: pid,
+      spellId: Number(spell.id),
+      spellName: String(spell.name),
+      damage: Number(result.damage) || (["dot", "damage_dot"].includes(String(spell.type)) ? 1 : 0),
+      crit: Boolean(result.crit)
+    });
+
+    const restoredMana = Math.max(
+      0,
+      Number(result.manaRestored) ||
+      Math.floor(session.player.maxSp * (Number(result.restoreManaPercent) || 0) / 100)
+    );
+    if (restoredMana > 0) {
+      session.player.sp = Math.min(session.player.maxSp, newSP + restoredMana);
+      await db.query(`UPDATE players SET spoints = ? WHERE id = ?`, [session.player.sp, pid]);
+    }
+
+    // Toxic Precision refreshes the active Poison Arrow DOT on the current
+    // creature. The service resets both its duration and complete tick count.
+    const refreshPoisonDuration =
+      Math.max(
+        0,
+        Number(
+          result.refreshPoisonDuration
+        ) || 0
+      );
+
+    if (
+      refreshPoisonDuration > 0 &&
+      enemy
+    ) {
+      const refreshedPoison =
+        await refreshPlayerCreatureDot(
+          Number(enemy.id),
+          62,
+          refreshPoisonDuration
+        );
+
+      if (refreshedPoison) {
+        result.log =
+          `${result.log ?? ""} ☠ Poison Arrow is refreshed.`;
+      }
+    }
 
 if (result.appliedStatus) {
   const refreshedPlayer =
@@ -713,6 +925,8 @@ if (result.appliedStatus) {
       }
     );
 
+    let actualDamage = 0;
+
     if (
       result.enemyHP !== undefined &&
       session.enemy &&
@@ -734,7 +948,7 @@ const previousEnemyHP =
 
       // Calculate actual HP removed so overkill damage
       // does not produce an inflated floating number.
-      const actualDamage = Math.max(
+      actualDamage = Math.max(
         0,
         previousEnemyHP - updatedEnemyHP
       );
@@ -752,24 +966,87 @@ const previousEnemyHP =
       }
     }
 
+    if (spellEnemy && actualDamage > 0) {
+      const markedHit = await processWarlordMarkedHit(spellEnemy as any, pid, actualDamage);
+      result.casterGaugeGain =
+        (Number(result.casterGaugeGain) || 0) + markedHit.gaugeGain;
+    }
+
     // Process direct-hit kills.
     if (
       result.killedEnemy &&
       enemy
     ) {
+      const claim = await processWarlordClaimThePrize(spellEnemy as any, [pid]);
+      const claimedPlayer = claim.players.find((entry) => entry.playerId === pid);
+      if (claimedPlayer) {
+        session.player.hp = claimedPlayer.hp;
+        session.player.sp = claimedPlayer.sp;
+        session.player.stats.hpoints = claimedPlayer.hp;
+        session.player.stats.spoints = claimedPlayer.sp;
+        emitPlayerStatePatch(pid, {
+          hpoints: claimedPlayer.hp,
+          spoints: claimedPlayer.sp,
+          maxhp: session.player.maxHp,
+          maxspoints: session.player.maxSp,
+        });
+      }
+      result.casterGaugeGain =
+        (Number(result.casterGaugeGain) || 0) + claim.gaugeGain;
       reward = await handleCreatureKill(
         pid,
         enemy.id
       );
     }
 
+    /*
+     * A post-cast custom talent may adjust the cooldown as part of its
+     * mechanic, so read the final value only after all talent hooks finish.
+     */
+    cooldownSec = Math.max(
+      0,
+      Number(preparedCast.castState.cooldownSeconds) || 0
+    );
+
     // A successful cast receives its cooldown.
     if (cooldownSec > 0) {
       setCooldown(
         session.player,
         cooldownKey,
-        cooldownSec
+        Math.max(0, cooldownSec - Math.max(0, Number(result.reduceCurrentCooldownSeconds) || 0))
       );
+    }
+
+    if(Number(result.resetSpellCooldown)===Number(spell.id)) setCooldown(session.player,cooldownKey,0);
+
+    const resetSpellIds = Array.isArray(result.resetSpellIds)
+      ? result.resetSpellIds.map(Number).filter(Number.isFinite)
+      : [];
+    for (const resetSpellId of resetSpellIds) {
+      setCooldown(session.player, `spell:${resetSpellId}`, 0);
+    }
+
+    // Relentless Pace affects active spell cooldowns other than Quick Shot.
+    // Item cooldowns and the spell which triggered the talent are untouched.
+    const reduceOtherCooldownsSeconds =
+      Math.max(
+        0,
+        Number(
+          result.reduceOtherCooldownsSeconds
+        ) || 0
+      );
+
+    if (reduceOtherCooldownsSeconds > 0) {
+      reduceOtherSpellCooldowns(
+        session.player,
+        Number(spell.id),
+        reduceOtherCooldownsSeconds
+      );
+    }
+
+    const reducePartyCooldownsSeconds = Math.max(0, Number((result as any).reducePartyCooldownsSeconds) || 0);
+    if (reducePartyCooldownsSeconds > 0) {
+      reduceOtherSpellCooldowns(session.player, Number(spell.id), reducePartyCooldownsSeconds);
     }
 
     // A successful cast consumes the player's ATB turn.
@@ -778,20 +1055,58 @@ const previousEnemyHP =
       450
     );
 
+    if (Number.isFinite(Number(result.setGaugeTo))) {
+      session.player.gauge = Math.max(0, Math.min(100, Number(result.setGaugeTo)));
+      session.player.ready = session.player.gauge >= 100;
+    }
+
+    const enemyGaugeReduction=Math.max(0,Number(result.enemyGaugeReduction)||0);
+    if(enemyGaugeReduction>0&&session.enemy){session.enemy.gauge=Math.max(0,session.enemy.gauge-enemyGaugeReduction);session.enemy.ready=session.enemy.gauge>=100;}
+
     const partyGaugeGain =
       Math.max(
         0,
         Number(result.partyGaugeGain) || 0
       );
 
-    if (partyGaugeGain > 0) {
+    const casterGaugeGain = Math.max(
+      0,
+      Number(result.casterGaugeGain) || 0
+    );
+
+    const targetGaugeGain =
+      Number(result.targetGaugePlayerId) === Number(req.session.playerId)
+        ? Math.max(0, Number(result.targetGaugeGain) || 0)
+        : 0;
+
+    if (partyGaugeGain > 0 || casterGaugeGain > 0 || targetGaugeGain > 0) {
       session.player.gauge = Math.min(
         100,
-        session.player.gauge + partyGaugeGain
+        session.player.gauge + partyGaugeGain + casterGaugeGain + targetGaugeGain
       );
 
       session.player.ready =
         session.player.gauge >= 100;
+    }
+
+    const playerGaugeBonuses = (result as any).playerGaugeBonuses ?? {};
+    const personalGaugeBonus = Math.max(0, Number(playerGaugeBonuses[pid]) || 0);
+    if (personalGaugeBonus > 0) {
+      session.player.gauge = Math.min(100, session.player.gauge + personalGaugeBonus);
+      session.player.ready = session.player.gauge >= 100;
+    }
+
+    const playerGaugeOverrides = (result as any).playerGaugeOverrides ?? {};
+    if (Number.isFinite(Number(playerGaugeOverrides[pid]))) {
+      session.player.gauge = Math.max(0, Math.min(100, Number(playerGaugeOverrides[pid])));
+      session.player.ready = session.player.gauge >= 100;
+    }
+
+    if (Number(result.damage) > 0) {
+      await db.query(
+        `DELETE FROM player_buffs WHERE player_id=? AND source LIKE 'knight-answer:%'`,
+        [pid]
+      );
     }
 
     if (reward) {

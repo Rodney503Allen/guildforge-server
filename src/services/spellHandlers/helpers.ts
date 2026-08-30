@@ -158,6 +158,26 @@ export function calculateScaledSpellAmount(
   );
 }
 
+/**
+ * Applies the caster's outgoing-healing modifier after normal spell scaling.
+ * Recipient-side healing modifiers are intentionally applied separately.
+ */
+export function calculateScaledHealingAmount(
+  player: any,
+  baseAmount: number,
+  coefficient = 0.5
+): number {
+  const scaled = calculateScaledSpellAmount(player, baseAmount, coefficient);
+  const rawMultiplier = Number(
+    player?.healingDealtMult ?? player?.stats?.healingDealtMult ?? 1
+  );
+  const multiplier = Number.isFinite(rawMultiplier)
+    ? Math.max(0, rawMultiplier)
+    : 1;
+
+  return Math.max(0, Math.floor(scaled * multiplier));
+}
+
 
 // =====================================================
 // DAMAGE RESOLUTION
@@ -171,6 +191,13 @@ export function resolveDamageAgainstEnemy(
 
   const stats =
     enemy.stats;
+
+    const combatStats = stats as
+  | (typeof stats & {
+      critChanceTakenPercent?: number;
+      criticalDamageTakenPercent?: number;
+    })
+  | undefined;
 
   const defender = {
 
@@ -282,6 +309,12 @@ export function resolveDamageAgainstEnemy(
         1
       ),
 
+    healingDealtMult:
+      Number(
+        stats?.healingDealtMult ??
+        1
+      ),
+
     atbRateMult:
       Number(
         stats?.atbRateMult ??
@@ -292,6 +325,22 @@ export function resolveDamageAgainstEnemy(
       Number(
         stats?.damageTakenMult ??
         1
+      ),
+
+    spellDamageTakenMult:
+      Number(
+        stats?.spellDamageTakenMult ??
+        1
+      ),
+
+    critChanceTakenPercent:
+      Number(
+        combatStats?.critChanceTakenPercent ?? 0
+      ),
+
+    criticalDamageTakenPercent:
+      Number(
+        combatStats?.criticalDamageTakenPercent ?? 0
       )
   };
 
@@ -479,6 +528,14 @@ export async function applySpellDot(
 
     durationSeconds: number;
     tickRateSeconds: number;
+    immediateFirstTick?: boolean;
+    defenseReductionPerTick?: number;
+    defenseReductionMaxStacks?: number;
+    manaRestorePercentPerTick?: number;
+    escalationPercentPerTick?: number;
+    escalationMaxPercent?: number;
+    healingReductionPercent?: number;
+    tickHealingPercent?: number;
   }
 ) {
 
@@ -550,8 +607,16 @@ export async function applySpellDot(
 
     durationSeconds,
 
-    tickRateSeconds
-  });
+    tickRateSeconds,
+    immediateFirstTick: Boolean(args.immediateFirstTick),
+    defenseReductionPerTick: Number(args.defenseReductionPerTick) || 0,
+    defenseReductionMaxStacks: Number(args.defenseReductionMaxStacks) || 0,
+    manaRestorePercentPerTick: Number(args.manaRestorePercentPerTick) || 0
+    ,escalationPercentPerTick: Number(args.escalationPercentPerTick) || 0
+    ,escalationMaxPercent: Number(args.escalationMaxPercent) || 0
+    ,healingReductionPercent: Number(args.healingReductionPercent) || 0
+    ,tickHealingPercent: Number(args.tickHealingPercent) || 0
+  } as any);
 }
 
 
@@ -694,4 +759,44 @@ export function applyHealingReceivedMultiplier(
       multiplier
     )
   );
+}
+
+export async function processJudgmentSpellHit(
+  enemy: SpellEnemy | null | undefined,
+  args: {
+    playerId: number;
+    spellId: number;
+    spellName: string;
+    damage: number;
+    crit: boolean;
+  }
+) {
+  if (!enemy || args.damage <= 0 || args.spellId === 26) return;
+  const current = await getSpellEnemyDebuffValue(enemy, "judgment");
+  if (current <= 0) return;
+
+  const upgrade = await getSpellEnemyDebuffValue(enemy, "judgment_crit_upgrade");
+  if (args.crit && upgrade >= 2) {
+    await applySpellDebuff(enemy, {
+      sourcePlayerId: args.playerId, spellId: args.spellId,
+      spellName: args.spellName, stat: "judgment", value: 2,
+      durationSeconds: 14
+    });
+    return;
+  }
+
+  const duration = await getSpellEnemyDebuffValue(enemy, "judgment_refresh_on_spell");
+  const onCooldown = await getSpellEnemyDebuffValue(enemy, "judgment_refresh_icd");
+  if (duration > 0 && onCooldown <= 0) {
+    await applySpellDebuff(enemy, {
+      sourcePlayerId: args.playerId, spellId: args.spellId,
+      spellName: args.spellName, stat: "judgment", value: current,
+      durationSeconds: duration
+    });
+    await applySpellDebuff(enemy, {
+      sourcePlayerId: args.playerId, spellId: args.spellId,
+      spellName: args.spellName, stat: "judgment_refresh_icd", value: 1,
+      durationSeconds: 4
+    });
+  }
 }

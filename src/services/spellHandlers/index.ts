@@ -20,7 +20,10 @@ import {
 
 import {
   aegisOfFaithHandler,
+  consecrationHandler,
+  divineBulwarkHandler,
   guardiansGraceHandler,
+  sacredStrikeHandler,
   sacredShieldHandler
 } from "./paladinHandlers";
 
@@ -51,17 +54,21 @@ import {
 } from "./bloodweaverHandlers";
 
 import {
-  guardHandler,
-  interceptHandler,
   shieldBashHandler,
-  shieldWallHandler
+  guardHandler,
+  bulwarkHandler,
+  interceptHandler,
+  shieldWallHandler,
+  unbreakableHandler
 } from "./knightHandlers";
 
 import {
   battleFrenzyHandler,
   bloodRageHandler,
   decapitateHandler,
-  savageBlowHandler
+  savageBlowHandler,
+  frenziedSlashHandler,
+  rendHandler
 } from "./berserkerHandlers";
 
 import {
@@ -73,21 +80,30 @@ import {
 } from "./warlordHandlers";
 
 import {
+  aimedShotHandler,
   deadeyeHandler,
   piercingArrowHandler,
+  poisonArrowHandler,
+  quickShotHandler,
   volleyHandler
 } from "./rangerHandlers";
 
 import {
   ancientProtectorHandler,
   brambleStrikeHandler,
+  guardianGroveHandler,
+  ironbarkHandler,
   naturesAegisHandler
+  ,rootsnareHandler
 } from "./sentinelHandlers";
 
 import {
   flourishHandler,
   harmonyOfTheWildHandler,
-  herbalRemedyHandler
+  herbalRemedyHandler,
+  naturesTouchHandler,
+  rejuvenationHandler,
+  tranquilityHandler
 } from "./sageHandlers";
 
 const genericSpellHandlers: Record<
@@ -114,10 +130,16 @@ const customSpellHandlers: Record<
     priest_divine_intervention:
         divineInterventionHandler,
     // Paladin Handlers
+    paladin_sacred_strike:
+        sacredStrikeHandler,
     paladin_guardians_grace:
         guardiansGraceHandler,
     paladin_sacred_shield:
         sacredShieldHandler,
+    paladin_consecration:
+        consecrationHandler,
+    paladin_divine_bulwark:
+        divineBulwarkHandler,
     paladin_aegis_of_faith:
         aegisOfFaithHandler,
     // Templar Handlers
@@ -155,14 +177,19 @@ const customSpellHandlers: Record<
     bloodweaver_blood_transfusion:
         bloodTransfusionHandler,
     // Knight Handlers
-    knight_shield_bash:
+    knight_shield_bash: 
         shieldBashHandler,
-    knight_guard:
+    knight_guard: 
         guardHandler,
-    knight_intercept:
+    knight_bulwark: 
+        bulwarkHandler,
+    knight_intercept: 
         interceptHandler,
-    knight_shield_wall:
+    knight_shield_wall: 
         shieldWallHandler,
+    knight_unbreakable: 
+        unbreakableHandler,
+    // Berserker Handlers  
     berserker_savage_blow:
         savageBlowHandler,
     berserker_battle_frenzy:
@@ -171,6 +198,11 @@ const customSpellHandlers: Record<
         decapitateHandler,
     berserker_blood_rage:
         bloodRageHandler,
+    berserker_frenzied_slash:
+        frenziedSlashHandler,
+    berserker_rend:
+        rendHandler,
+    // Warlord Handlers
     warlord_commanding_strike:
         commandingStrikeHandler,
     warlord_war_banner:
@@ -188,22 +220,38 @@ const customSpellHandlers: Record<
         piercingArrowHandler,
     ranger_deadeye:
         deadeyeHandler,
+    ranger_quick_shot: 
+        quickShotHandler,
+    ranger_poison_arrow: 
+        poisonArrowHandler,
+    ranger_aimed_shot: 
+        aimedShotHandler,
     // Sentinel Handlers
     sentinel_bramble_strike:
         brambleStrikeHandler,
+    sentinel_ironbark:
+        ironbarkHandler,
+    sentinel_rootsnare:
+        rootsnareHandler,
+    sentinel_guardian_grove:
+        guardianGroveHandler,
     sentinel_natures_aegis:
         naturesAegisHandler,
     sentinel_ancient_protector:
         ancientProtectorHandler,
     // Sage Handlers
-    sage_rejuvenation:
-        renewHandler,
-    sage_herbal_remedy:
+    sage_natures_touch: 
+        naturesTouchHandler,
+    sage_rejuvenation: 
+        rejuvenationHandler,
+    sage_herbal_remedy: 
         herbalRemedyHandler,
-    sage_flourish:
+    sage_tranquility: 
+        tranquilityHandler,
+    sage_flourish: 
         flourishHandler,
-    sage_harmony_of_the_wild:
-        harmonyOfTheWildHandler
+    sage_harmony_of_the_wild: 
+        harmonyOfTheWildHandler,
 };
 
 export function getSpellHandler(

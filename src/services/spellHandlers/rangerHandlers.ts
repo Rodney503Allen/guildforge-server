@@ -1,673 +1,370 @@
 // src/services/spellHandlers/rangerHandlers.ts
-
 import {
   SpellEnemy,
   SpellHandlerDefinition,
-  SpellHandlerResult
+  SpellHandlerResult,
 } from "./types";
-
 import {
+  applySpellDebuff,
+  applySpellDot,
   calculateScaledSpellAmount,
+  getConfiguredDot,
+  getSpellEnemyDebuffValue,
   resolveDamageAgainstEnemy,
-  setSpellEnemyHP
+  setSpellEnemyHP,
 } from "./helpers";
 
+function rankNumber(spell: any, key: string, fallback = 0): number {
+  const value = Number(spell?.rank_config?.[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
 
-// =====================================================
-// SHARED RANGER DAMAGE
-//
-// Combat-mode agnostic.
-//
-// Normal combat:
-//   SpellEnemy.setHP -> player_creatures
-//
-// Hunt combat:
-//   SpellEnemy.setHP -> hunt_encounters/session
-//
-// Future dungeon / raid:
-//   Their own SpellEnemy adapters handle persistence.
-// =====================================================
+function validateDamage(spell: any): string | null {
+  return (Number(spell.damage) || 0) > 0
+    ? null
+    : `${spell.name} has invalid damage configuration`;
+}
+
+async function isPoisoned(enemy: SpellEnemy): Promise<boolean> {
+  return (await getSpellEnemyDebuffValue(enemy, "poisoned")) > 0;
+}
 
 async function dealRangerDamage(
   spell: any,
   player: any,
   enemy: SpellEnemy,
-  options?: {
+  options: {
     damageMultiplier?: number;
     defenseIgnorePct?: number;
+    critChanceBonusPct?: number;
     forceCrit?: boolean;
-  }
+  } = {},
 ) {
-
-  const damageMultiplier =
-    Math.max(
-      0,
-      Number(
-        options?.damageMultiplier
-      ) || 1
-    );
-
-
-  const defenseIgnorePct =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Number(
-          options?.defenseIgnorePct
-        ) || 0
-      )
-    );
-
-
-  // =================================================
-  // BASE DAMAGE
-  // =================================================
-
-  const scaledDamage =
-    calculateScaledSpellAmount(
-      player,
-      Number(
-        spell.damage
-      ) || 0
-    );
-
-
-  const modifiedDamage =
-    Math.max(
-      1,
-      Math.floor(
-        scaledDamage *
-        damageMultiplier
-      )
-    );
-
-
-  // =================================================
-  // TEMPORARY DEFENSE MODIFICATION
-  // =================================================
-
-  /*
-   * resolveDamageAgainstEnemy may use enemy.stats
-   * when available.
-   *
-   * Therefore Piercing Arrow needs to modify both:
-   *
-   * enemy.defense
-   * enemy.stats.defense
-   *
-   * on a temporary copy of the enemy.
-   */
-  const currentDefense =
-    Math.max(
-      0,
-      Number(
-        enemy.stats?.defense ??
-        enemy.defense ??
-        0
-      ) || 0
-    );
-
-
-  const modifiedDefense =
-    Math.max(
-      0,
-      Math.floor(
-        currentDefense *
-        (
-          1 -
-          defenseIgnorePct /
-          100
-        )
-      )
-    );
-
-
-  const modifiedEnemy:
-    SpellEnemy = {
-
+  const multiplier = Math.max(0, Number(options.damageMultiplier) || 1);
+  const defenseIgnore = Math.max(
+    0,
+    Math.min(100, Number(options.defenseIgnorePct) || 0),
+  );
+  const critBonus = Math.max(0, Number(options.critChanceBonusPct) || 0) / 100;
+  const scaled = calculateScaledSpellAmount(player, Number(spell.damage) || 0);
+  const amount = Math.max(1, Math.floor(scaled * multiplier));
+  const defense = Math.max(
+    0,
+    Number(enemy.stats?.defense ?? enemy.defense ?? 0) || 0,
+  );
+  const reducedDefense = Math.max(
+    0,
+    Math.floor(defense * (1 - defenseIgnore / 100)),
+  );
+  const modifiedEnemy: SpellEnemy = {
     ...enemy,
-
-    defense:
-      modifiedDefense,
-
-    stats:
-      enemy.stats
-        ? {
-            ...enemy.stats,
-
-            defense:
-              modifiedDefense
-          }
-        : enemy.stats
+    defense: reducedDefense,
+    stats: enemy.stats
+      ? { ...enemy.stats, defense: reducedDefense }
+      : enemy.stats,
   };
+  const modifiedPlayer =
+    critBonus > 0
+      ? {
+          ...player,
+          crit: Math.min(1, Math.max(0, Number(player?.crit) || 0) + critBonus),
+        }
+      : player;
+  let resolution = resolveDamageAgainstEnemy(
+    modifiedPlayer,
+    modifiedEnemy,
+    amount,
+  );
 
-
-  // =================================================
-  // DAMAGE RESOLUTION
-  // =================================================
-
-  let damageResult =
-    resolveDamageAgainstEnemy(
-      player,
-      modifiedEnemy,
-      modifiedDamage
-    );
-
-
-  // =================================================
-  // FORCED CRITICAL
-  // =================================================
-
-  /*
-   * Deadeye guarantees a critical during execute.
-   *
-   * If the normal damage roll was not already a crit,
-   * apply the player's normal critical multiplier.
-   */
-  if (
-    options?.forceCrit &&
-    !damageResult.crit &&
-    !damageResult.dodged
-  ) {
-
-    const critMultiplier =
-      Math.max(
+  if (options.forceCrit && !resolution.crit && !resolution.dodged) {
+    const critMultiplier = Math.max(1, Number(player?.critDamageMult) || 1.5);
+    resolution = {
+      ...resolution,
+      damage: Math.max(
         1,
-        Number(
-          player?.critDamageMult ??
-          1.5
-        ) || 1.5
-      );
-
-
-    damageResult = {
-      ...damageResult,
-
-      damage:
-        Math.max(
-          1,
-          Math.floor(
-            Number(
-              damageResult.damage ??
-              1
-            ) *
-            critMultiplier
-          )
-        ),
-
-      crit:
-        true
+        Math.floor((Number(resolution.damage) || 1) * critMultiplier),
+      ),
+      crit: true,
     };
   }
 
+  const dodged = Boolean(resolution.dodged);
+  const damage = dodged ? 0 : Math.max(1, Number(resolution.damage) || 1);
+  const enemyHP = Math.max(0, Number(enemy.hp) - damage);
+  await setSpellEnemyHP(enemy, enemyHP);
+  return { damage, enemyHP, critical: Boolean(resolution.crit), dodged };
+}
 
-  // =================================================
-  // FINAL DAMAGE
-  // =================================================
-
-  const dodged =
-    Boolean(
-      damageResult.dodged
-    );
-
-
-  const damage =
-    dodged
-      ? 0
-      : Math.max(
-          1,
-          Number(
-            damageResult.damage
-          ) || 1
-        );
-
-
-  const enemyHP =
-    Math.max(
-      0,
-      Number(
-        enemy.hp
-      ) -
-      damage
-    );
-
-
-  /*
-   * IMPORTANT:
-   *
-   * Never directly UPDATE player_creatures here.
-   *
-   * The SpellEnemy adapter decides which combat
-   * system owns this enemy's HP.
-   */
-  await setSpellEnemyHP(
-    enemy,
-    enemyHP
-  );
-
-
+function damageResult(
+  spell: any,
+  result: Awaited<ReturnType<typeof dealRangerDamage>>,
+  hitText: string,
+  extraLog = "",
+): SpellHandlerResult {
+  const log = result.dodged
+    ? `🏹 ${spell.name} misses the enemy!`
+    : result.critical
+      ? `🏹 Critical! ${spell.name} ${hitText} for ${result.damage} damage!${extraLog}`
+      : `🏹 ${spell.name} ${hitText} for ${result.damage} damage!${extraLog}`;
   return {
-    damage,
-
-    enemyHP,
-
-    critical:
-      Boolean(
-        damageResult.crit
-      ),
-
-    dodged
+    log,
+    damage: result.damage,
+    enemyHP: result.enemyHP,
+    killedEnemy: result.enemyHP <= 0,
+    crit: result.critical,
+    dodged: result.dodged,
   };
 }
 
-
-// =====================================================
-// VOLLEY
-//
-// target_type = all_enemies
-//
-// Current single-enemy combat behavior:
-// Hits the current active enemy.
-//
-// Hunt combat:
-// Hits the Hunt quarry.
-//
-// Future dungeon / raid:
-// Once those encounters expose multiple SpellEnemy
-// targets, the combat layer can fan this spell out
-// across all enemies.
-// =====================================================
-
-export const volleyHandler:
-SpellHandlerDefinition = {
-
-  requiresEnemy:
-    true,
-
-
-  validate(spell) {
-
-    if (
-      (
-        Number(
-          spell.damage
-        ) || 0
-      ) <= 0
-    ) {
-
-      return (
-        `${spell.name} has invalid damage configuration`
-      );
-    }
-
-
-    return null;
-  },
-
-
-  async execute({
-    spell,
-    player,
-    enemy
-  }): Promise<SpellHandlerResult> {
-
-    if (
-      !enemy
-    ) {
-
-      throw new Error(
-        "Volley handler received no enemy"
-      );
-    }
-
-
-    const result =
-      await dealRangerDamage(
-        spell,
-        player,
-        enemy
-      );
-
-
-    let log:
-      string;
-
-
-    if (
-      result.dodged
-    ) {
-
-      log =
-        `🏹 ${spell.name} rains down, but the enemy evades the volley!`;
-
-    } else if (
-      result.critical
-    ) {
-
-      log =
-        `🏹 Critical! ${spell.name} rains down for ` +
-        `${result.damage} damage!`;
-
-    } else {
-
-      log =
-        `🏹 ${spell.name} rains down for ` +
-        `${result.damage} damage!`;
-    }
-
-
+export const quickShotHandler: SpellHandlerDefinition = {
+  requiresEnemy: true,
+  validate: validateDamage,
+  async execute({ spell, player, enemy }): Promise<SpellHandlerResult> {
+    if (!enemy) throw new Error("Quick Shot handler received no enemy");
+    const result = await dealRangerDamage(spell, player, enemy);
+    const base = damageResult(spell, result, "strikes");
+    const gauge = result.dodged
+      ? 0
+      : Math.max(0, rankNumber(spell, "casterGaugeGain", 10));
     return {
-      log,
-
-      enemyHP:
-        result.enemyHP,
-
-      killedEnemy:
-        result.enemyHP <=
-        0,
-
-      crit:
-        result.critical,
-
-      dodged:
-        result.dodged
+      ...base,
+      casterGaugeGain: gauge,
+      log: result.dodged
+        ? base.log
+        : `${base.log} You gain ${gauge} action gauge.`,
     };
-  }
+  },
 };
 
-
-// =====================================================
-// PIERCING ARROW
-//
-// Ignores 40% of the target's Defense for this hit.
-// =====================================================
-
-export const piercingArrowHandler:
-SpellHandlerDefinition = {
-
-  requiresEnemy:
-    true,
-
-
+export const poisonArrowHandler: SpellHandlerDefinition = {
+  requiresEnemy: true,
   validate(spell) {
-
-    if (
-      (
-        Number(
-          spell.damage
-        ) || 0
-      ) <= 0
-    ) {
-
-      return (
-        `${spell.name} has invalid damage configuration`
-      );
-    }
-
-
+    const dot = getConfiguredDot(spell);
+    if (dot.damage <= 0) return `${spell.name} has invalid poison damage`;
+    if (dot.duration <= 0 || dot.tickRate <= 0)
+      return `${spell.name} has invalid poison duration`;
     return null;
   },
-
-
   async execute({
+    playerId,
     spell,
     player,
-    enemy
+    enemy,
   }): Promise<SpellHandlerResult> {
-
-    if (
-      !enemy
-    ) {
-
-      throw new Error(
-        "Piercing Arrow handler received no enemy"
-      );
-    }
-
-
-    const defenseIgnorePct =
-      40;
-
-
-    const result =
-      await dealRangerDamage(
-        spell,
-        player,
-        enemy,
-        {
-          defenseIgnorePct
-        }
-      );
-
-
-    let log:
-      string;
-
-
-    if (
-      result.dodged
-    ) {
-
-      log =
-        `🏹 ${spell.name} misses the enemy!`;
-
-    } else if (
-      result.critical
-    ) {
-
-      log =
-        `🏹 Critical! ${spell.name} pierces the enemy ` +
-        `for ${result.damage} damage!`;
-
-    } else {
-
-      log =
-        `🏹 ${spell.name} pierces the enemy ` +
-        `for ${result.damage} damage!`;
-    }
-
-
-    if (
-      !result.dodged
-    ) {
-
-      log +=
-        ` The arrow ignores ${defenseIgnorePct}% of its Defense!`;
-    }
-
-
+    if (!enemy) throw new Error("Poison Arrow handler received no enemy");
+    const dot = getConfiguredDot(spell);
+    const scaled = calculateScaledSpellAmount(player, dot.damage);
+    const resolution = resolveDamageAgainstEnemy(player, enemy, scaled);
+    const totalDamage = Math.max(1, Number(resolution.damage) || 1);
+    await applySpellDot(enemy, {
+      sourcePlayerId: playerId,
+      spellId: Number(spell.id),
+      spellName: String(spell.name),
+      totalDamage,
+      durationSeconds: dot.duration,
+      tickRateSeconds: dot.tickRate,
+      immediateFirstTick: Boolean(spell.rank_config?.immediateFirstTick),
+    });
+    await applySpellDebuff(enemy, {
+      sourcePlayerId: playerId,
+      spellId: Number(spell.id),
+      spellName: String(spell.name),
+      stat: "poisoned",
+      value: 1,
+      durationSeconds: dot.duration,
+    });
     return {
-      log,
-
-      enemyHP:
-        result.enemyHP,
-
-      killedEnemy:
-        result.enemyHP <=
-        0,
-
-      crit:
-        result.critical,
-
-      dodged:
-        result.dodged
+      log: `☠ ${spell.name} poisons the enemy for ${totalDamage} damage over ${dot.duration}s!`,
+      enemyHP: Number(enemy.hp),
+      appliedStatus: true,
+      killedEnemy: false,
+      crit: Boolean(resolution.crit),
+      dodged: false,
     };
-  }
+  },
 };
 
-
-// =====================================================
-// DEADEYE
-//
-// Normal:
-// Deals heavy ranged damage.
-//
-// Execute:
-// At or below 25% enemy HP:
-//
-// - +75% damage
-// - guaranteed critical strike
-// =====================================================
-
-export const deadeyeHandler:
-SpellHandlerDefinition = {
-
-  requiresEnemy:
-    true,
-
-
-  validate(spell) {
-
-    if (
-      (
-        Number(
-          spell.damage
-        ) || 0
-      ) <= 0
-    ) {
-
-      return (
-        `${spell.name} has invalid damage configuration`
-      );
-    }
-
-
-    return null;
+export const aimedShotHandler: SpellHandlerDefinition = {
+  requiresEnemy: true,
+  validate: validateDamage,
+  async execute({ spell, player, enemy }): Promise<SpellHandlerResult> {
+    if (!enemy) throw new Error("Aimed Shot handler received no enemy");
+    const poisoned = await isPoisoned(enemy);
+    const poisonBonus = Math.max(
+      0,
+      rankNumber(spell, "poisonedDamageBonusPercent", 20),
+    );
+    const critBonus = Math.max(
+      0,
+      rankNumber(spell, "critChanceBonusPercent", 15),
+    );
+    const result = await dealRangerDamage(spell, player, enemy, {
+      damageMultiplier: poisoned ? 1 + poisonBonus / 100 : 1,
+      critChanceBonusPct: critBonus,
+      defenseIgnorePct: Math.max(
+        0,
+        rankNumber(spell, "talentDefenseIgnorePercent", 0),
+      ),
+    });
+    return damageResult(
+      spell,
+      result,
+      "finds its mark",
+      poisoned && !result.dodged
+        ? ` Poison increases the hit by ${poisonBonus}%.`
+        : "",
+    );
   },
+};
 
-
+export const volleyHandler: SpellHandlerDefinition = {
+  requiresEnemy: true,
+  validate: validateDamage,
   async execute({
+    playerId,
     spell,
     player,
-    enemy
+    enemy,
   }): Promise<SpellHandlerResult> {
+    if (!enemy) throw new Error("Volley handler received no enemy");
+    const poisoned = await isPoisoned(enemy);
+    const poisonBonus = Math.max(
+      0,
+      rankNumber(spell, "poisonedDamageBonusPercent", 20),
+    );
+    const result = await dealRangerDamage(spell, player, enemy, {
+      damageMultiplier: poisoned ? 1 + poisonBonus / 100 : 1,
+    });
 
-    if (
-      !enemy
-    ) {
+    const venomousRainPercent = Math.max(
+      0,
+      rankNumber(spell, "venomousRainEffectivenessPercent", 0),
+    );
 
-      throw new Error(
-        "Deadeye handler received no enemy"
-      );
-    }
-
-
-    // =================================================
-    // TARGET HEALTH
-    // =================================================
-
-    const currentHP =
-      Math.max(
-        0,
-        Number(
-          enemy.hp
-        ) || 0
-      );
-
-
-    const maxHP =
-      Math.max(
+    if (!result.dodged && result.enemyHP > 0 && venomousRainPercent > 0) {
+      const poisonDamage = Math.max(
         1,
-        Number(
-          enemy.maxhp
-        ) || 1
+        Math.floor((result.damage * venomousRainPercent) / 100),
       );
 
+      await applySpellDot(enemy, {
+        sourcePlayerId: playerId,
+        spellId: Number(spell.id),
+        spellName: `${spell.name} — Venomous Rain`,
+        totalDamage: poisonDamage,
+        durationSeconds: 12,
+        tickRateSeconds: 2,
+      });
 
-    const healthPercent =
-      Math.max(
-        0,
-        Math.min(
-          1,
-          currentHP /
-          maxHP
-        )
-      );
-
-
-    const executeActive =
-      healthPercent <=
-      0.25;
-
-
-    // =================================================
-    // DAMAGE
-    // =================================================
-
-    const result =
-      await dealRangerDamage(
-        spell,
-        player,
-        enemy,
-        {
-          damageMultiplier:
-            executeActive
-              ? 1.75
-              : 1,
-
-          forceCrit:
-            executeActive
-        }
-      );
-
-
-    // =================================================
-    // LOG
-    // =================================================
-
-    let log:
-      string;
-
-
-    if (
-      result.dodged
-    ) {
-
-      log =
-        `🎯 ${spell.name} misses the enemy!`;
-
-    } else if (
-      result.critical
-    ) {
-
-      log =
-        `🎯 Critical! ${spell.name} strikes for ` +
-        `${result.damage} damage!`;
-
-    } else {
-
-      log =
-        `🎯 ${spell.name} strikes for ` +
-        `${result.damage} damage!`;
+      await applySpellDebuff(enemy, {
+        sourcePlayerId: playerId,
+        spellId: Number(spell.id),
+        spellName: `${spell.name} — Venomous Rain`,
+        stat: "poisoned",
+        value: 1,
+        durationSeconds: 12,
+      });
     }
-
-
-    if (
-      executeActive &&
-      !result.dodged
-    ) {
-
-      log +=
-        ` The wounded target triggers Deadeye's lethal precision!`;
-    }
-
-
     return {
-      log,
-
-      enemyHP:
-        result.enemyHP,
-
-      killedEnemy:
-        result.enemyHP <=
-        0,
-
-      crit:
-        result.critical,
-
-      dodged:
-        result.dodged
+      ...damageResult(
+        spell,
+        result,
+        "rains down",
+        poisoned && !result.dodged
+          ? ` Poison increases the hit by ${poisonBonus}%.`
+          : "",
+      ),
+      targetsHit: result.dodged ? 0 : 1,
+      appliedStatus: !result.dodged && venomousRainPercent > 0,
     };
-  }
+  },
+};
+
+export const piercingArrowHandler: SpellHandlerDefinition = {
+  requiresEnemy: true,
+  validate: validateDamage,
+  async execute({
+    playerId,
+    spell,
+    player,
+    enemy,
+  }): Promise<SpellHandlerResult> {
+    if (!enemy) throw new Error("Piercing Arrow handler received no enemy");
+    const ignore = Math.max(0, rankNumber(spell, "defenseIgnorePercent", 40));
+    const armorBreak = Math.max(0, rankNumber(spell, "armorBreakPercent", 10));
+    const duration = Math.max(
+      1,
+      rankNumber(spell, "armorBreakDurationSeconds", 8),
+    );
+    const result = await dealRangerDamage(spell, player, enemy, {
+      defenseIgnorePct: ignore,
+    });
+    if (!result.dodged && result.enemyHP > 0) {
+      await applySpellDebuff(enemy, {
+        sourcePlayerId: playerId,
+        spellId: Number(spell.id),
+        spellName: String(spell.name),
+        stat: "damage_taken_pct",
+        value: armorBreak,
+        durationSeconds: duration,
+      });
+    }
+    return {
+      ...damageResult(
+        spell,
+        result,
+        "pierces the enemy",
+        !result.dodged
+          ? ` It ignores ${ignore}% Defense and breaks its armor by ${armorBreak}% for ${duration}s.`
+          : "",
+      ),
+      appliedStatus: !result.dodged && result.enemyHP > 0,
+    };
+  },
+};
+
+export const deadeyeHandler: SpellHandlerDefinition = {
+  requiresEnemy: true,
+  validate: validateDamage,
+  async execute({ spell, player, enemy }): Promise<SpellHandlerResult> {
+    if (!enemy) throw new Error("Deadeye handler received no enemy");
+    const currentHP = Math.max(0, Number(enemy.hp) || 0);
+    const maxHP = Math.max(1, Number(enemy.maxhp) || 1);
+    const healthFraction = Math.max(0, Math.min(1, currentHP / maxHP));
+    const missingHealthMax = Math.max(
+      0,
+      rankNumber(spell, "missingHealthDamageBonusMaxPercent", 50),
+    );
+    const threshold = Math.max(
+      0,
+      Math.min(100, rankNumber(spell, "executeThresholdPercent", 30)),
+    );
+    const executeBonus = Math.max(
+      0,
+      rankNumber(spell, "executeDamageBonusPercent", 75),
+    );
+    const defenseIgnore = Math.max(
+      0,
+      rankNumber(spell, "defenseIgnorePercent", 50),
+    );
+    const executeActive = healthFraction <= threshold / 100;
+    const missingHealthBonus = (1 - healthFraction) * missingHealthMax;
+    const result = await dealRangerDamage(spell, player, enemy, {
+      damageMultiplier:
+        1 + missingHealthBonus / 100 + (executeActive ? executeBonus / 100 : 0),
+      defenseIgnorePct: defenseIgnore,
+      forceCrit:
+        executeActive && Boolean(spell?.rank_config?.executeGuaranteedCrit),
+    });
+    return damageResult(
+      spell,
+      result,
+      "strikes",
+      executeActive && !result.dodged
+        ? " Deadeye's lethal precision executes the critically wounded target!"
+        : !result.dodged
+          ? ` Missing health increases the shot by ${Math.floor(missingHealthBonus)}%.`
+          : "",
+    );
+  },
 };

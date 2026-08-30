@@ -3,17 +3,61 @@ import { db } from "../db";
 import type { DerivedStats } from "./statEngine";
 import { getFinalPlayerStats } from "./playerService";
 import { resolveAttack } from "./combatEngine";
-import { handleCreatureKill } from "./killService";
-import { getCreatureDebuffTotals } from "./creatureDebuffService";
 import {
-  mitigateIncomingPlayerDamage
-} from "./playerDamageMitigationService";
+  COMBAT_TIMING,
+  advanceCombatActorGauge,
+  appendCombatDamageEvent,
+  appendCombatLog,
+  calculateDistributedTickDamage,
+  consumeCombatActorTurn,
+  getCombatActorReadyInMs,
+  getCombatATBFillRate,
+  getCombatATBTimeSeconds,
+  isCombatCooldownReady,
+  reduceCombatSpellCooldowns,
+  setCombatCooldown,
+} from "./combat";
+import { handleCreatureKill } from "./killService";
+import {
+  getCreatureDebuffTotals,
+  applyCreatureDebuff,
+  extendWarlordMarkDebuffs,
+} from "./creatureDebuffService";
+import { mitigateIncomingPlayerDamage } from "./playerDamageMitigationService";
+import {
+  getActiveBerserkerDamageMultiplier,
+  processBerserkerCriticalGauge,
+  convertBerserkerLifestealOverhealToShield
+} from "./spellTalents/handlers/berserkerTalentHandlers";
+import {
+  processWarlordBannerGaugeTick,
+  processWarlordMarkedHit,
+  processWarlordClaimThePrize,
+} from "./spellTalents/handlers/warlordTalentHandlers";
+import { processDuePlayerHots } from "./playerHotService";
 import {
   publishPlayerStatePatch,
   publishPlayerLevelUp,
 } from "../playerStateEvents";
 
 export type CombatActionType = "attack" | "spell" | "item";
+
+function buildWarlordMarkedCreature(playerCreatureId: number) {
+  return {
+    id: playerCreatureId,
+    sourceType: "player_creature",
+    getDebuffValue: async (stat: string) => {
+      const [[row]]: any = await db.query(
+        `SELECT MAX(value) AS value FROM player_creature_debuffs
+         WHERE player_creature_id=? AND stat=? AND expires_at>NOW(3)`,
+        [playerCreatureId, String(stat).trim().toLowerCase()],
+      );
+      return Math.max(0, Number(row?.value) || 0);
+    },
+    extendWarlordMark: (maximumExtensionSeconds: number) =>
+      extendWarlordMarkDebuffs(playerCreatureId, maximumExtensionSeconds),
+  };
+}
 
 export type CombatActor = {
   side: "player" | "enemy";
@@ -30,15 +74,14 @@ export type CombatActor = {
 
   stats: DerivedStats;
 
-  gauge: number;           // 0 - 100
+  gauge: number; // 0 - 100
   ready: boolean;
-  recoveryUntil: number;   // unix ms timestamp
+  recoveryUntil: number; // unix ms timestamp
 
-  atbRateMult: number;        // 0.0 - 2.0
+  atbRateMult: number; // 0.0 - 2.0
 
   cooldowns: Record<string, number>; // spell:12 => timestamp, item:health => timestamp
 };
-
 
 export type CombatDamageEvent = {
   id: number;
@@ -86,49 +129,27 @@ export type CombatSession = {
   };
 };
 
-
 const combatSessions = new Map<number, CombatSession>();
 
-const BASE_ATB_SECONDS = 6.0;
-const MIN_ATB_SECONDS = 3.0;
-const MAX_AGILITY = 500;
-const AGILITY_EXPONENT = 0.6;
-const PLAYER_AUTO_ATTACK_MS = 6000;
+const PLAYER_AUTO_ATTACK_MS = COMBAT_TIMING.playerAutoAttackMs;
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 function pushLog(session: CombatSession, line: string) {
-  session.log.push(line);
-  if (session.log.length > 50) {
-    session.log = session.log.slice(-50);
-  }
+  appendCombatLog(session.log, line, 50);
 }
 
 export function pushDamageEvent(
   session: CombatSession,
-  event: Omit<CombatDamageEvent, "id" | "createdAt">
+  event: Omit<CombatDamageEvent, "id" | "createdAt">,
 ) {
-  const amount = Math.max(
-    0,
-    Math.floor(Number(event.amount) || 0)
+  appendCombatDamageEvent(
+    session.damageEvents,
+    () => session.nextDamageEventId++,
+    event,
+    30,
   );
-
-  if (amount <= 0) return;
-
-  session.damageEvents.push({
-    id: session.nextDamageEventId++,
-    target: event.target,
-    amount,
-    crit: Boolean(event.crit),
-    kind: event.kind,
-    createdAt: Date.now()
-  });
-
-  if (session.damageEvents.length > 30) {
-    session.damageEvents =
-      session.damageEvents.slice(-30);
-  }
 }
 
 async function refreshSessionPlayer(session: CombatSession) {
@@ -176,7 +197,7 @@ async function refreshSessionEnemy(session: CombatSession) {
       AND pc.player_id = ?
     LIMIT 1
     `,
-    [session.enemyInstanceId, session.playerId]
+    [session.enemyInstanceId, session.playerId],
   );
 
   if (!enemyRow) return null;
@@ -197,63 +218,48 @@ async function refreshSessionEnemy(session: CombatSession) {
   const baseDescription = String(enemyRow.description ?? "");
   const affixDescription = String(enemyRow.affix_description ?? "");
 
-const baseEnemyAgility =
-  Math.floor(
-    Number(enemyRow.agility ?? 0) *
-    speedMult
-  ) + Number(debuffs.agility || 0);
+  const baseEnemyAgility =
+    Math.floor(Number(enemyRow.agility ?? 0) * speedMult) +
+    Number(debuffs.agility || 0);
 
-const attackSpeedSlowPct = Math.max(
-  0,
-  Math.min(
-    80,
-    Number(debuffs.attack_speed_pct || 0)
-  )
-);
+  const attackSpeedSlowPct = Math.max(
+    0,
+    Math.min(80, Number(debuffs.attack_speed_pct || 0)),
+  );
 
-const enemyAtbRateMult = Math.max(
-  0.2,
-  1 - attackSpeedSlowPct / 100
-);
+  const enemyAtbRateMult = Math.max(0.2, 1 - attackSpeedSlowPct / 100);
 
-const baseEnemyAttack =
-  Math.floor(
-    Number(enemyRow.attack ?? 0) *
-    attackMult
-  ) + Number(debuffs.attack || 0);
+  const baseEnemyAttack =
+    Math.floor(Number(enemyRow.attack ?? 0) * attackMult) +
+    Number(debuffs.attack || 0);
 
-const damageDealtReductionPct = Math.max(
-  0,
-  Math.min(
-    80,
-    Number(debuffs.damage_dealt_pct || 0)
-  )
-);
+  const damageDealtReductionPct = Math.max(
+    0,
+    Math.min(80, Number(debuffs.damage_dealt_pct || 0)),
+  );
 
-const finalEnemyAttack = Math.max(
-  0,
-  Math.floor(
-    baseEnemyAttack *
-    (
-      1 -
-      damageDealtReductionPct / 100
-    )
-  )
-);
+  const finalEnemyAttack = Math.max(
+    0,
+    Math.floor(baseEnemyAttack * (1 - damageDealtReductionPct / 100)),
+  );
 
-const damageTakenPct = Math.max(
-  0,
-  Number(debuffs.damage_taken_pct || 0)
-);
+  const damageTakenPct = Math.max(0, Number(debuffs.damage_taken_pct || 0));
 
-const damageTakenMult =
-  1 + damageTakenPct / 100;
+  const damageTakenMult = 1 + damageTakenPct / 100;
 
-  const enemyStats: DerivedStats = {
+  const spellDamageTakenMult =
+    1 + Math.max(0, Number(debuffs.spell_damage_taken_pct || 0)) / 100;
+
+  const enemyStats: DerivedStats & {
+    critChanceTakenPercent: number;
+    criticalDamageTakenPercent: number;
+  } = {
     level: Number(enemyRow.level ?? 1),
     attack: finalEnemyAttack,
-    defense: Math.floor(Number(enemyRow.defense ?? 0) * defenseMult) + Number(debuffs.defense || 0),
-    agility: Math.max(0,baseEnemyAgility),
+    defense:
+      Math.floor(Number(enemyRow.defense ?? 0) * defenseMult) +
+      Number(debuffs.defense || 0),
+    agility: Math.max(0, baseEnemyAgility),
     vitality: Number(debuffs.vitality || 0),
     intellect: Number(debuffs.intellect || 0),
     crit: Number(enemyRow.crit ?? 0) + Number(debuffs.crit || 0),
@@ -267,21 +273,31 @@ const damageTakenMult =
     damageReduction: 0,
     lifesteal: 0,
     healingReceivedMult: 1,
+    healingDealtMult: 1,
     atbRateMult: 1,
     damageTakenMult: damageTakenMult,
+    spellDamageTakenMult,
+    critChanceTakenPercent: Math.max(
+      0,
+      Number(debuffs.crit_chance_taken_pct || 0),
+    ),
+    criticalDamageTakenPercent: Math.max(
+      0,
+      Number(debuffs.critical_damage_taken_pct || 0),
+    ),
   };
 
-session.enemy.name = enemyDisplayName;
-session.enemy.hp = Number(enemyRow.hp ?? 0);
-session.enemy.maxHp = modifiedMaxHp;
-session.enemy.stats = enemyStats;
-session.enemy.level = Number(enemyRow.level ?? 1);
+  session.enemy.name = enemyDisplayName;
+  session.enemy.hp = Number(enemyRow.hp ?? 0);
+  session.enemy.maxHp = modifiedMaxHp;
+  session.enemy.stats = enemyStats;
+  session.enemy.level = Number(enemyRow.level ?? 1);
 
-session.enemy.atbRateMult = enemyAtbRateMult;
+  session.enemy.atbRateMult = enemyAtbRateMult;
 
-session.enemy.description = enemyRow.affix_name
-  ? `${baseDescription}\n\n${affixDescription}`
-  : baseDescription;
+  session.enemy.description = enemyRow.affix_name
+    ? `${baseDescription}\n\n${affixDescription}`
+    : baseDescription;
 
   return enemyStats;
 }
@@ -296,13 +312,13 @@ async function processEnemyDots(session: CombatSession) {
       AND next_tick_at <= NOW()
       AND expires_at > NOW()
     `,
-    [session.enemyInstanceId]
+    [session.enemyInstanceId],
   );
 
   if (!dots?.length) {
     await db.query(
       `DELETE FROM player_creature_dots WHERE player_creature_id = ? AND expires_at <= NOW()`,
-      [session.enemyInstanceId]
+      [session.enemyInstanceId],
     );
     return;
   }
@@ -312,30 +328,116 @@ async function processEnemyDots(session: CombatSession) {
 
   for (const dot of dots) {
     const totalDamage = Number(dot.total_damage || dot.damage || 1);
-    const totalTicks = Math.max(
-      1,
-      Number(dot.total_ticks || 1)
-    );
+    const totalTicks = Math.max(1, Number(dot.total_ticks || 1));
 
     const ticksApplied = Number(dot.ticks_applied || 0);
 
-    const damageBefore = Math.floor(
-      (totalDamage * ticksApplied) / totalTicks
+    const tickDamage = calculateDistributedTickDamage(
+      totalDamage,
+      totalTicks,
+      ticksApplied,
     );
 
-    const damageAfter = Math.floor(
-      (totalDamage * (ticksApplied + 1)) / totalTicks
+    const sourceParts = Object.fromEntries(
+      String(dot.source || "")
+        .split("|")
+        .slice(1)
+        .map((part: string) => part.split(":")),
     );
+    const defensePerTick = Number(sourceParts.dr) || 0;
+    const maxDefenseStacks = Number(sourceParts.ds) || 0;
+    const manaPercent = Number(sourceParts.mp) || 0;
+    const escalationPerTick = Number(sourceParts.ep) || 0;
+    const escalationCap = Number(sourceParts.ec) || 0;
+    const tickHealingPercent = Number(sourceParts.th) || 0;
 
-    const tickDamage = Math.max(
+    if (defensePerTick > 0 && maxDefenseStacks > 0) {
+      const stacks = Math.min(maxDefenseStacks, ticksApplied + 1);
+      const reduction = -Math.max(
+        1,
+        Math.floor(
+          (Number(session.enemy.stats.defense || 0) * defensePerTick * stacks) /
+            100,
+        ),
+      );
+      await applyCreatureDebuff(
+        session.enemyInstanceId,
+        "defense",
+        reduction,
+        Number(dot.tick_interval || 1) * Math.max(1, totalTicks - ticksApplied),
+        `templar_brand_exposure:${dot.id}`,
+      );
+    }
+
+    if (manaPercent > 0) {
+      const restored = Math.max(
+        1,
+        Math.floor((session.player.maxSp * manaPercent) / 100),
+      );
+      session.player.sp = Math.min(
+        session.player.maxSp,
+        session.player.sp + restored,
+      );
+      session.player.stats.spoints = session.player.sp;
+      await db.query(`UPDATE players SET spoints = ? WHERE id = ?`, [
+        session.player.sp,
+        session.playerId,
+      ]);
+    }
+
+    const escalatedTickDamage = Math.max(
       0,
-      damageAfter - damageBefore
+      Math.floor(
+        tickDamage *
+          (1 + Math.min(escalationCap, escalationPerTick * ticksApplied) / 100),
+      ),
     );
 
-    enemyHP = Math.max(
-      0,
-      enemyHP - tickDamage
-    );
+    if (
+      tickHealingPercent > 0 &&
+      escalatedTickDamage > 0 &&
+      session.player.hp > 0
+    ) {
+      const potentialHealing = Math.max(
+        1,
+        Math.floor((escalatedTickDamage * tickHealingPercent) / 100),
+      );
+
+      const previousHP = session.player.hp;
+
+      session.player.hp = Math.min(
+        session.player.maxHp,
+        session.player.hp + potentialHealing,
+      );
+
+      const actualHealing = Math.max(0, session.player.hp - previousHP);
+
+      session.player.stats.hpoints = session.player.hp;
+
+      if (actualHealing > 0) {
+        await db.query(`UPDATE players SET hpoints = ? WHERE id = ?`, [
+          session.player.hp,
+          session.playerId,
+        ]);
+
+        pushLog(
+          session,
+          `🩸 Scent of Blood restores ${actualHealing} HP.`,
+        );
+      }
+    }
+
+    enemyHP = Math.max(0, enemyHP - escalatedTickDamage);
+
+    if (escalatedTickDamage > 0) {
+      const markedHit = await processWarlordMarkedHit(
+        buildWarlordMarkedCreature(session.enemyInstanceId),
+        session.playerId,
+        escalatedTickDamage,
+      );
+      session.player.gauge = Math.min(100, session.player.gauge + markedHit.gaugeGain);
+      session.player.ready = session.player.gauge >= 100;
+    }
 
     await db.query(
       `
@@ -343,7 +445,7 @@ async function processEnemyDots(session: CombatSession) {
       SET hp = ?
       WHERE id = ?
       `,
-      [enemyHP, session.enemyInstanceId]
+      [enemyHP, session.enemyInstanceId],
     );
 
     if (ticksApplied + 1 >= totalTicks) {
@@ -352,7 +454,7 @@ async function processEnemyDots(session: CombatSession) {
         DELETE FROM player_creature_dots
         WHERE id = ?
         `,
-        [dot.id]
+        [dot.id],
       );
     } else {
       await db.query(
@@ -366,32 +468,45 @@ async function processEnemyDots(session: CombatSession) {
           )
         WHERE id = ?
         `,
-        [dot.id]
+        [dot.id],
       );
     }
 
     pushDamageEvent(session, {
       target: "enemy",
-      amount: tickDamage,
+      amount: escalatedTickDamage,
       crit: false,
-      kind: "dot"
+      kind: "dot",
     });
 
-    pushLog(
-      session,
-      `🔥 Enemy takes ${tickDamage} damage.`
-    );
+    pushLog(session, `🔥 Enemy takes ${escalatedTickDamage} damage.`);
   }
 
   await db.query(
     `DELETE FROM player_creature_dots WHERE player_creature_id = ? AND expires_at <= NOW()`,
-    [session.enemyInstanceId]
+    [session.enemyInstanceId],
   );
 
   session.enemy.hp = enemyHP;
 
   if (enemyHP <= 0) {
-    reward = await handleCreatureKill(session.playerId, session.enemyInstanceId);
+    const claim = await processWarlordClaimThePrize(
+      buildWarlordMarkedCreature(session.enemyInstanceId),
+      [session.playerId],
+    );
+    const claimedPlayer = claim.players[0];
+    if (claimedPlayer) {
+      session.player.hp = claimedPlayer.hp;
+      session.player.sp = claimedPlayer.sp;
+      session.player.stats.hpoints = claimedPlayer.hp;
+      session.player.stats.spoints = claimedPlayer.sp;
+    }
+    session.player.gauge = Math.min(100, session.player.gauge + claim.gaugeGain);
+    session.player.ready = session.player.gauge >= 100;
+    reward = await handleCreatureKill(
+      session.playerId,
+      session.enemyInstanceId,
+    );
 
     session.state = "victory";
     session.rewards = {
@@ -400,7 +515,7 @@ async function processEnemyDots(session: CombatSession) {
       levelUp: reward?.levelUp,
       chest: reward?.chest ?? null,
       quest: reward?.quest ?? null,
-      huntProgress: reward?.huntProgress ?? null
+      huntProgress: reward?.huntProgress ?? null,
     };
 
     /*
@@ -415,140 +530,49 @@ async function processEnemyDots(session: CombatSession) {
      * authoritative reconciliation immediately.
      * This is event-driven, not polling.
      */
-    publishPlayerStatePatch(
-      session.playerId,
-      {
-        refreshDerivedStats: true
-      }
-    );
-
+    publishPlayerStatePatch(session.playerId, {
+      refreshDerivedStats: true,
+    });
 
     if (reward?.levelUp) {
-      publishPlayerLevelUp(
-        session.playerId,
-        reward.levelUp
-      );
+      publishPlayerLevelUp(session.playerId, reward.levelUp);
     }
 
     pushLog(session, "🏆 Enemy defeated!");
-    if (reward?.expGained) pushLog(session, `✨ You gained ${reward.expGained} EXP!`);
-    if (reward?.goldGained) pushLog(session, `💰 You gained ${reward.goldGained} gold!`);
+    if (reward?.expGained)
+      pushLog(session, `✨ You gained ${reward.expGained} EXP!`);
+    if (reward?.goldGained)
+      pushLog(session, `💰 You gained ${reward.goldGained} gold!`);
     if (reward?.levelUp) pushLog(session, "⬆ LEVEL UP!");
   }
 }
 
 async function processPlayerHots(session: CombatSession) {
   if (session.state !== "active") return;
-
-  const [hots]: any = await db.query(
-    `
-    SELECT *
-    FROM player_hots
-    WHERE player_id = ?
-      AND next_tick_at <= NOW()
-      AND expires_at > NOW()
-    `,
-    [session.playerId]
-  );
-
-  if (!hots?.length) {
-    await db.query(
-      `
-      DELETE FROM player_hots
-      WHERE player_id = ?
-        AND expires_at <= NOW()
-      `,
-      [session.playerId]
-    );
-
-    return;
-  }
-
-  const player = await getFinalPlayerStats(
-    session.playerId
-  );
-
-  if (!player) return;
-
-  let playerHP = Number(player.hpoints || 0);
-  const maxPlayerHP = Math.max(
-    1,
-    Number(player.maxhp || 1)
-  );
-
-  for (const hot of hots) {
-    const healing = Math.max(
-      0,
-      Number(hot.healing || 0)
-    );
-
-    const previousHP = playerHP;
-
-    playerHP = Math.min(
-      maxPlayerHP,
-      playerHP + healing
-    );
-
-    const actualHealing = Math.max(
-      0,
-      playerHP - previousHP
-    );
-
-    await db.query(
-      `
-      UPDATE player_hots
-      SET next_tick_at =
-        DATE_ADD(
-          next_tick_at,
-          INTERVAL tick_interval SECOND
-        )
-      WHERE id = ?
-      `,
-      [hot.id]
-    );
-
-    if (actualHealing > 0) {
-    const displayName =
-      String(
-        hot.display_name ||
-        "Healing over Time"
+  const ticks = await processDuePlayerHots(session.playerId);
+  for (const tick of ticks) {
+    session.player.hp = tick.newHP;
+    session.player.maxHp = tick.maxHP;
+    if (tick.gaugeGain > 0) {
+      session.player.gauge = Math.min(
+        100,
+        session.player.gauge + tick.gaugeGain,
       );
-
-    pushLog(
-      session,
-      `✨ ${displayName} restores ${actualHealing} HP.`
-    );
+      session.player.ready = session.player.gauge >= 100;
     }
+    if (tick.healing > 0)
+      pushLog(session, `✨ ${tick.displayName} restores ${tick.healing} HP.`);
+    if (tick.refreshed)
+      pushLog(session, `🩸 ${tick.displayName} renews itself!`);
+    if (tick.casterEchoHealing > 0 && tick.casterEchoPlayerId === session.playerId) {
+      session.player.hp = Math.min(session.player.maxHp, session.player.hp + tick.casterEchoHealing);
+      pushLog(session, `🌱 Symbiotic Growth restores ${tick.casterEchoHealing} HP.`);
+    }
+    publishPlayerStatePatch(session.playerId, {
+      hpoints: tick.newHP,
+      maxhp: tick.maxHP,
+    });
   }
-
-  await db.query(
-    `
-    UPDATE players
-    SET hpoints = ?
-    WHERE id = ?
-    `,
-    [playerHP, session.playerId]
-  );
-
-  publishPlayerStatePatch(
-    session.playerId,
-    {
-      hpoints: playerHP,
-      maxhp: maxPlayerHP
-    }
-  );
-
-  await db.query(
-    `
-    DELETE FROM player_hots
-    WHERE player_id = ?
-      AND expires_at <= NOW()
-    `,
-    [session.playerId]
-  );
-
-  session.player.hp = playerHP;
-  session.player.maxHp = maxPlayerHP;
 }
 
 async function processPlayerAutoAttack(session: CombatSession) {
@@ -567,52 +591,76 @@ async function processPlayerAutoAttack(session: CombatSession) {
 
   const result = resolveAttack(session.player.stats as any, enemyStats as any);
 
-  const damage = Math.max(0, Number(result.damage || 0));
+  const deathWishMultiplier = await getActiveBerserkerDamageMultiplier(
+    session.playerId, session.player.hp, session.player.maxHp
+  );
+  const damage = Math.max(0, Math.floor(Number(result.damage || 0) * deathWishMultiplier));
   const newEnemyHP = Math.max(0, session.enemy.hp - damage);
 
-  await db.query(
-    `UPDATE player_creatures SET hp = ? WHERE id = ?`,
-    [newEnemyHP, session.enemyInstanceId]
-  );
+  await db.query(`UPDATE player_creatures SET hp = ? WHERE id = ?`, [
+    newEnemyHP,
+    session.enemyInstanceId,
+  ]);
 
   session.enemy.hp = newEnemyHP;
 
+  if (!result.dodged && damage > 0) {
+    const markedHit = await processWarlordMarkedHit(
+      buildWarlordMarkedCreature(session.enemyInstanceId),
+      session.playerId,
+      damage,
+    );
+    session.player.gauge = Math.min(100, session.player.gauge + markedHit.gaugeGain);
+    session.player.ready = session.player.gauge >= 100;
+  }
+
   if (!result.dodged) {
-  pushDamageEvent(session, {
-    target: "enemy",
-    amount: damage,
-    crit: Boolean(result.crit),
-    kind: "attack"
-  });
-}
+    pushDamageEvent(session, {
+      target: "enemy",
+      amount: damage,
+      crit: Boolean(result.crit),
+      kind: "attack",
+    });
+  }
 
   pushLog(
     session,
     result.dodged
       ? "⚔ Your auto attack missed!"
-      : `⚔ You auto attack for ${damage}${result.crit ? " (CRITICAL!)" : ""}`
+      : `⚔ You auto attack for ${damage}${result.crit ? " (CRITICAL!)" : ""}`,
   );
 
   let lifestealHeal = 0;
 
-  if (!result.dodged && damage > 0 && Number(session.player.stats.lifesteal || 0) > 0) {
-    lifestealHeal = Math.floor(damage * Number(session.player.stats.lifesteal || 0));
+  if (
+    !result.dodged &&
+    damage > 0 &&
+    Number(session.player.stats.lifesteal || 0) > 0
+  ) {
+    const rawLifesteal = Math.floor(
+      damage * Number(session.player.stats.lifesteal || 0),
+    );
+    lifestealHeal = Math.min(rawLifesteal, Math.max(0, session.player.maxHp - session.player.hp));
+    await convertBerserkerLifestealOverhealToShield(
+      session.playerId,
+      Math.max(0, rawLifesteal - lifestealHeal),
+    );
 
     if (lifestealHeal > 0) {
-      session.player.hp = Math.min(session.player.maxHp, session.player.hp + lifestealHeal);
-
-      await db.query(
-        `UPDATE players SET hpoints = ? WHERE id = ?`,
-        [session.player.hp, session.playerId]
+      session.player.hp = Math.min(
+        session.player.maxHp,
+        session.player.hp + lifestealHeal,
       );
 
-      publishPlayerStatePatch(
+      await db.query(`UPDATE players SET hpoints = ? WHERE id = ?`, [
+        session.player.hp,
         session.playerId,
-        {
-          hpoints: session.player.hp,
-          maxhp: session.player.maxHp
-        }
-      );
+      ]);
+
+      publishPlayerStatePatch(session.playerId, {
+        hpoints: session.player.hp,
+        maxhp: session.player.maxHp,
+      });
 
       pushLog(session, `🩸 You restore ${lifestealHeal} HP.`);
     }
@@ -621,7 +669,23 @@ async function processPlayerAutoAttack(session: CombatSession) {
   session.nextPlayerAutoAttackAt = now + PLAYER_AUTO_ATTACK_MS;
 
   if (newEnemyHP <= 0) {
-    const reward = await handleCreatureKill(session.playerId, session.enemyInstanceId);
+    const claim = await processWarlordClaimThePrize(
+      buildWarlordMarkedCreature(session.enemyInstanceId),
+      [session.playerId],
+    );
+    const claimedPlayer = claim.players[0];
+    if (claimedPlayer) {
+      session.player.hp = claimedPlayer.hp;
+      session.player.sp = claimedPlayer.sp;
+      session.player.stats.hpoints = claimedPlayer.hp;
+      session.player.stats.spoints = claimedPlayer.sp;
+    }
+    session.player.gauge = Math.min(100, session.player.gauge + claim.gaugeGain);
+    session.player.ready = session.player.gauge >= 100;
+    const reward = await handleCreatureKill(
+      session.playerId,
+      session.enemyInstanceId,
+    );
 
     session.state = "victory";
     session.rewards = {
@@ -630,7 +694,7 @@ async function processPlayerAutoAttack(session: CombatSession) {
       levelUp: reward?.levelUp,
       chest: reward?.chest ?? null,
       quest: reward?.quest ?? null,
-      huntProgress: reward?.huntProgress ?? null
+      huntProgress: reward?.huntProgress ?? null,
     };
 
     /*
@@ -645,24 +709,19 @@ async function processPlayerAutoAttack(session: CombatSession) {
      * authoritative reconciliation immediately.
      * This is event-driven, not polling.
      */
-    publishPlayerStatePatch(
-      session.playerId,
-      {
-        refreshDerivedStats: true
-      }
-    );
-
+    publishPlayerStatePatch(session.playerId, {
+      refreshDerivedStats: true,
+    });
 
     if (reward?.levelUp) {
-      publishPlayerLevelUp(
-        session.playerId,
-        reward.levelUp
-      );
+      publishPlayerLevelUp(session.playerId, reward.levelUp);
     }
 
     pushLog(session, "🏆 Enemy defeated!");
-    if (reward?.expGained) pushLog(session, `✨ You gained ${reward.expGained} EXP!`);
-    if (reward?.goldGained) pushLog(session, `💰 You gained ${reward.goldGained} gold!`);
+    if (reward?.expGained)
+      pushLog(session, `✨ You gained ${reward.expGained} EXP!`);
+    if (reward?.goldGained)
+      pushLog(session, `💰 You gained ${reward.goldGained} gold!`);
     if (reward?.levelUp) pushLog(session, "⬆ LEVEL UP!");
   }
 }
@@ -673,8 +732,6 @@ type ShieldAbsorbResult = {
   remainingDamage: number;
   shieldBroken: boolean;
 };
-
-
 
 type AegisResult = {
   damage: number;
@@ -701,184 +758,263 @@ async function processEnemyAction(session: CombatSession) {
     return;
   }
 
-const result = resolveAttack(
-  enemyStats,
-  player as any
-);
+  const result = resolveAttack(enemyStats, player as any);
 
-const mitigatedDamage = Math.max(
-  0,
-  Math.floor(
-    Number(result.damage) || 0
-  )
-);
+  const mitigatedDamage = Math.max(0, Math.floor(Number(result.damage) || 0));
 
-const mitigation =
-  result.dodged
+  const mitigation = result.dodged
     ? null
     : await mitigateIncomingPlayerDamage(
         session.playerId,
         session.player.hp,
-        mitigatedDamage
+        mitigatedDamage,
+        session.player.maxHp,
       );
 
-const hpDamage =
-  result.dodged
+  const hpDamage = result.dodged
     ? 0
-    : mitigation?.finalDamage ??
-      mitigatedDamage;
+    : (mitigation?.finalDamage ?? mitigatedDamage);
 
-const absorbedDamage =
-  mitigation?.absorbedDamage ??
-  0;
+  const absorbedDamage = mitigation?.absorbedDamage ?? 0;
 
-const shieldBroken =
-  mitigation?.shieldBroken ??
-  false;
+  const shieldBroken = mitigation?.shieldBroken ?? false;
 
-const interceptTriggered =
-  mitigation?.interceptTriggered ??
-  false;
+  const interceptTriggered = mitigation?.interceptTriggered ?? false;
 
-const interceptReductionPercent =
-  mitigation?.interceptReductionPercent ??
-  0;
+  const interceptReductionPercent = mitigation?.interceptReductionPercent ?? 0;
 
-const aegisTriggered =
-  mitigation?.aegisTriggered ??
-  false;
+  const aegisTriggered = mitigation?.aegisTriggered ?? false;
 
-const aegisPreventedDeath =
-  mitigation?.aegisPreventedDeath ??
-  false;
+  const aegisPreventedDeath = mitigation?.aegisPreventedDeath ?? false;
 
-const aegisReductionPercent =
-  mitigation?.aegisReductionPercent ??
-  0;
+  const aegisReductionPercent = mitigation?.aegisReductionPercent ?? 0;
 
-const newHP = Math.max(
-  0,
-  session.player.hp - hpDamage
-);
+  const newHP = Math.max(
+    0,
+    Math.min(
+      session.player.maxHp,
+      session.player.hp -
+        hpDamage +
+        (mitigation?.aegisHealing ?? 0) +
+        (mitigation?.shieldBreakHealing ?? 0) +
+        (mitigation?.thornsHealing ?? 0) +
+        Math.floor(
+          (session.player.maxHp *
+            (mitigation?.shieldBreakPartyHealPercent ?? 0)) /
+            100,
+        ),
+    ),
+  );
 
-session.player.hp = newHP;
+  session.player.hp = newHP;
 
-await db.query(
-  `
+  if ((mitigation?.sageTriggerGaugeGain ?? 0) > 0) {
+    session.player.gauge = Math.min(100, session.player.gauge + mitigation!.sageTriggerGaugeGain);
+    session.player.ready = session.player.gauge >= 100;
+    pushLog(session, `🌳 Undying Grove restores ${mitigation!.sageReviveHealing} HP and grants ${mitigation!.sageTriggerGaugeGain} action gauge!`);
+  }
+
+  if ((mitigation?.voidFeedbackDamage ?? 0) > 0) {
+    const reflected = Math.min(
+      session.enemy.hp,
+      mitigation!.voidFeedbackDamage,
+    );
+    session.enemy.hp = Math.max(0, session.enemy.hp - reflected);
+    await db.query(`UPDATE player_creatures SET hpoints=? WHERE id=?`, [
+      session.enemy.hp,
+      session.enemyInstanceId,
+    ]);
+    pushLog(
+      session,
+      `🌌 Void Feedback strikes ${session.enemy.name} for ${reflected} damage!`,
+    );
+  }
+
+  if ((mitigation?.thornsDamage ?? 0) > 0) {
+    const reflected = Math.min(session.enemy.hp, mitigation!.thornsDamage);
+    session.enemy.hp = Math.max(0, session.enemy.hp - reflected);
+    await db.query(`UPDATE player_creatures SET hpoints = ? WHERE id = ?`, [
+      session.enemy.hp,
+      session.enemyInstanceId,
+    ]);
+    pushLog(
+      session,
+      mitigation?.knightThornsTriggered
+        ? `🛡️ Your defenses retaliate against ${session.enemy.name} for ${reflected} damage!`
+        : `🌿 Ironbark retaliates against ${session.enemy.name} for ${reflected} damage!`,
+    );
+  }
+
+  if ((mitigation?.thornsHealing ?? 0) > 0) {
+    pushLog(
+      session,
+      `🌱 Living Bark restores ${mitigation!.thornsHealing} HP!`,
+    );
+  }
+
+  if ((mitigation?.shieldBreakHealing ?? 0) > 0) {
+    pushLog(
+      session,
+      `🌱 Nature's Aegis blooms, restoring ${mitigation!.shieldBreakHealing} HP!`,
+    );
+  }
+
+  if ((mitigation?.shieldBreakPartyHealPercent ?? 0) > 0) {
+    pushLog(
+      session,
+      `🌸 Blooming Aegis restores ${mitigation!.shieldBreakPartyHealPercent}% maximum HP!`,
+    );
+  }
+
+  if (mitigation?.sentinelDeathProtectionTriggered) {
+    pushLog(
+      session,
+      `🌲 Ancient Protector prevents a lethal blow and restores ${mitigation.sentinelReviveHealing} HP!`,
+    );
+  }
+
+  if (mitigation?.shieldReformed) {
+    pushLog(
+      session,
+      mitigation.knightShieldReformed
+        ? `🛡️ Layered Plating reforms Bulwark!`
+        : `🌿 Layered Canopy reforms Nature's Aegis!`,
+    );
+  }
+
+  if (mitigation?.knightSecondWindTriggered) {
+    pushLog(session, `🛡️ Second Wind restores ${mitigation.aegisHealing} HP!`);
+  }
+
+  if (!result.dodged && result.crit) {
+    const gaugeGain = await processBerserkerCriticalGauge(session.playerId, true);
+    if (gaugeGain > 0) {
+      session.player.gauge = Math.min(100, session.player.gauge + gaugeGain);
+      session.player.ready = session.player.gauge >= 100;
+      pushLog(session, `🔥 Furious Onslaught grants ${gaugeGain} action gauge!`);
+    }
+  }
+  if (mitigation?.berserkerRefuseToFallTriggered) {
+    pushLog(session, `🩸 Refuse to Fall prevents a lethal blow, but Blood Rage ends!`);
+  }
+
+  if (mitigation?.shieldBreakReductionApplied) {
+    pushLog(session, `🌳 Barkskin Aftermath hardens your defenses!`);
+  }
+
+  if (mitigation?.shieldBreakHotApplied) {
+    pushLog(session, `🌱 Seeds of Renewal begins restoring your health!`);
+  }
+
+  await db.query(
+    `
   UPDATE players
   SET hpoints = ?
   WHERE id = ?
   `,
-  [newHP, session.playerId]
-);
+    [newHP, session.playerId],
+  );
 
-publishPlayerStatePatch(
-  session.playerId,
-  {
+  publishPlayerStatePatch(session.playerId, {
     hpoints: newHP,
-    maxhp: session.player.maxHp
+    maxhp: session.player.maxHp,
+  });
+
+  if (
+    mitigation?.linkedShieldBuffRemoved ||
+    mitigation?.aegisFollowupReductionPercent
+  ) {
+    await refreshSessionPlayer(session);
   }
-);
 
-if (result.dodged) {
-  pushLog(
-    session,
-    `💨 ${session.enemy.name} missed you!`
-  );
-} else {
-  let attackLog =
-    `💥 ${session.enemy.name} hits you`;
-
-  if (hpDamage > 0) {
-    attackLog += ` for ${hpDamage}`;
-  } else if (absorbedDamage > 0) {
-    attackLog += ", but your shield absorbs the attack";
-  } else if (aegisTriggered) {
-    attackLog += ", but Aegis of Faith negates the attack";
+  if (result.dodged) {
+    pushLog(session, `💨 ${session.enemy.name} missed you!`);
   } else {
-    attackLog += " for no damage";
+    let attackLog = `💥 ${session.enemy.name} hits you`;
+
+    if (hpDamage > 0) {
+      attackLog += ` for ${hpDamage}`;
+    } else if (absorbedDamage > 0) {
+      attackLog += ", but your shield absorbs the attack";
+    } else if (aegisTriggered) {
+      attackLog += ", but Aegis of Faith negates the attack";
+    } else {
+      attackLog += " for no damage";
+    }
+
+    if (result.crit) {
+      attackLog += " (CRITICAL!)";
+    }
+
+    if (!result.dodged && hpDamage > 0) {
+      pushDamageEvent(session, {
+        target: "player",
+        amount: hpDamage,
+        crit: Boolean(result.crit),
+        kind: "attack",
+      });
+    }
+
+    pushLog(session, `${attackLog}!`);
+
+    if (absorbedDamage > 0) {
+      pushLog(session, `🛡️ Your shield absorbs ${absorbedDamage} damage.`);
+    }
+
+    if (shieldBroken) {
+      pushLog(session, "💥 Your shield shatters!");
+    }
+
+    if (interceptTriggered) {
+      pushLog(
+        session,
+        `🛡️ Intercept reduces the attack by ` +
+          `${interceptReductionPercent}%!`,
+      );
+    }
+
+    if (aegisTriggered && aegisReductionPercent > 0) {
+      pushLog(
+        session,
+        `✨ Aegis of Faith reduces the attack by ` +
+          `${aegisReductionPercent}%!`,
+      );
+    }
+
+    if (aegisPreventedDeath) {
+      pushLog(session, "🕊️ Aegis of Faith prevents a lethal blow!");
+      if ((mitigation?.aegisHealing ?? 0) > 0) {
+        pushLog(
+          session,
+          `💚 Undying Faith restores ${mitigation?.aegisHealing} health!`,
+        );
+      }
+    }
+    if (mitigation?.bloodweaverDeathProtectionTriggered) {
+      pushLog(
+        session,
+        `🩸 Life Beyond Death restores you to ${mitigation.bloodweaverReviveHealing} health!`,
+      );
+    }
   }
-
-  if (result.crit) {
-    attackLog += " (CRITICAL!)";
-  }
-
-  if (!result.dodged && hpDamage > 0) {
-    pushDamageEvent(session, {
-      target: "player",
-      amount: hpDamage,
-      crit: Boolean(result.crit),
-      kind: "attack"
-    });
-  }
-
-  pushLog(
-    session,
-    `${attackLog}!`
-  );
-
-  if (absorbedDamage > 0) {
-    pushLog(
-      session,
-      `🛡️ Your shield absorbs ${absorbedDamage} damage.`
-    );
-  }
-
-  if (shieldBroken) {
-    pushLog(
-      session,
-      "💥 Your shield shatters!"
-    );
-  }
-
-  if (interceptTriggered) {
-  pushLog(
-    session,
-    `🛡️ Intercept reduces the attack by ` +
-    `${interceptReductionPercent}%!`
-  );
-}
-
-  if (aegisTriggered) {
-  pushLog(
-    session,
-    `✨ Aegis of Faith reduces the attack by ` +
-    `${aegisReductionPercent}%!`
-  );
-}
-
-if (aegisPreventedDeath) {
-  pushLog(
-    session,
-    "🕊️ Aegis of Faith prevents a lethal blow!"
-  );
-}
-}
   consumeActorTurn(session.enemy, 450);
 
   if (newHP <= 0) {
-    await db.query(`DELETE FROM player_creatures WHERE player_id = ?`, [session.playerId]);
+    await db.query(`DELETE FROM player_creatures WHERE player_id = ?`, [
+      session.playerId,
+    ]);
 
     session.state = "defeat";
     pushLog(session, "☠ You were slain!");
   }
 }
 
-
-
-
-
 export function getATBTimeSeconds(agility: number) {
-  const agi = Math.max(0, Math.min(MAX_AGILITY, Number(agility || 0)));
-
-  const progress = Math.pow(agi / MAX_AGILITY, AGILITY_EXPONENT);
-
-  return BASE_ATB_SECONDS -
-    progress * (BASE_ATB_SECONDS - MIN_ATB_SECONDS);
+  return getCombatATBTimeSeconds(agility);
 }
 
 export function getATBFillRate(agility: number) {
-  return 100 / getATBTimeSeconds(agility);
+  return getCombatATBFillRate(agility);
 }
 
 export function getCombatSession(playerId: number) {
@@ -898,27 +1034,17 @@ export function getActorReadyInMs(actor: CombatActor) {
     return actor.recoveryUntil - now;
   }
 
-  const baseFillRate =
-    getATBFillRate(actor.stats.agility);
-
-  const atbRateMult = Math.max(
-    0.01,
-    Number(actor.atbRateMult) || 1
-  );
-
-  const fillRate =
-    baseFillRate * atbRateMult;
-  const remainingGauge = Math.max(0, 100 - actor.gauge);
-
-  return Math.ceil((remainingGauge / Math.max(fillRate, 0.001)) * 1000);
+  return Math.ceil(getCombatActorReadyInMs(actor, now));
 }
 
-export async function createCombatSession(playerId: number): Promise<CombatSession | null> {
+export async function createCombatSession(
+  playerId: number,
+): Promise<CombatSession | null> {
   const player = await getFinalPlayerStats(playerId);
   if (!player) return null;
 
-const [[enemyRow]]: any = await db.query(
-  `
+  const [[enemyRow]]: any = await db.query(
+    `
   SELECT
     pc.id,
     pc.hp,
@@ -936,34 +1062,35 @@ const [[enemyRow]]: any = await db.query(
   WHERE pc.player_id = ?
   LIMIT 1
   `,
-  [playerId]
-);
+    [playerId],
+  );
 
   if (!enemyRow) return null;
 
   const now = Date.now();
 
-const enemyStats: DerivedStats = {
-  level: Number(enemyRow.level ?? 1),
-  attack: Number(enemyRow.attack ?? 0),
-  defense: Number(enemyRow.defense ?? 0),
-  agility: Number(enemyRow.agility ?? 0),
-  vitality: 0,
-  intellect: 0,
-  crit: Math.max(0, Math.min(0.4, Number(enemyRow.crit ?? 0) * 0.005)),
-  hpoints: Number(enemyRow.hp ?? 1),
-  spoints: 0,
-  maxhp: Number(enemyRow.maxhp ?? 1),
-  maxspoints: 0,
-  spellPower: 1,
-  dodgeChance: clamp(Number(enemyRow.agility ?? 0) * 0.002, 0, 0.35),
-  critDamageMult: 1.5,
-  damageReduction: 0,
-  lifesteal: 0,
-  healingReceivedMult: 1,
-  atbRateMult: 1,
-  damageTakenMult: 1
-};
+  const enemyStats: DerivedStats = {
+    level: Number(enemyRow.level ?? 1),
+    attack: Number(enemyRow.attack ?? 0),
+    defense: Number(enemyRow.defense ?? 0),
+    agility: Number(enemyRow.agility ?? 0),
+    vitality: 0,
+    intellect: 0,
+    crit: Math.max(0, Math.min(0.4, Number(enemyRow.crit ?? 0) * 0.005)),
+    hpoints: Number(enemyRow.hp ?? 1),
+    spoints: 0,
+    maxhp: Number(enemyRow.maxhp ?? 1),
+    maxspoints: 0,
+    spellPower: 1,
+    dodgeChance: clamp(Number(enemyRow.agility ?? 0) * 0.002, 0, 0.35),
+    critDamageMult: 1.5,
+    damageReduction: 0,
+    lifesteal: 0,
+    healingReceivedMult: 1,
+    healingDealtMult: 1,
+    atbRateMult: 1,
+    damageTakenMult: 1,
+  };
 
   const session: CombatSession = {
     playerId,
@@ -987,7 +1114,7 @@ const enemyStats: DerivedStats = {
       ready: false,
       recoveryUntil: 0,
       atbRateMult: Number(player.atbRateMult ?? 1),
-      cooldowns: {}
+      cooldowns: {},
     },
 
     enemy: {
@@ -1004,10 +1131,10 @@ const enemyStats: DerivedStats = {
       recoveryUntil: now + Number(enemyRow.attack_speed ?? 1500),
       atbRateMult: 1,
       stats: enemyStats as any,
-      cooldowns: {}
+      cooldowns: {},
     },
 
-    log: [`⚠ ${enemyRow.name ?? "Enemy"} engages you!`]
+    log: [`⚠ ${enemyRow.name ?? "Enemy"} engages you!`],
   };
 
   combatSessions.set(playerId, session);
@@ -1038,45 +1165,17 @@ export async function advanceCombatSession(session: CombatSession) {
   const elapsedMs = Math.max(0, now - session.updatedAt);
   const elapsedSec = elapsedMs / 1000;
 
-for (const actor of [session.player, session.enemy]) {
-  if (actor.ready) continue;
-
-  const fillStartedAt = Math.max(
-    session.updatedAt,
-    actor.recoveryUntil
-  );
-
-  const fillElapsedMs = Math.max(
-    0,
-    now - fillStartedAt
-  );
-
-  if (fillElapsedMs <= 0) continue;
-
-  const baseFillRate =
-    getATBFillRate(actor.stats.agility);
-
-  const atbRateMult = Math.max(
-    0.01,
-    Number(actor.atbRateMult) || 1
-  );
-
-  const finalFillRate =
-    baseFillRate * atbRateMult;
-
-  actor.gauge = Math.min(
-    100,
-    actor.gauge +
-      finalFillRate * (fillElapsedMs / 1000)
-  );
-
-  if (actor.gauge >= 100) {
-    actor.gauge = 100;
-    actor.ready = true;
+  for (const actor of [session.player, session.enemy]) {
+    advanceCombatActorGauge(actor, session.updatedAt, now);
   }
-}
 
   session.updatedAt = now;
+
+  const bannerGauge = await processWarlordBannerGaugeTick(session.playerId);
+  if (bannerGauge > 0 && session.player.hp > 0) {
+    session.player.gauge = Math.min(100, session.player.gauge + bannerGauge);
+    session.player.ready = session.player.gauge >= 100;
+  }
 
   await processEnemyDots(session);
 
@@ -1097,26 +1196,58 @@ for (const actor of [session.player, session.enemy]) {
   await processEnemyAction(session);
 
   return session;
-
 }
 
-export function consumeActorTurn(
-  actor: CombatActor,
-  recoveryMs: number
-) {
-  const now = Date.now();
-  actor.gauge = 0;
-  actor.ready = false;
-  actor.recoveryUntil = now + recoveryMs;
+export function consumeActorTurn(actor: CombatActor, recoveryMs: number) {
+  consumeCombatActorTurn(actor, recoveryMs);
 }
 
 export function isCooldownReady(actor: CombatActor, key: string) {
-  const now = Date.now();
-  return now >= (actor.cooldowns[key] || 0);
+  return isCombatCooldownReady(actor, key);
 }
 
 export function setCooldown(actor: CombatActor, key: string, seconds: number) {
-  actor.cooldowns[key] = Date.now() + seconds * 1000;
+  setCombatCooldown(actor, key, seconds);
+}
+
+/**
+ * Reduce every active spell cooldown except the spell that produced the
+ * reduction. Item cooldowns are intentionally untouched.
+ */
+export function reduceOtherSpellCooldowns(
+  actor: CombatActor,
+  exceptSpellId: number,
+  seconds: number,
+) {
+  reduceCombatSpellCooldowns(actor, seconds, [exceptSpellId]);
+}
+
+/**
+ * Refresh an existing normal-combat DOT back to its full duration and tick
+ * count. Returns true only when a matching effect existed.
+ */
+export async function refreshPlayerCreatureDot(
+  playerCreatureId: number,
+  spellId: number,
+  durationSeconds: number,
+): Promise<boolean> {
+  const duration = Math.max(0.1, Number(durationSeconds) || 0);
+
+  const [result]: any = await db.query(
+    `
+      UPDATE player_creature_dots
+      SET
+        ticks_applied = 0,
+        next_tick_at = DATE_ADD(NOW(3), INTERVAL tick_interval SECOND),
+        expires_at = DATE_ADD(NOW(3), INTERVAL ? SECOND)
+      WHERE player_creature_id = ?
+        AND source LIKE ?
+        AND expires_at > NOW(3)
+    `,
+    [duration, playerCreatureId, `spell:${spellId}|%`],
+  );
+
+  return Number(result?.affectedRows || 0) > 0;
 }
 
 export function buildCombatSnapshot(session: CombatSession) {
@@ -1125,19 +1256,19 @@ export function buildCombatSnapshot(session: CombatSession) {
   return {
     state: session.state,
     player: {
-    name: session.player.name,
-    hp: session.player.hp,
-    maxHp: session.player.maxHp,
-    sp: session.player.sp,
-    maxSp: session.player.maxSp,
-    gauge: session.player.gauge,
-    ready: session.player.ready,
-    recoveryMs: Math.max(0, session.player.recoveryUntil - now),
-    readyInMs: getActorReadyInMs(session.player),
-    autoAttackMs: Math.max(0, session.nextPlayerAutoAttackAt - now),
-    autoAttackTotalMs: PLAYER_AUTO_ATTACK_MS,
-    cooldowns: session.player.cooldowns
-  },
+      name: session.player.name,
+      hp: session.player.hp,
+      maxHp: session.player.maxHp,
+      sp: session.player.sp,
+      maxSp: session.player.maxSp,
+      gauge: session.player.gauge,
+      ready: session.player.ready,
+      recoveryMs: Math.max(0, session.player.recoveryUntil - now),
+      readyInMs: getActorReadyInMs(session.player),
+      autoAttackMs: Math.max(0, session.nextPlayerAutoAttackAt - now),
+      autoAttackTotalMs: PLAYER_AUTO_ATTACK_MS,
+      cooldowns: session.player.cooldowns,
+    },
     enemy: {
       name: session.enemy.name,
       level: session.enemy.level,
@@ -1147,10 +1278,10 @@ export function buildCombatSnapshot(session: CombatSession) {
       gauge: session.enemy.gauge,
       ready: session.enemy.ready,
       recoveryMs: Math.max(0, session.enemy.recoveryUntil - now),
-      readyInMs: getActorReadyInMs(session.enemy)
+      readyInMs: getActorReadyInMs(session.enemy),
     },
     damageEvents: session.damageEvents,
     log: session.log,
-    rewards: session.rewards ?? null
+    rewards: session.rewards ?? null,
   };
 }

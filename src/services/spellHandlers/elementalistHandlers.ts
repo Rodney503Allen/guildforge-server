@@ -273,6 +273,8 @@ SpellHandlerDefinition = {
     return {
       log,
 
+      damage,
+
       enemyHP,
 
       appliedStatus,
@@ -416,6 +418,8 @@ SpellHandlerDefinition = {
 
     return {
       log,
+
+      damage,
 
       enemyHP,
 
@@ -751,7 +755,10 @@ SpellHandlerDefinition = {
           dotDuration,
 
         tickRateSeconds:
-          tickInterval
+          tickInterval,
+        escalationPercentPerTick: Number(spell.rank_config?.dotEscalationPercent) || 0,
+        escalationMaxPercent: Number(spell.rank_config?.dotEscalationCap) || 0,
+        healingReductionPercent: Number(spell.rank_config?.dotHealingReductionPercent) || 0
       }
     );
 
@@ -781,6 +788,9 @@ SpellHandlerDefinition = {
 
     return {
       log,
+
+      damage: directDamage,
+      dotDamage: totalDotDamage,
 
       enemyHP,
 
@@ -919,6 +929,8 @@ SpellHandlerDefinition = {
 
     return {
       log,
+
+      damage,
 
       enemyHP,
 

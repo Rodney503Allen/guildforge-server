@@ -21,6 +21,51 @@ function getDamageTakenMultiplier(
   return Math.max(0, value);
 }
 
+function getDamageDealtMultiplier(
+  attacker: DerivedStats
+): number {
+  const value = Number(
+    attacker.damageDealtMult ?? 1
+  );
+
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(0, value);
+}
+
+function getCriticalChanceAgainstDefender(
+  attacker: DerivedStats,
+  defender: DerivedStats
+): number {
+  const bonusPercent = Number(
+    (defender as any).critChanceTakenPercent ?? 0
+  );
+  const bonus = Number.isFinite(bonusPercent)
+    ? bonusPercent / 100
+    : 0;
+
+  return Math.max(
+    0,
+    Math.min(1, Number(attacker.crit || 0) + bonus)
+  );
+}
+
+function getCriticalDamageAgainstDefender(
+  attacker: DerivedStats,
+  defender: DerivedStats
+): number {
+  const bonusPercent = Number(
+    (defender as any).criticalDamageTakenPercent ?? 0
+  );
+  const bonus = Number.isFinite(bonusPercent)
+    ? bonusPercent / 100
+    : 0;
+
+  return Math.max(1, Number(attacker.critDamageMult || 1.5) + bonus);
+}
+
 export function resolveAttack(
   attacker: DerivedStats,
   defender: DerivedStats
@@ -60,10 +105,13 @@ export function resolveAttack(
   // Critical hit.
   let crit = false;
 
-  if (Math.random() < attacker.crit) {
-    damage *= attacker.critDamageMult;
+  if (Math.random() < getCriticalChanceAgainstDefender(attacker, defender)) {
+    damage *= getCriticalDamageAgainstDefender(attacker, defender);
     crit = true;
   }
+
+  damage *=
+    getDamageDealtMultiplier(attacker);
 
   // Damage reduction may be negative for effects
   // such as Blood Rage.
@@ -116,10 +164,16 @@ export function resolveSpellDamage(
 
   let crit = false;
 
-  if (Math.random() < caster.crit) {
-    damage *= caster.critDamageMult;
+  if (Math.random() < getCriticalChanceAgainstDefender(caster, defender)) {
+    damage *= getCriticalDamageAgainstDefender(caster, defender);
     crit = true;
   }
+
+  damage *=
+    getDamageDealtMultiplier(caster);
+
+  damage *= Math.max(0, Number(caster.spellDamageDealtMult ?? 1) || 1);
+  damage *= Math.max(0, Number((defender as any).spellDamageTakenMult ?? 1) || 1);
 
   damage *=
     1 - Number(defender.damageReduction || 0);

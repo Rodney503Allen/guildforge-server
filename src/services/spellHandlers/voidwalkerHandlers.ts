@@ -287,7 +287,10 @@ SpellHandlerDefinition = {
             ),
 
       appliedStatus:
-        true
+        true,
+      shieldAmount,
+      shieldedTargetId: Number(targetId),
+      shieldDuration: duration
     };
   }
 };
@@ -380,28 +383,16 @@ SpellHandlerDefinition = {
       playerId;
 
 
-    /*
-     * Temporary implementation until combat
-     * supports actual cross-player damage
-     * redirection.
-     */
-    const protectionPercent =
-      Math.max(
-        1,
-        Math.floor(
-          buff.value *
-          0.5
-        )
-      );
-
-
-    await applyBuff(
-      targetId,
-      "damage_reduction",
-      protectionPercent,
-      buff.duration,
-      `spell:${spell.id}`
-    );
+    const redirectPercent = Math.max(1, Math.min(90, Math.floor(buff.value)));
+    if (Number(targetId) === Number(playerId)) {
+      await applyBuff(targetId,"damage_reduction",Math.max(1,Math.floor(redirectPercent*0.5)),buff.duration,`spell:${spell.id}`);
+    } else {
+      await db.query(`
+        INSERT INTO player_status_effects(player_id,effect_key,value,charges,expires_at,source)
+        VALUES(?, 'spatial_exchange', ?, 99, DATE_ADD(NOW(3),INTERVAL ? SECOND), ?)
+        ON DUPLICATE KEY UPDATE value=VALUES(value),charges=VALUES(charges),expires_at=VALUES(expires_at),source=VALUES(source)
+      `,[targetId,redirectPercent,buff.duration,`spatial_exchange:${playerId}`]);
+    }
 
 
     const targetingSelf =
@@ -419,18 +410,21 @@ SpellHandlerDefinition = {
           ? (
               `🌀 You cast ${spell.name}, bending incoming force ` +
               `through folded space and gaining ` +
-              `${protectionPercent}% damage reduction for ` +
+              `${Math.max(1,Math.floor(redirectPercent*0.5))}% damage reduction for ` +
               `${buff.duration}s!`
             )
           : (
               `🌀 You cast ${spell.name}, linking yourself to your ally ` +
-              `through folded space and granting them ` +
-              `${protectionPercent}% damage reduction for ` +
+              `through folded space and redirecting ` +
+              `${redirectPercent}% of their incoming damage to you for ` +
               `${buff.duration}s!`
             ),
 
       appliedStatus:
-        true
+        true,
+      shieldedTargetId: Number(targetId),
+      shieldDuration: buff.duration,
+      redirectPercent
     };
   }
 };
@@ -611,7 +605,10 @@ SpellHandlerDefinition = {
         `for ${buff.duration}s!`,
 
       appliedStatus:
-        true
+        true,
+      shieldedTargetIds: targets.map(ally => Number(ally.playerId)),
+      shieldDuration: buff.duration,
+      totalShield
     };
   }
 };

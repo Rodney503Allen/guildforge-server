@@ -56,8 +56,11 @@ export type ItemMods = Partial<
   damage_reduction?: number;
   lifesteal?: number;
   healing_received_pct?: number;
+  healing_dealt_pct?: number;
   attack_pct?: number;
   atb_rate_pct?: number;
+  damage_dealt_pct?: number;
+  spell_damage_dealt_pct?: number;
 };
 
 export type BuffMods = ItemMods;
@@ -72,9 +75,13 @@ export type DerivedStats = BasePlayerStats & {
   damageReduction: number;   // 0.00 - 0.50
   lifesteal: number;         // 0.00 - 0.25
   healingReceivedMult: number;
+  healingDealtMult: number;
   atbRateMult: number;
 
   damageTakenMult: number;
+  damageDealtMult?: number;
+  spellDamageDealtMult?: number;
+  spellDamageTakenMult?: number;
 };
 
 export type PerkMultipliers = {
@@ -149,10 +156,16 @@ function normalizeMod(mod: ItemMods = {}) {
     
     healingReceivedPct:
       n(mod.healing_received_pct),
+    healingDealtPct:
+      n(mod.healing_dealt_pct),
     attackPct:
       n(mod.attack_pct),
     atbRatePct:
       n(mod.atb_rate_pct),
+    damageDealtPct:
+      n(mod.damage_dealt_pct),
+    spellDamageDealtPct:
+      n(mod.spell_damage_dealt_pct),
   };
 }
 
@@ -184,6 +197,9 @@ export function computePlayerStats(
   final.maxhp = n(final.maxhp, 1);
   final.maxspoints = n(final.maxspoints, 1);
   final.damageTakenMult = 1;
+  final.damageDealtMult = 1;
+  final.spellDamageDealtMult = 1;
+  final.healingDealtMult = 1;
 
   let flatHealthBonus = 0;
   let flatManaBonus = 0;
@@ -196,8 +212,11 @@ export function computePlayerStats(
   let damageReductionPct = 0;
   let lifestealPct = 0;
   let healingReceivedPct = 0;
+  let healingDealtPct = 0;
   let attackBonusPct = 0;
   let atbRateBonusPct = 0;
+  let damageDealtBonusPct = 0;
+  let spellDamageDealtBonusPct = 0;
 
   // gear mods
   for (const raw of gearMods) {
@@ -221,8 +240,11 @@ export function computePlayerStats(
     damageReductionPct += g.damageReduction;
     lifestealPct += g.lifesteal;
     healingReceivedPct += g.healingReceivedPct;
+    healingDealtPct += g.healingDealtPct;
     attackBonusPct += g.attackPct;
     atbRateBonusPct += g.atbRatePct;
+    damageDealtBonusPct += g.damageDealtPct;
+    spellDamageDealtBonusPct += g.spellDamageDealtPct;
   }
 
   // buff mods
@@ -247,12 +269,20 @@ export function computePlayerStats(
     damageReductionPct += b.damageReduction;
     lifestealPct += b.lifesteal;
     healingReceivedPct += b.healingReceivedPct;
+    healingDealtPct += b.healingDealtPct;
     attackBonusPct += b.attackPct;
     atbRateBonusPct += b.atbRatePct;
+    damageDealtBonusPct += b.damageDealtPct;
+    spellDamageDealtBonusPct += b.spellDamageDealtPct;
 
     final.healingReceivedMult = Math.max(
       0,
       1 + healingReceivedPct / 100
+    );
+
+    final.healingDealtMult = Math.max(
+      0,
+      1 + healingDealtPct / 100
     );
 
     final.atbRateMult = Math.max(
@@ -324,6 +354,14 @@ export function computePlayerStats(
     0.5
   );
   final.lifesteal = clamp(lifestealPct / 100, 0, 0.25);
+
+  final.damageDealtMult = Math.max(
+    0,
+    1 + damageDealtBonusPct / 100
+  );
+  final.spellDamageDealtMult = Math.max(0, 1 + spellDamageDealtBonusPct / 100);
+  final.healingReceivedMult = Math.max(0, 1 + healingReceivedPct / 100);
+  final.healingDealtMult = Math.max(0, 1 + healingDealtPct / 100);
 
   return final as DerivedStats;
 }

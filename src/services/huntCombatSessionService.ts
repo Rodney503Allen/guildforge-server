@@ -3,43 +3,73 @@ import { db } from "../db";
 import { getFinalPlayerStats } from "./playerService";
 import { resolveAttack } from "./combatEngine";
 import {
-  mitigateIncomingPlayerDamage
-} from "./playerDamageMitigationService";
+  COMBAT_TIMING,
+  KeyedCombatLock,
+  advanceCombatActorGauge,
+  calculateDistributedTickDamage,
+  getCombatActorReadyInMs,
+  getCombatATBFillRate,
+  getCombatATBTimeSeconds,
+  getEffectRemainingMs,
+  applyEnemyDebuffs,
+  getEnemyAtbRateMultiplier,
+  publishCombatPlayerVitals,
+  reduceCombatSpellCooldowns,
+} from "./combat";
+import { mitigateIncomingPlayerDamage } from "./playerDamageMitigationService";
 
-import type {
-  DerivedStats
-} from "./statEngine";
+import { processDuePlayerHots } from "./playerHotService";
+
+import type { DerivedStats } from "./statEngine";
+
+import { getSpellHandler } from "./spellHandlers";
 
 import {
-  getSpellHandler
-} from "./spellHandlers";
+  prepareSpellForCast,
+  runAfterCastTalents,
+  runBeforeCastTalents,
+  validatePreparedSpellTalents,
+} from "./spellTalents";
 
-import type {
-  SpellEnemy
-} from "./spellHandlers/types";
+import type { SpellEnemy, SpellHandlerContext } from "./spellHandlers/types";
+import {
+  getActiveBerserkerDamageMultiplier,
+  processBerserkerCriticalGauge,
+  convertBerserkerLifestealOverhealToShield
+} from "./spellTalents/handlers/berserkerTalentHandlers";
+import {
+  getWarlordNextSpellOrder,
+  consumeWarlordNextSpellOrder,
+  processWarlordBannerGaugeTick,
+  processWarlordMarkedHit,
+  processWarlordClaimThePrize
+} from "./spellTalents/handlers/warlordTalentHandlers";
 
 import {
-  resolveDirectSpellDamage
+  resolveDirectSpellDamage,
+  processJudgmentSpellHit,
 } from "./spellHandlers/helpers";
 
-import {
-  createChestFromDrops,
-  type DropLine
-} from "./chestService";
+import { createChestFromDrops, type DropLine } from "./chestService";
 
-import {
-  generateLootForCreature
-} from "./lootGenerator";
+import { generateLootForCreature } from "./lootGenerator";
 
-import {
-  grantExperienceTx
-} from "./experienceService";
+import { grantExperienceTx } from "./experienceService";
 
 import {
   publishPlayerStatePatch,
-  publishPlayerLevelUp
+  publishPlayerLevelUp,
 } from "../playerStateEvents";
 
+import {
+  addCombatThreat,
+  calculateCombatThreat,
+  createCombatThreatTable,
+  getCombatThreat,
+  getHighestThreatTarget,
+  getPlayerCombatThreatMultiplier,
+  refreshCombatThreatTarget,
+} from "./combatThreatService";
 
 export type HuntCombatPlayer = {
   playerId: number;
@@ -81,10 +111,11 @@ export type HuntCombatEnemy = {
 
   recoveryUntil: number;
 
+  threat: Record<number, number>;
+  targetPlayerId: number | null;
+
   stats: DerivedStats;
 };
-
-
 
 export type HuntDotEffect = {
   id: number;
@@ -101,6 +132,10 @@ export type HuntDotEffect = {
   tickIntervalMs: number;
   nextTickAt: number;
   expiresAt: number;
+  defenseReductionPerTick?: number;
+  defenseReductionMaxStacks?: number;
+  manaRestorePercentPerTick?: number;
+  tickHealingPercent?: number;
 };
 
 export type HuntDebuffEffect = {
@@ -120,7 +155,20 @@ export type HuntDebuffEffect = {
     | "crit"
     | "attack_speed_pct"
     | "damage_dealt_pct"
-    | "damage_taken_pct";
+    | "damage_taken_pct"
+    | "spell_damage_taken_pct"
+    | "judgment"
+    | "judgment_refresh_on_spell"
+    | "judgment_refresh_icd"
+    | "judgment_crit_upgrade"
+    | "crit_chance_taken_pct"
+    | "critical_damage_taken_pct"
+    | "warlord_bounty_gauge"
+    | "warlord_bounty_icd"
+    | "warlord_mark_extension"
+    | "warlord_claim_hp_pct"
+    | "warlord_claim_mana_pct"
+    | "warlord_claim_gauge";
 
   value: number;
 
@@ -170,10 +218,7 @@ export type HuntCombatSession = {
   createdAt: number;
   updatedAt: number;
 
-  state:
-    | "active"
-    | "victory"
-    | "defeat";
+  state: "active" | "victory" | "defeat";
 
   players: Map<number, HuntCombatPlayer>;
 
@@ -204,315 +249,86 @@ export type HuntSpellCastResult = {
   crit?: boolean;
   dodged?: boolean;
 
-  snapshot?: ReturnType<
-    typeof buildHuntCombatSnapshot
-  >;
+  snapshot?: ReturnType<typeof buildHuntCombatSnapshot>;
 };
 
+const huntCombatSessions = new Map<number, HuntCombatSession>();
 
+const huntCombatLocks = new KeyedCombatLock<number>();
 
-
-const huntCombatSessions =
-  new Map<number, HuntCombatSession>();
-
-const huntCombatLocks =
-  new Map<number, Promise<void>>();
-
-const PLAYER_AUTO_ATTACK_MS = 6000;
-
-const BASE_ATB_SECONDS = 6.0;
-const MIN_ATB_SECONDS = 3.0;
-const MAX_AGILITY = 500;
-const AGILITY_EXPONENT = 0.6;
+const PLAYER_AUTO_ATTACK_MS = COMBAT_TIMING.playerAutoAttackMs;
 const HUNT_SPELL_RECOVERY_MS = 350;
 const HUNT_ENEMY_RECOVERY_MS = 350;
-const HUNT_FINAL_SESSION_LIFETIME_MS =
-  2 * 60 * 1000;
+const HUNT_FINAL_SESSION_LIFETIME_MS = 2 * 60 * 1000;
 
-function clamp(
-  value: number,
-  min: number,
-  max: number
-) {
-  return Math.max(
-    min,
-    Math.min(max, value)
-  );
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
-
-function publishHuntPlayerVitals(
-  player: HuntCombatPlayer
-) {
-  publishPlayerStatePatch(
-    player.playerId,
-    {
-      hpoints:
-        player.hp,
-
-      maxhp:
-        player.maxHp,
-
-      spoints:
-        player.sp,
-
-      maxspoints:
-        player.maxSp
-    }
-  );
+function publishHuntPlayerVitals(player: HuntCombatPlayer) {
+  publishCombatPlayerVitals(player);
 }
 
 async function withHuntCombatLock<T>(
   encounterId: number,
-  action: () => Promise<T>
+  action: () => Promise<T>,
 ): Promise<T> {
-
-  const previous =
-    huntCombatLocks.get(encounterId) ??
-    Promise.resolve();
-
-  let release!: () => void;
-
-  const current =
-    new Promise<void>(
-      resolve => {
-        release = resolve;
-      }
-    );
-
-  const queued =
-    previous.then(
-      () => current
-    );
-
-  huntCombatLocks.set(
-    encounterId,
-    queued
-  );
-
-  await previous;
-
-  try {
-    return await action();
-
-  } finally {
-    release();
-
-    if (
-      huntCombatLocks.get(encounterId) ===
-      queued
-    ) {
-      huntCombatLocks.delete(
-        encounterId
-      );
-    }
-  }
+  return huntCombatLocks.run(encounterId, action);
 }
 
-
-export function getHuntATBTimeSeconds(
-  agility: number
-) {
-  const agi =
-    Math.max(
-      0,
-      Math.min(
-        MAX_AGILITY,
-        Number(agility || 0)
-      )
-    );
-
-  const progress =
-    Math.pow(
-      agi / MAX_AGILITY,
-      AGILITY_EXPONENT
-    );
-
-  return (
-    BASE_ATB_SECONDS -
-    progress *
-      (
-        BASE_ATB_SECONDS -
-        MIN_ATB_SECONDS
-      )
-  );
+export function getHuntATBTimeSeconds(agility: number) {
+  return getCombatATBTimeSeconds(agility);
 }
 
-export function getHuntATBFillRate(
-  agility: number
-) {
-  return (
-    100 /
-    getHuntATBTimeSeconds(
-      agility
-    )
-  );
+export function getHuntATBFillRate(agility: number) {
+  return getCombatATBFillRate(agility);
 }
-
 
 function getHuntPlayerReadyInMs(
   player: HuntCombatPlayer,
-  now: number = Date.now()
+  now: number = Date.now(),
 ) {
-  if (
-    player.hp <= 0 ||
-    player.ready
-  ) {
-    return 0;
-  }
-
-  const recoveryMs =
-    Math.max(
-      0,
-      player.recoveryUntil -
-        now
-    );
-
-  const fillRate =
-    Math.max(
-      0.0001,
-      getHuntATBFillRate(
-        player.stats.agility
-      )
-    );
-
-  const remainingGauge =
-    Math.max(
-      0,
-      100 -
-        Number(
-          player.gauge || 0
-        )
-    );
-
-  const fillMs =
-    (
-      remainingGauge /
-      fillRate
-    ) *
-    1000;
-
-  return Math.max(
-    0,
-    recoveryMs +
-      fillMs
-  );
+  return getCombatActorReadyInMs(player, now);
 }
 
 function getHuntEnemyReadyInMs(
   session: HuntCombatSession,
-  now: number = Date.now()
+  now: number = Date.now(),
 ) {
-  const enemy =
-    session.enemy;
+  const enemy = session.enemy;
 
-  if (
-    enemy.hp <= 0 ||
-    enemy.ready
-  ) {
-    return 0;
-  }
-
-  const recoveryMs =
-    Math.max(
-      0,
-      enemy.recoveryUntil -
-        now
-    );
-
-  const effectiveStats =
-    getEffectiveHuntEnemyStats(
-      session,
-      now
-    );
-
-  const baseFillRate =
-    getHuntATBFillRate(
-      effectiveStats.agility
-    );
-
-  const atbRateMult =
-    getHuntEnemyAtbRateMult(
-      session,
-      now
-    );
-
-  const fillRate =
-    Math.max(
-      0.0001,
-      baseFillRate *
-        atbRateMult
-    );
-
-  const remainingGauge =
-    Math.max(
-      0,
-      100 -
-        Number(
-          enemy.gauge || 0
-        )
-    );
-
-  const fillMs =
-    (
-      remainingGauge /
-      fillRate
-    ) *
-    1000;
-
-  return Math.max(
-    0,
-    recoveryMs +
-      fillMs
+  const effectiveStats = getEffectiveHuntEnemyStats(session, now);
+  const atbRateMult = getHuntEnemyAtbRateMult(session, now);
+  return getCombatActorReadyInMs(
+    { ...enemy, stats: effectiveStats, atbRateMult },
+    now,
   );
 }
 
-export function getHuntCombatSession(
-  encounterId: number
-) {
-  return (
-    huntCombatSessions.get(
-      encounterId
-    ) ?? null
-  );
+export function getHuntCombatSession(encounterId: number) {
+  return huntCombatSessions.get(encounterId) ?? null;
 }
 
-export function destroyHuntCombatSession(
-  encounterId: number
-) {
-  huntCombatSessions.delete(
-    encounterId
-  );
+export function destroyHuntCombatSession(encounterId: number) {
+  huntCombatSessions.delete(encounterId);
 }
 
-function scheduleHuntSessionCleanup(
-  encounterId: number
-) {
+function scheduleHuntSessionCleanup(encounterId: number) {
   setTimeout(() => {
-    const session =
-      huntCombatSessions.get(
-        encounterId
-      );
+    const session = huntCombatSessions.get(encounterId);
 
-    if (
-      !session ||
-      session.state === "active"
-    ) {
+    if (!session || session.state === "active") {
       return;
     }
 
-    destroyHuntCombatSession(
-      encounterId
-    );
+    destroyHuntCombatSession(encounterId);
   }, HUNT_FINAL_SESSION_LIFETIME_MS);
 }
 
 export async function createHuntCombatSession(
-  encounterId: number
+  encounterId: number,
 ): Promise<HuntCombatSession | null> {
-
-const [[encounter]]: any =
-  await db.query(
+  const [[encounter]]: any = await db.query(
     `
       SELECT
         he.id AS encounter_id,
@@ -546,16 +362,15 @@ const [[encounter]]: any =
 
       LIMIT 1
     `,
-    [encounterId]
+    [encounterId],
   );
 
   if (!encounter) {
     return null;
   }
 
-  const [participantRows]: any =
-    await db.query(
-      `
+  const [participantRows]: any = await db.query(
+    `
         SELECT
           hep.player_id
 
@@ -566,81 +381,50 @@ const [[encounter]]: any =
 
         ORDER BY hep.player_id ASC
       `,
-      [encounterId]
-    );
+    [encounterId],
+  );
 
   if (!participantRows?.length) {
     return null;
   }
 
-  const now =
-    Date.now();
+  const now = Date.now();
 
-  const players =
-    new Map<
-      number,
-      HuntCombatPlayer
-    >();
+  const players = new Map<number, HuntCombatPlayer>();
 
-  for (
-    const row of
-    participantRows
-  ) {
-    const playerId =
-      Number(row.player_id);
+  for (const row of participantRows) {
+    const playerId = Number(row.player_id);
 
-    const stats =
-      await getFinalPlayerStats(
-        playerId
-      );
+    const stats = await getFinalPlayerStats(playerId);
 
     if (!stats) {
       continue;
     }
 
-    players.set(
+    players.set(playerId, {
       playerId,
-      {
-        playerId,
 
-        name:
-          stats.name ??
-          "Adventurer",
+      name: stats.name ?? "Adventurer",
 
-        hp:
-          Number(
-            stats.hpoints ?? 0
-          ),
+      hp: Number(stats.hpoints ?? 0),
 
-        maxHp:
-          Number(
-            stats.maxhp ?? 1
-          ),
+      maxHp: Number(stats.maxhp ?? 1),
 
-        sp:
-          Number(
-            stats.spoints ?? 0
-          ),
+      sp: Number(stats.spoints ?? 0),
 
-        maxSp:
-          Number(
-            stats.maxspoints ?? 0
-          ),
+      maxSp: Number(stats.maxspoints ?? 0),
 
-        stats,
+      stats,
 
-        gauge: 0,
-        ready: false,
+      gauge: 0,
+      ready: false,
 
-        recoveryUntil: 0,
+      recoveryUntil: 0,
 
-        nextAutoAttackAt:
-          now +
-          PLAYER_AUTO_ATTACK_MS,
+      nextAutoAttackAt: now + PLAYER_AUTO_ATTACK_MS,
 
-        cooldowns: {}
-      }
-    );
+      cooldowns: {},
+    });
   }
 
   if (players.size === 0) {
@@ -648,64 +432,30 @@ const [[encounter]]: any =
   }
 
   const enemyStats: DerivedStats = {
-    level:
-      Number(
-        encounter.level ?? 1
-      ),
+    level: Number(encounter.level ?? 1),
 
-    attack:
-      Number(
-        encounter.attack ?? 0
-      ),
+    attack: Number(encounter.attack ?? 0),
 
-    defense:
-      Number(
-        encounter.defense ?? 0
-      ),
+    defense: Number(encounter.defense ?? 0),
 
-    agility:
-      Number(
-        encounter.agility ?? 0
-      ),
+    agility: Number(encounter.agility ?? 0),
 
     vitality: 0,
     intellect: 0,
 
-    crit:
-    Math.max(
-        0,
-        Math.min(
-        0.4,
-        Number(
-            encounter.crit ?? 0
-        ) * 0.005
-        )
-    ),
+    crit: Math.max(0, Math.min(0.4, Number(encounter.crit ?? 0) * 0.005)),
 
-    hpoints:
-      Number(
-        encounter.hp ?? 0
-      ),
+    hpoints: Number(encounter.hp ?? 0),
 
     spoints: 0,
 
-    maxhp:
-      Number(
-        encounter.max_hp ?? 1
-      ),
+    maxhp: Number(encounter.max_hp ?? 1),
 
     maxspoints: 0,
 
     spellPower: 1,
 
-    dodgeChance:
-      clamp(
-        Number(
-          encounter.agility ?? 0
-        ) * 0.002,
-        0,
-        0.35
-      ),
+    dodgeChance: clamp(Number(encounter.agility ?? 0) * 0.002, 0, 0.35),
 
     critDamageMult: 1.5,
 
@@ -715,128 +465,86 @@ const [[encounter]]: any =
 
     healingReceivedMult: 1,
 
+    healingDealtMult: 1,
+
     atbRateMult: 1,
 
-    damageTakenMult: 1
+    damageTakenMult: 1,
   };
 
-const session:
-  HuntCombatSession = {
+  const session: HuntCombatSession = {
+    encounterId: Number(encounter.encounter_id),
 
-  encounterId:
-    Number(
-      encounter.encounter_id
-    ),
+    partyHuntId: Number(encounter.party_hunt_id),
 
-  partyHuntId:
-    Number(
-      encounter.party_hunt_id
-    ),
+    partyId: Number(encounter.party_id),
 
-  partyId:
-    Number(
-      encounter.party_id
-    ),
+    createdAt: now,
+    updatedAt: now,
 
-  createdAt: now,
-  updatedAt: now,
+    state: "active",
 
-  state: "active",
+    players,
 
-  players,
+    enemy: {
+      encounterId: Number(encounter.encounter_id),
 
-  enemy: {
-  encounterId:
-    Number(
-      encounter.encounter_id
-    ),
+      name: String(encounter.name ?? "Hunt Target"),
 
-  name:
-    String(
-      encounter.name ??
-      "Hunt Target"
-    ),
+      level: Number(encounter.level ?? 1),
 
-  level:
-    Number(
-      encounter.level ?? 1
-    ),
+      description: String(encounter.description ?? ""),
 
-  description:
-    String(
-      encounter.description ?? ""
-    ),
+      image: encounter.image ?? null,
 
-  image:
-    encounter.image ?? null,
+      hp: Number(encounter.hp ?? 0),
 
-  hp:
-    Number(
-      encounter.hp ?? 0
-    ),
+      maxHp: Number(encounter.max_hp ?? 1),
 
-  maxHp:
-    Number(
-      encounter.max_hp ?? 1
-    ),
+      stats: enemyStats,
 
-  stats:
-    enemyStats,
+      gauge: 0,
+      ready: false,
 
-  gauge: 0,
-  ready: false,
+      recoveryUntil: 0,
 
-  recoveryUntil: 0
-},
+      threat: createCombatThreatTable(players.keys()),
+      targetPlayerId: null,
+    },
 
-  log: [
-    `⚠ ${encounter.name ?? "The quarry"} faces your party!`
-  ],
+    log: [`⚠ ${encounter.name ?? "The quarry"} faces your party!`],
 
-  nextDamageEventId: 1,
+    nextDamageEventId: 1,
 
-  damageEvents: [],
+    damageEvents: [],
 
-  nextEffectId: 1,
+    nextEffectId: 1,
 
-  dots: [],
+    dots: [],
 
-  debuffs: [],
+    debuffs: [],
 
-  rewards: []
-};
+    rewards: [],
+  };
 
-  huntCombatSessions.set(
-    encounterId,
-    session
-  );
+  huntCombatSessions.set(encounterId, session);
 
   return session;
 }
 
 export async function ensureHuntCombatSessionForPlayer(
-  playerId: number
+  playerId: number,
 ): Promise<HuntCombatSession | null> {
-
-  const pid =
-    Number(playerId);
-
+  const pid = Number(playerId);
 
   /*
    * First prefer an ACTIVE in-memory session.
    */
-  for (
-    const session of
-    huntCombatSessions.values()
-  ) {
-    if (
-      session.state === "active" &&
-      session.players.has(pid)
-    ) {
+  for (const session of huntCombatSessions.values()) {
+    if (session.state === "active" && session.players.has(pid)) {
       return session;
     }
   }
-
 
   /*
    * Next check the database for a newly-created
@@ -846,9 +554,8 @@ export async function ensureHuntCombatSessionForPlayer(
    * may still have a short-lived victory session
    * retained in memory.
    */
-  const [[row]]: any =
-    await db.query(
-      `
+  const [[row]]: any = await db.query(
+    `
         SELECT
           he.id AS encounter_id
 
@@ -867,34 +574,20 @@ export async function ensureHuntCombatSessionForPlayer(
 
         LIMIT 1
       `,
-      [
-        pid
-      ]
-    );
-
+    [pid],
+  );
 
   if (row) {
+    const encounterId = Number(row.encounter_id);
 
-    const encounterId =
-      Number(
-        row.encounter_id
-      );
-
-    let session =
-      getHuntCombatSession(
-        encounterId
-      );
+    let session = getHuntCombatSession(encounterId);
 
     if (!session) {
-      session =
-        await createHuntCombatSession(
-          encounterId
-        );
+      session = await createHuntCombatSession(encounterId);
     }
 
     return session;
   }
-
 
   /*
    * No active encounter exists.
@@ -903,227 +596,164 @@ export async function ensureHuntCombatSessionForPlayer(
    * to be returned so the client can display
    * the final result screen.
    */
-  for (
-    const session of
-    huntCombatSessions.values()
-  ) {
-    if (
-      session.state !== "active" &&
-      session.players.has(pid)
-    ) {
+  for (const session of huntCombatSessions.values()) {
+    if (session.state !== "active" && session.players.has(pid)) {
       return session;
     }
   }
 
-
   return null;
 }
 
-async function processPlayerAutoAttacks(
-  session: HuntCombatSession
-) {
-  if (
-    session.state !==
-    "active"
-  ) {
+async function processPlayerAutoAttacks(session: HuntCombatSession) {
+  if (session.state !== "active") {
     return;
   }
 
-  const now =
-    Date.now();
+  const now = Date.now();
 
-  for (
-    const player of
-    session.players.values()
-  ) {
-
+  for (const player of session.players.values()) {
     if (player.hp <= 0) {
       continue;
     }
 
-    if (
-      now <
-      player.nextAutoAttackAt
-    ) {
+    if (now < player.nextAutoAttackAt) {
       continue;
     }
 
-    if (
-      session.enemy.hp <= 0
-    ) {
+    if (session.enemy.hp <= 0) {
       break;
     }
 
-    const effectiveEnemyStats =
-      getEffectiveHuntEnemyStats(
-        session,
-        now
+    const effectiveEnemyStats = getEffectiveHuntEnemyStats(session, now);
+
+    const result = resolveAttack(
+      player.stats as any,
+      effectiveEnemyStats as any,
+    );
+
+    const deathWishMultiplier = await getActiveBerserkerDamageMultiplier(player.playerId, player.hp, player.maxHp);
+    const damage = result.dodged
+      ? 0
+      : Math.max(0, Math.floor(Number(result.damage ?? 0) * deathWishMultiplier));
+
+    if (!result.dodged && result.crit) {
+      const gauge = await processBerserkerCriticalGauge(player.playerId, true);
+      if (gauge > 0) {
+        player.gauge = Math.min(100, player.gauge + gauge);
+        player.ready = player.gauge >= 100;
+      }
+    }
+
+    if (!result.dodged && damage > 0 && Number(player.stats.lifesteal || 0) > 0) {
+      const raw = Math.max(0, Math.floor(damage * Number(player.stats.lifesteal)));
+      const actual = Math.max(0, Math.min(raw, player.maxHp - player.hp));
+      const overheal = Math.max(0, raw - actual);
+      if (actual > 0) {
+        player.hp += actual;
+        player.stats.hpoints = player.hp;
+        await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [player.hp, player.playerId]);
+      }
+      await convertBerserkerLifestealOverhealToShield(player.playerId, overheal);
+    }
+
+    const autoAttackThreatMultiplier = await getPlayerCombatThreatMultiplier(
+      player.playerId,
+    );
+
+    addCombatThreat(
+      session.enemy,
+      session.players.values(),
+      player.playerId,
+      damage * autoAttackThreatMultiplier,
+    );
+
+    const previousBossHP = session.enemy.hp;
+
+    const newBossHP = Math.max(0, previousBossHP - damage);
+
+    if (!result.dodged && damage > 0) {
+      const markedHit = await processWarlordMarkedHit(
+        buildHuntSpellEnemy(session) as any,
+        player.playerId,
+        damage,
       );
+      player.gauge = Math.min(100, player.gauge + markedHit.gaugeGain);
+      player.ready = player.gauge >= 100;
+    }
 
-    const result =
-      resolveAttack(
-        player.stats as any,
-        effectiveEnemyStats as any
-      );
+    session.enemy.hp = newBossHP;
 
-const damage =
-  result.dodged
-    ? 0
-    : Math.max(
-        0,
-        Math.floor(
-          Number(
-            result.damage ?? 0
-          )
-        )
-      );
+    session.enemy.stats.hpoints = newBossHP;
 
-    const previousBossHP =
-      session.enemy.hp;
+    player.nextAutoAttackAt = now + PLAYER_AUTO_ATTACK_MS;
 
-    const newBossHP =
-      Math.max(
-        0,
-        previousBossHP -
-          damage
-      );
-
-session.enemy.hp =
-  newBossHP;
-
-  session.enemy.stats.hpoints =
-  newBossHP;
-
-player.nextAutoAttackAt =
-  now +
-  PLAYER_AUTO_ATTACK_MS;
-
-await db.query(
-  `
+    await db.query(
+      `
     UPDATE hunt_encounters
 
     SET hp = ?
 
     WHERE id = ?
   `,
-  [
-    newBossHP,
-    session.encounterId
-  ]
-);
+      [newBossHP, session.encounterId],
+    );
     if (result.dodged) {
-      session.log.push(
-        `⚔ ${player.name}'s auto attack misses!`
-      );
+      session.log.push(`⚔ ${player.name}'s auto attack misses!`);
     } else {
       session.log.push(
         `⚔ ${player.name} attacks ${session.enemy.name} for ${damage}${
-          result.crit
-            ? " (CRITICAL!)"
-            : ""
-        }`
+          result.crit ? " (CRITICAL!)" : ""
+        }`,
       );
     }
 
-    if (
-      session.log.length > 60
-    ) {
-      session.log =
-        session.log.slice(-60);
+    if (session.log.length > 60) {
+      session.log = session.log.slice(-60);
     }
 
-if (
-  newBossHP <= 0
-) {
-  await completeHuntVictory(
-    session
-  );
+    if (newBossHP <= 0) {
+      const claim = await processWarlordClaimThePrize(
+        buildHuntSpellEnemy(session) as any,
+        Array.from(session.players.values())
+          .filter((member) => member.hp > 0)
+          .map((member) => member.playerId),
+      );
+      for (const claimed of claim.players) {
+        const member = session.players.get(claimed.playerId);
+        if (!member) continue;
+        member.hp = claimed.hp;
+        member.sp = claimed.sp;
+        member.stats.hpoints = claimed.hp;
+        member.stats.spoints = claimed.sp;
+        member.gauge = Math.min(100, member.gauge + claim.gaugeGain);
+        member.ready = member.gauge >= 100;
+      }
+      await completeHuntVictory(session);
 
-  break;
-}
+      break;
+    }
   }
 }
 
-function advancePlayerATBs(
-  session: HuntCombatSession,
-  now: number
-) {
-  for (
-    const player of
-    session.players.values()
-  ) {
-    if (player.hp <= 0) {
-      continue;
-    }
-
-    if (player.ready) {
-      continue;
-    }
-
-    const fillStartedAt =
-      Math.max(
-        session.updatedAt,
-        player.recoveryUntil
-      );
-
-    const fillElapsedMs =
-      Math.max(
-        0,
-        now -
-        fillStartedAt
-      );
-
-    if (
-      fillElapsedMs <= 0
-    ) {
-      continue;
-    }
-
-    const fillRate =
-      getHuntATBFillRate(
-        player.stats.agility
-      );
-
-    player.gauge =
-      Math.min(
-        100,
-        player.gauge +
-          fillRate *
-          (
-            fillElapsedMs /
-            1000
-          )
-      );
-
-    if (
-      player.gauge >= 100
-    ) {
-      player.gauge = 100;
-      player.ready = true;
-    }
+function advancePlayerATBs(session: HuntCombatSession, now: number) {
+  for (const player of session.players.values()) {
+    advanceCombatActorGauge(player, session.updatedAt, now);
   }
 }
 
 function removeExpiredHuntDebuffs(
   session: HuntCombatSession,
-  now: number = Date.now()
+  now: number = Date.now(),
 ) {
-  session.debuffs =
-    session.debuffs.filter(
-      debuff =>
-        debuff.expiresAt > now
-    );
+  session.debuffs = session.debuffs.filter((debuff) => debuff.expiresAt > now);
 }
-
 
 function getHuntDebuffTotals(
   session: HuntCombatSession,
-  now: number = Date.now()
+  now: number = Date.now(),
 ) {
-  removeExpiredHuntDebuffs(
-    session,
-    now
-  );
+  removeExpiredHuntDebuffs(session, now);
 
   const totals = {
     attack: 0,
@@ -1135,577 +765,313 @@ function getHuntDebuffTotals(
 
     attack_speed_pct: 0,
     damage_dealt_pct: 0,
-    damage_taken_pct: 0
+    damage_taken_pct: 0,
+    spell_damage_taken_pct: 0,
+    crit_chance_taken_pct: 0,
+    critical_damage_taken_pct: 0,
   };
 
-  for (
-    const debuff of
-    session.debuffs
-  ) {
-    const key =
-      debuff.stat;
+  for (const debuff of session.debuffs) {
+    const key = debuff.stat;
 
-    if (
-      Object.prototype.hasOwnProperty.call(
-        totals,
-        key
-      )
-    ) {
-      totals[
-        key as keyof typeof totals
-      ] +=
-        Number(
-          debuff.value || 0
-        );
+    if (Object.prototype.hasOwnProperty.call(totals, key)) {
+      totals[key as keyof typeof totals] += Number(debuff.value || 0);
     }
   }
 
   return totals;
 }
 
-
 function getEffectiveHuntEnemyStats(
   session: HuntCombatSession,
-  now: number = Date.now()
+  now: number = Date.now(),
 ): DerivedStats {
+  const base = session.enemy.stats;
 
-  const base =
-    session.enemy.stats;
-
-  const debuffs =
-    getHuntDebuffTotals(
-      session,
-      now
-    );
-
-
-  /*
-   * Flat stat debuffs use the same convention
-   * as normal combat:
-   *
-   * -10 attack means debuff value = -10.
-   */
-  const baseAttack =
-    Number(
-      base.attack || 0
-    ) +
-    Number(
-      debuffs.attack || 0
-    );
-
-
-  const damageDealtReductionPct =
-    Math.max(
-      0,
-      Math.min(
-        80,
-        Number(
-          debuffs.damage_dealt_pct ||
-          0
-        )
-      )
-    );
-
-
-  const finalAttack =
-    Math.max(
-      0,
-      Math.floor(
-        baseAttack *
-        (
-          1 -
-          damageDealtReductionPct /
-            100
-        )
-      )
-    );
-
-
-  const damageTakenPct =
-    Math.max(
-      0,
-      Number(
-        debuffs.damage_taken_pct ||
-        0
-      )
-    );
-
+  const debuffs = getHuntDebuffTotals(session, now);
 
   return {
-    ...base,
-
-    attack:
-      finalAttack,
-
-    defense:
-      Math.max(
-        0,
-        Number(
-          base.defense || 0
-        ) +
-        Number(
-          debuffs.defense || 0
-        )
-      ),
-
-    agility:
-      Math.max(
-        0,
-        Number(
-          base.agility || 0
-        ) +
-        Number(
-          debuffs.agility || 0
-        )
-      ),
-
-    vitality:
-      Number(
-        base.vitality || 0
-      ) +
-      Number(
-        debuffs.vitality || 0
-      ),
-
-    intellect:
-      Number(
-        base.intellect || 0
-      ) +
-      Number(
-        debuffs.intellect || 0
-      ),
-
-    crit:
-      Math.max(
-        0,
-        Number(
-          base.crit || 0
-        ) +
-        Number(
-          debuffs.crit || 0
-        )
-      ),
-
-    hpoints:
-      session.enemy.hp,
-
-    maxhp:
-      session.enemy.maxHp,
-
-    damageTakenMult:
-      1 +
-      damageTakenPct /
-        100
-  };
+    ...applyEnemyDebuffs(base, debuffs),
+    hpoints: session.enemy.hp,
+    maxhp: session.enemy.maxHp,
+  } as DerivedStats;
 }
-
 
 function getHuntEnemyAtbRateMult(
   session: HuntCombatSession,
-  now: number = Date.now()
+  now: number = Date.now(),
 ) {
-  const debuffs =
-    getHuntDebuffTotals(
-      session,
-      now
-    );
+  const debuffs = getHuntDebuffTotals(session, now);
 
-  const slowPct =
-    Math.max(
-      0,
-      Math.min(
-        80,
-        Number(
-          debuffs.attack_speed_pct ||
-          0
-        )
-      )
-    );
-
-  return Math.max(
-    0.2,
-    1 -
-      slowPct /
-        100
-  );
+  return getEnemyAtbRateMultiplier(debuffs);
 }
 
+function buildHuntSpellEnemy(session: HuntCombatSession): SpellEnemy {
+  const now = Date.now();
 
-function buildHuntSpellEnemy(
-  session: HuntCombatSession
-): SpellEnemy {
+  const effectiveStats = getEffectiveHuntEnemyStats(session, now);
 
-  const now =
-    Date.now();
+  const spellEnemy = {
+    id: session.encounterId,
 
-  const effectiveStats =
-    getEffectiveHuntEnemyStats(
-      session,
-      now
-    );
+    name: session.enemy.name,
 
-  const spellEnemy: SpellEnemy = {
+    sourceType: "hunt",
 
-    id:
-      session.encounterId,
+    hp: session.enemy.hp,
 
-    name:
-      session.enemy.name,
+    maxhp: session.enemy.maxHp,
 
-    sourceType:
-      "hunt",
+    level: session.enemy.level,
 
-    hp:
-      session.enemy.hp,
+    attack: Number(effectiveStats.attack ?? 0),
 
-    maxhp:
-      session.enemy.maxHp,
+    defense: Number(effectiveStats.defense ?? 0),
 
-    level:
-      session.enemy.level,
+    agility: Number(effectiveStats.agility ?? 0),
 
-    attack:
-      Number(
-        effectiveStats.attack ?? 0
-      ),
-
-    defense:
-      Number(
-        effectiveStats.defense ?? 0
-      ),
-
-    agility:
-      Number(
-        effectiveStats.agility ?? 0
-      ),
-
-    stats:
-      effectiveStats,
-
+    stats: effectiveStats,
 
     // =================================================
     // HP PERSISTENCE
     // =================================================
 
-    setHP:
-      async (
-        newHP: number
-      ) => {
+    setHP: async (newHP: number) => {
+      const finalHP = Math.max(0, Math.floor(Number(newHP) || 0));
 
-        const finalHP =
-          Math.max(
-            0,
-            Math.floor(
-              Number(newHP) || 0
-            )
-          );
+      /*
+       * Keep the Hunt session authoritative.
+       */
+      session.enemy.hp = finalHP;
 
-        /*
-         * Keep the Hunt session authoritative.
-         */
-        session.enemy.hp =
-          finalHP;
+      session.enemy.stats.hpoints = finalHP;
 
-        session.enemy.stats.hpoints =
-          finalHP;
+      /*
+       * Keep the handler-facing adapter
+       * synchronized too.
+       */
+      spellEnemy.hp = finalHP;
 
-        /*
-         * Keep the handler-facing adapter
-         * synchronized too.
-         */
-        spellEnemy.hp =
-          finalHP;
-
-        /*
-         * Persist Hunt boss HP.
-         */
-        await db.query(
-          `
+      /*
+       * Persist Hunt boss HP.
+       */
+      await db.query(
+        `
             UPDATE hunt_encounters
 
             SET hp = ?
 
             WHERE id = ?
           `,
-          [
-            finalHP,
-            session.encounterId
-          ]
-        );
+        [finalHP, session.encounterId],
+      );
+    },
 
-      },
+    getDebuffValue: async (stat: string) => {
+      const normalizedStat = String(stat).trim().toLowerCase();
 
-getDebuffValue:
-  async (
-    stat: string
-  ) => {
+      const currentTime = Date.now();
 
-    const normalizedStat =
-      String(stat)
-        .trim()
-        .toLowerCase();
-
-    const currentTime =
-      Date.now();
-
-    let strongestValue = 0;
-
-    for (
-      const effect of
-      session.debuffs
-    ) {
-
-      if (
-        effect.expiresAt <=
-        currentTime
-      ) {
-        continue;
+      if (normalizedStat === "__any__") {
+        return session.debuffs.some((effect) => effect.expiresAt > currentTime)
+          ? 1
+          : 0;
       }
 
-      if (
-        String(
-          effect.stat
-        ).toLowerCase() !==
-        normalizedStat
-      ) {
-        continue;
+      let strongestValue = 0;
+
+      for (const effect of session.debuffs) {
+        if (effect.expiresAt <= currentTime) {
+          continue;
+        }
+
+        if (String(effect.stat).toLowerCase() !== normalizedStat) {
+          continue;
+        }
+
+        strongestValue = Math.max(strongestValue, Number(effect.value) || 0);
       }
 
-      strongestValue =
-        Math.max(
-          strongestValue,
-          Number(
-            effect.value
-          ) || 0
-        );
-    }
+      return strongestValue;
+    },
 
-    return strongestValue;
-  },
+    removeDebuff: async (stat: string) => {
+      const normalized = String(stat).trim().toLowerCase();
+      session.debuffs = session.debuffs.filter(
+        (effect) => effect.stat !== normalized,
+      );
+    },
+
+    extendWarlordMark: async (maximumExtensionSeconds: number) => {
+      const now = Date.now();
+      const marker = session.debuffs
+        .filter((effect) =>
+          effect.stat === "warlord_mark_extension" && effect.expiresAt > now
+        )
+        .sort((a, b) => b.expiresAt - a.expiresAt)[0];
+      if (!marker) return 0;
+
+      const cap = marker.expiresAt + Math.max(0, maximumExtensionSeconds) * 1000;
+      let changed = false;
+      for (const effect of session.debuffs) {
+        if (
+          effect.spellId === 16 &&
+          effect.stat !== "warlord_mark_extension" &&
+          effect.expiresAt > now
+        ) {
+          const nextExpiry = Math.min(cap, effect.expiresAt + 1000);
+          changed ||= nextExpiry > effect.expiresAt;
+          effect.expiresAt = nextExpiry;
+        }
+      }
+      return changed ? 1 : 0;
+    },
+
+    consumeDot: async (sourcePlayerId: number, spellId: number) => {
+      const existing = session.dots.find(
+        effect => effect.sourcePlayerId === Number(sourcePlayerId) && effect.spellId === Number(spellId)
+      );
+      if (!existing) return 0;
+      const dealt = Math.floor(existing.totalDamage * existing.ticksApplied / Math.max(1, existing.totalTicks));
+      const remaining = Math.max(0, existing.totalDamage - dealt);
+      session.dots = session.dots.filter(effect => effect.id !== existing.id);
+      return remaining;
+    },
 
     // =================================================
     // DOT APPLICATION
     // =================================================
 
-    applyDot:
-      async (args) => {
+    applyDot: async (args) => {
+      const totalDamage = Math.max(
+        1,
+        Math.floor(Number(args.totalDamage) || 1),
+      );
 
-        const totalDamage =
-          Math.max(
-            1,
-            Math.floor(
-              Number(
-                args.totalDamage
-              ) || 1
-            )
-          );
+      const durationSeconds = Math.max(0.1, Number(args.durationSeconds) || 1);
 
-        const durationSeconds =
-          Math.max(
-            0.1,
-            Number(
-              args.durationSeconds
-            ) || 1
-          );
+      const tickRateSeconds = Math.max(0.1, Number(args.tickRateSeconds) || 1);
 
-        const tickRateSeconds =
-          Math.max(
-            0.1,
-            Number(
-              args.tickRateSeconds
-            ) || 1
-          );
+      const durationMs = durationSeconds * 1000;
 
-        const durationMs =
-          durationSeconds *
-          1000;
+      const tickIntervalMs = tickRateSeconds * 1000;
 
-        const tickIntervalMs =
-          tickRateSeconds *
-          1000;
+      const totalTicks = Math.max(
+        1,
+        Math.floor(durationSeconds / tickRateSeconds),
+      );
 
-        const totalTicks =
-          Math.max(
-            1,
-            Math.floor(
-              durationSeconds /
-              tickRateSeconds
-            )
-          );
+      /*
+       * Refresh the same player's same
+       * spell rather than stacking itself
+       * infinitely.
+       */
+      session.dots = session.dots.filter(
+        (effect) =>
+          !(
+            effect.sourcePlayerId === Number(args.sourcePlayerId) &&
+            effect.spellId === Number(args.spellId)
+          ),
+      );
+
+      const effect: HuntDotEffect = {
+        id: session.nextEffectId++,
+
+        sourcePlayerId: Number(args.sourcePlayerId),
+
+        spellId: Number(args.spellId),
+
+        spellName: String(args.spellName),
+
+        totalDamage,
+
+        totalTicks,
+
+        ticksApplied: 0,
+
+        tickIntervalMs,
 
         /*
-         * Refresh the same player's same
-         * spell rather than stacking itself
-         * infinitely.
+         * Same behavior as your normal DOT
+         * pipeline: first tick may occur
+         * immediately during advancement.
          */
-        session.dots =
-          session.dots.filter(
-            effect =>
-              !(
-                effect.sourcePlayerId ===
-                  Number(
-                    args.sourcePlayerId
-                  ) &&
-                effect.spellId ===
-                  Number(
-                    args.spellId
-                  )
-              )
-          );
+        nextTickAt: Date.now() + (args.immediateFirstTick ? 0 : tickIntervalMs),
 
-        const effect:
-          HuntDotEffect = {
+        expiresAt: Date.now() + durationMs,
 
-          id:
-            session.nextEffectId++,
+        defenseReductionPerTick: Number(args.defenseReductionPerTick) || 0,
+        defenseReductionMaxStacks: Number(args.defenseReductionMaxStacks) || 0,
+        manaRestorePercentPerTick: Number(args.manaRestorePercentPerTick) || 0,
+        tickHealingPercent: Number((args as any).tickHealingPercent) || 0,
+      };
 
-          sourcePlayerId:
-            Number(
-              args.sourcePlayerId
-            ),
+      session.dots.push(effect);
 
-          spellId:
-            Number(
-              args.spellId
-            ),
-
-          spellName:
-            String(
-              args.spellName
-            ),
-
-          totalDamage,
-
-          totalTicks,
-
-          ticksApplied:
-            0,
-
-          tickIntervalMs,
-
-          /*
-           * Same behavior as your normal DOT
-           * pipeline: first tick may occur
-           * immediately during advancement.
-           */
-          nextTickAt:
-            Date.now(),
-
-          expiresAt:
-            Date.now() +
-            durationMs
-        };
-
-        session.dots.push(
-          effect
-        );
-
-        return effect;
-      },
-
+      return effect;
+    },
 
     // =================================================
     // DEBUFF APPLICATION
     // =================================================
 
-    applyDebuff:
-      async (args) => {
+    applyDebuff: async (args) => {
+      const stat = String(args.stat || "")
+        .trim()
+        .toLowerCase() as HuntDebuffEffect["stat"];
 
-        const stat =
-          String(
-            args.stat ||
-            ""
-          )
-            .trim()
-            .toLowerCase() as
-              HuntDebuffEffect["stat"];
+      const value = Number(args.value) || 0;
 
-        const value =
-          Number(
-            args.value
-          ) || 0;
+      const durationSeconds = Math.max(0.1, Number(args.durationSeconds) || 1);
 
-        const durationSeconds =
-          Math.max(
-            0.1,
-            Number(
-              args.durationSeconds
-            ) || 1
-          );
+      /*
+       * Same caster + same spell + same stat
+       * refreshes instead of stacking itself.
+       */
+      session.debuffs = session.debuffs.filter(
+        (effect) =>
+          !(
+            effect.sourcePlayerId === Number(args.sourcePlayerId) &&
+            effect.spellId === Number(args.spellId) &&
+            effect.stat === stat
+          ),
+      );
 
-        /*
-         * Same caster + same spell + same stat
-         * refreshes instead of stacking itself.
-         */
-        session.debuffs =
-          session.debuffs.filter(
-            effect =>
-              !(
-                effect.sourcePlayerId ===
-                  Number(
-                    args.sourcePlayerId
-                  ) &&
-                effect.spellId ===
-                  Number(
-                    args.spellId
-                  ) &&
-                effect.stat ===
-                  stat
-              )
-          );
+      const appliedAt = Date.now();
 
-        const appliedAt =
-          Date.now();
+      const effect: HuntDebuffEffect = {
+        id: session.nextEffectId++,
 
-        const effect:
-          HuntDebuffEffect = {
+        sourcePlayerId: Number(args.sourcePlayerId),
 
-          id:
-            session.nextEffectId++,
+        spellId: Number(args.spellId),
 
-          sourcePlayerId:
-            Number(
-              args.sourcePlayerId
-            ),
+        spellName: String(args.spellName),
 
-          spellId:
-            Number(
-              args.spellId
-            ),
+        stat,
 
-          spellName:
-            String(
-              args.spellName
-            ),
+        value,
 
-          stat,
+        appliedAt,
 
-          value,
+        expiresAt: appliedAt + durationSeconds * 1000,
+      };
 
-          appliedAt,
+      session.debuffs.push(effect);
 
-          expiresAt:
-            appliedAt +
-            durationSeconds *
-              1000
-        };
-
-        session.debuffs.push(
-          effect
-        );
-
-        return effect;
-      }
+      return effect;
+    },
+  } as SpellEnemy & {
+    consumeDot: (
+      sourcePlayerId: number,
+      spellId: number
+    ) => Promise<number>;
   };
 
   return spellEnemy;
 }
 
-
-async function processHuntDots(
-  session: HuntCombatSession,
-  now: number
-) {
+async function processHuntDots(session: HuntCombatSession, now: number) {
   if (
     session.state !== "active" ||
     session.enemy.hp <= 0 ||
@@ -1714,15 +1080,9 @@ async function processHuntDots(
     return;
   }
 
-  let enemyHP =
-    session.enemy.hp;
+  let enemyHP = session.enemy.hp;
 
-
-  for (
-    const dot of
-    session.dots
-  ) {
-
+  for (const dot of session.dots) {
     /*
      * A poll could arrive late enough that
      * multiple ticks are due.
@@ -1731,12 +1091,10 @@ async function processHuntDots(
      * silently losing damage.
      */
     while (
-      dot.ticksApplied <
-        dot.totalTicks &&
+      dot.ticksApplied < dot.totalTicks &&
       dot.nextTickAt <= now &&
       enemyHP > 0
     ) {
-
       /*
        * Fraction-safe distribution.
        *
@@ -1744,121 +1102,158 @@ async function processHuntDots(
        * 25 total damage / 15 ticks
        * still ultimately deals exactly 25.
        */
-      const damageBefore =
-        Math.floor(
-          (
-            dot.totalDamage *
-            dot.ticksApplied
-          ) /
-          dot.totalTicks
-        );
-
-      const damageAfter =
-        Math.floor(
-          (
-            dot.totalDamage *
-            (
-              dot.ticksApplied +
-              1
-            )
-          ) /
-          dot.totalTicks
-        );
-
-      const tickDamage =
-        Math.max(
-          0,
-          damageAfter -
-            damageBefore
-        );
-
+      const tickDamage = calculateDistributedTickDamage(
+        dot.totalDamage,
+        dot.totalTicks,
+        dot.ticksApplied,
+      );
 
       dot.ticksApplied++;
 
-      dot.nextTickAt +=
-        dot.tickIntervalMs;
+      if (
+        (dot.defenseReductionPerTick || 0) > 0 &&
+        (dot.defenseReductionMaxStacks || 0) > 0
+      ) {
+        const stacks = Math.min(
+          Number(dot.defenseReductionMaxStacks),
+          dot.ticksApplied,
+        );
+        const reduction = -Math.max(
+          1,
+          Math.floor(
+            (Number(session.enemy.stats.defense || 0) *
+              Number(dot.defenseReductionPerTick) *
+              stacks) /
+              100,
+          ),
+        );
+        session.debuffs = session.debuffs.filter(
+          (effect) =>
+            !(
+              effect.sourcePlayerId === dot.sourcePlayerId &&
+              effect.spellId === dot.spellId &&
+              effect.stat === "defense"
+            ),
+        );
+        session.debuffs.push({
+          id: session.nextEffectId++,
+          sourcePlayerId: dot.sourcePlayerId,
+          spellId: dot.spellId,
+          spellName: dot.spellName,
+          stat: "defense",
+          value: reduction,
+          appliedAt: now,
+          expiresAt: dot.expiresAt,
+        });
+      }
 
+      if ((dot.manaRestorePercentPerTick || 0) > 0) {
+        const source = session.players.get(dot.sourcePlayerId);
+        if (source) {
+          const restored = Math.max(
+            1,
+            Math.floor(
+              (source.maxSp * Number(dot.manaRestorePercentPerTick)) / 100,
+            ),
+          );
+          source.sp = Math.min(source.maxSp, source.sp + restored);
+          source.stats.spoints = source.sp;
+          await db.query(`UPDATE players SET spoints = ? WHERE id = ?`, [
+            source.sp,
+            source.playerId,
+          ]);
+        }
+      }
+
+      if ((dot.tickHealingPercent || 0) > 0 && tickDamage > 0) {
+        const source = session.players.get(dot.sourcePlayerId);
+        if (source && source.hp > 0) {
+          const healing = Math.max(1, Math.floor(tickDamage * Number(dot.tickHealingPercent) / 100));
+          source.hp = Math.min(source.maxHp, source.hp + healing);
+          source.stats.hpoints = source.hp;
+          await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [source.hp, source.playerId]);
+          publishHuntPlayerVitals(source);
+          session.log.push(`🩸 Scent of Blood restores ${healing} HP to ${source.name}.`);
+        }
+      }
+
+      dot.nextTickAt += dot.tickIntervalMs;
 
       if (tickDamage <= 0) {
         continue;
       }
 
+      enemyHP = Math.max(0, enemyHP - tickDamage);
 
-      enemyHP =
-        Math.max(
-          0,
-          enemyHP -
-            tickDamage
+      const markedHit = await processWarlordMarkedHit(
+        buildHuntSpellEnemy(session) as any,
+        dot.sourcePlayerId,
+        tickDamage,
+      );
+      const markedAttacker = session.players.get(dot.sourcePlayerId);
+      if (markedAttacker) {
+        markedAttacker.gauge = Math.min(
+          100,
+          markedAttacker.gauge + markedHit.gaugeGain,
         );
+        markedAttacker.ready = markedAttacker.gauge >= 100;
+      }
 
-
-      session.log.push(
-        `🔥 ${session.enemy.name} takes ${tickDamage} damage from ${dot.spellName}.`
+      const dotThreatMultiplier = await getPlayerCombatThreatMultiplier(
+        dot.sourcePlayerId,
       );
 
+      addCombatThreat(
+        session.enemy,
+        session.players.values(),
+        dot.sourcePlayerId,
+        tickDamage * dotThreatMultiplier,
+      );
+
+      session.log.push(
+        `🔥 ${session.enemy.name} takes ${tickDamage} damage from ${dot.spellName}.`,
+      );
 
       session.damageEvents.push({
-        id:
-          session.nextDamageEventId++,
+        id: session.nextDamageEventId++,
 
-        type:
-          "damage",
+        type: "damage",
 
-        source:
-          "player",
+        source: "player",
 
-        playerId:
-          dot.sourcePlayerId,
+        playerId: dot.sourcePlayerId,
 
-        target:
-          "enemy",
+        target: "enemy",
 
-        amount:
-          tickDamage,
+        amount: tickDamage,
 
-        crit:
-          false,
+        crit: false,
 
-        spellId:
-          dot.spellId,
+        spellId: dot.spellId,
 
-        spellName:
-          dot.spellName,
+        spellName: dot.spellName,
 
-        kind:
-          "dot",
+        kind: "dot",
 
-        createdAt:
-          Date.now()
+        createdAt: Date.now(),
       });
 
-
-      if (
-        enemyHP <= 0
-      ) {
+      if (enemyHP <= 0) {
         break;
       }
     }
   }
 
+  session.enemy.hp = enemyHP;
 
-  session.enemy.hp =
-    enemyHP;
-
-  session.enemy.stats.hpoints =
-    enemyHP;
-
+  session.enemy.stats.hpoints = enemyHP;
 
   /*
    * Remove finished effects.
    */
-  session.dots =
-    session.dots.filter(
-      dot =>
-        dot.ticksApplied <
-        dot.totalTicks
-    );
-
+  session.dots = session.dots.filter(
+    (dot) => dot.ticksApplied < dot.totalTicks,
+  );
 
   await db.query(
     `
@@ -1868,158 +1263,113 @@ async function processHuntDots(
 
       WHERE id = ?
     `,
-    [
-      enemyHP,
-      session.encounterId
-    ]
+    [enemyHP, session.encounterId],
   );
 
-
-  if (
-    session.damageEvents.length >
-    40
-  ) {
-    session.damageEvents =
-      session.damageEvents.slice(
-        -40
-      );
+  if (session.damageEvents.length > 40) {
+    session.damageEvents = session.damageEvents.slice(-40);
   }
 
-
-  if (
-    session.log.length >
-    60
-  ) {
-    session.log =
-      session.log.slice(
-        -60
-      );
+  if (session.log.length > 60) {
+    session.log = session.log.slice(-60);
   }
-
 
   /*
    * Critical:
    * DOT kills must use the normal Hunt
    * victory/reward lifecycle.
    */
-  if (
-    enemyHP <= 0
-  ) {
-    await completeHuntVictory(
-      session
+  if (enemyHP <= 0) {
+    const claim = await processWarlordClaimThePrize(
+      buildHuntSpellEnemy(session) as any,
+      Array.from(session.players.values())
+        .filter((member) => member.hp > 0)
+        .map((member) => member.playerId),
     );
+    for (const claimed of claim.players) {
+      const member = session.players.get(claimed.playerId);
+      if (!member) continue;
+      member.hp = claimed.hp;
+      member.sp = claimed.sp;
+      member.stats.hpoints = claimed.hp;
+      member.stats.spoints = claimed.sp;
+      member.gauge = Math.min(100, member.gauge + claim.gaugeGain);
+      member.ready = member.gauge >= 100;
+    }
+    await completeHuntVictory(session);
   }
 }
-
-
 
 async function castHuntSpellUnlocked(
   session: HuntCombatSession,
   playerId: number,
   spellId: number,
-  targetPlayerId: number | null = null
+  targetPlayerId: number | null = null,
 ): Promise<HuntSpellCastResult> {
-
   // =====================================================
   // ENCOUNTER VALIDATION
   // =====================================================
 
-  if (
-    session.state !==
-    "active"
-  ) {
+  if (session.state !== "active") {
     return {
       ok: false,
-      error:
-        "The Hunt encounter is no longer active."
+      error: "The Hunt encounter is no longer active.",
     };
   }
-
 
   /*
    * Advance authoritative Hunt state before
    * attempting the player's action.
    */
-  await advanceHuntCombatSessionUnlocked(
-    session
-  );
-
+  await advanceHuntCombatSessionUnlocked(session);
 
   /*
    * Advancement may have ended the encounter
    * through an auto attack, DOT, etc.
    */
-  if (
-    session.state !==
-    "active"
-  ) {
+  if (session.state !== "active") {
     return {
       ok: false,
 
-      error:
-        "The Hunt target has already been defeated.",
+      error: "The Hunt target has already been defeated.",
 
-      snapshot:
-        buildHuntCombatSnapshot(
-          session
-        )
+      snapshot: buildHuntCombatSnapshot(session),
     };
   }
-
 
   // =====================================================
   // PLAYER VALIDATION
   // =====================================================
 
-  const player =
-    session.players.get(
-      Number(
-        playerId
-      )
-    );
-
+  const player = session.players.get(Number(playerId));
 
   if (!player) {
     return {
       ok: false,
-      error:
-        "You are not part of this Hunt encounter."
+      error: "You are not part of this Hunt encounter.",
     };
   }
 
-
-  if (
-    player.hp <= 0
-  ) {
+  if (player.hp <= 0) {
     return {
       ok: false,
-      error:
-        "You cannot act while defeated."
+      error: "You cannot act while defeated.",
     };
   }
 
-
-  if (
-    !player.ready
-  ) {
+  if (!player.ready) {
     return {
       ok: false,
-      error:
-        "Your action gauge is not ready."
+      error: "Your action gauge is not ready.",
     };
   }
 
-
-  if (
-    session.enemy.hp <= 0
-  ) {
+  if (session.enemy.hp <= 0) {
     return {
       ok: false,
-      error:
-        "The Hunt target has already been defeated."
+      error: "The Hunt target has already been defeated.",
     };
   }
-
 
   // =====================================================
   // LOAD / VERIFY SPELL
@@ -2033,9 +1383,8 @@ async function castHuntSpellUnlocked(
    * - be equipped
    * - be a combat spell
    */
-  const [[spell]]: any =
-    await db.query(
-      `
+  const [[baseSpell]]: any = await db.query(
+    `
         SELECT
           s.*,
           pes.slot
@@ -2058,116 +1407,90 @@ async function castHuntSpellUnlocked(
 
         LIMIT 1
       `,
-      [
-        playerId,
-        spellId
-      ]
-    );
+    [playerId, spellId],
+  );
 
-
-  if (!spell) {
+  if (!baseSpell) {
     return {
       ok: false,
-      error:
-        "That spell is not equipped."
+      error: "That spell is not equipped.",
     };
   }
 
+  /*
+   * Build the authoritative Hunt spell:
+   *
+   * base spell + purchased rank + selected talents.
+   *
+   * Every validation and effect below uses this prepared spell.
+   */
+  const preparedCast = await prepareSpellForCast(playerId, baseSpell);
 
-  const spellName =
-    String(
-      spell.name ??
-      "Ability"
-    );
+  const spell = preparedCast.spell;
 
+  const warlordOrder = await getWarlordNextSpellOrder(playerId);
+  const isDamagingSpell =
+    Number(spell.damage) > 0 ||
+    Number(spell.dot_damage) > 0 ||
+    ["damage", "dot", "damage_dot"].includes(String(spell.type));
 
-  const targetType =
-    String(
-      spell.target_type ||
-      spell.target ||
-      "enemy"
-    )
-      .trim()
-      .toLowerCase();
+  if (isDamagingSpell && warlordOrder.damagePercent > 0) {
+    const multiplier = 1 + warlordOrder.damagePercent / 100;
+    if (Number(spell.damage) > 0) spell.damage = Math.round(Number(spell.damage) * multiplier);
+    if (Number(spell.dot_damage) > 0) spell.dot_damage = Math.round(Number(spell.dot_damage) * multiplier);
+  }
 
+  const spellName = String(spell.name ?? "Ability");
+
+  const targetType = String(spell.target_type || spell.target || "enemy")
+    .trim()
+    .toLowerCase();
 
   // =====================================================
   // SINGLE FRIENDLY TARGET
   // =====================================================
 
-  let targetPlayer:
-    HuntCombatPlayer | null =
-    null;
-
+  let targetPlayer: HuntCombatPlayer | null = null;
 
   /*
    * Ally-targeted abilities require an
    * explicitly selected Hunt participant.
    */
-  if (
-    targetType ===
-    "ally"
-  ) {
-
-    if (
-      !targetPlayerId
-    ) {
+  if (targetType === "ally") {
+    if (!targetPlayerId) {
       return {
         ok: false,
-        error:
-          "Choose an ally to target."
+        error: "Choose an ally to target.",
       };
     }
 
+    const selectedTarget = session.players.get(Number(targetPlayerId));
 
-    const selectedTarget =
-      session.players.get(
-        Number(
-          targetPlayerId
-        )
-      );
-
-
-    if (
-      !selectedTarget
-    ) {
+    if (!selectedTarget) {
       return {
         ok: false,
-        error:
-          "That player is not part of this Hunt."
+        error: "That player is not part of this Hunt.",
       };
     }
 
-
-    if (
-      selectedTarget.hp <= 0
-    ) {
+    if (selectedTarget.hp <= 0) {
       return {
         ok: false,
-        error:
-          "That ally is defeated."
+        error: "That ally is defeated.",
       };
     }
 
-
-    targetPlayer =
-      selectedTarget;
+    targetPlayer = selectedTarget;
   }
-
 
   /*
    * Self-targeted abilities always target
    * the caster regardless of anything the
    * browser supplied.
    */
-  if (
-    targetType ===
-    "self"
-  ) {
-    targetPlayer =
-      player;
+  if (targetType === "self") {
+    targetPlayer = player;
   }
-
 
   // =====================================================
   // PARTY TARGET COLLECTION
@@ -2182,39 +1505,23 @@ async function castHuntSpellUnlocked(
    *
    * target_type = all_allies
    */
-  const alliedPlayers =
-    Array.from(
-      session.players.values()
-    )
-      .filter(
-        member =>
-          member.hp > 0
-      )
-      .map(
-        member => ({
-          playerId:
-            member.playerId,
+  const alliedPlayers = Array.from(session.players.values())
+    .filter((member) => member.hp > 0)
+    .map((member) => ({
+      playerId: member.playerId,
 
-          name:
-            member.name,
+      name: member.name,
 
-          stats:
-            member.stats,
+      stats: member.stats,
 
-          hp:
-            member.hp,
+      hp: member.hp,
 
-          maxHp:
-            member.maxHp,
+      maxHp: member.maxHp,
 
-          sp:
-            member.sp,
+      sp: member.sp,
 
-          maxSp:
-            member.maxSp
-        })
-      );
-
+      maxSp: member.maxSp,
+    }));
 
   // =====================================================
   // RESOLVE SHARED SPELL HANDLER
@@ -2231,148 +1538,162 @@ async function castHuntSpellUnlocked(
    *      ↓
    * generic handler
    */
-  const handler =
-    getSpellHandler(
-      spell
-    );
-
+  const handler = getSpellHandler(spell);
 
   if (!handler) {
     return {
       ok: false,
 
-      error:
-        `No spell handler exists for ${spellName}.`
+      error: `No spell handler exists for ${spellName}.`,
     };
   }
-
 
   // =====================================================
   // BUILD HUNT ENEMY ADAPTER
   // =====================================================
 
-  const spellEnemy =
-    buildHuntSpellEnemy(
-      session
-    );
+  const spellEnemy = buildHuntSpellEnemy(session);
 
-
-  if (
-    handler.requiresEnemy &&
-    !spellEnemy
-  ) {
+  if (handler.requiresEnemy && !spellEnemy) {
     return {
       ok: false,
-      error:
-        "There is no Hunt target."
+      error: "There is no Hunt target.",
     };
   }
-
 
   // =====================================================
   // SPELL CONFIGURATION VALIDATION
   // =====================================================
 
-  const configurationError =
-    handler.validate?.(
-      spell
-    ) ??
-    null;
+  const configurationError = handler.validate?.(spell) ?? null;
 
+  if (configurationError) {
+    console.error("Invalid Hunt spell configuration:", {
+      spellId: spell.id,
 
-  if (
-    configurationError
-  ) {
+      spellName: spell.name,
 
-    console.error(
-      "Invalid Hunt spell configuration:",
-      {
-        spellId:
-          spell.id,
+      spellType: spell.type,
 
-        spellName:
-          spell.name,
+      handlerKey: spell.handler_key,
 
-        spellType:
-          spell.type,
+      targetType: spell.target_type,
 
-        handlerKey:
-          spell.handler_key,
-
-        targetType:
-          spell.target_type,
-
-        configurationError
-      }
-    );
-
+      configurationError,
+    });
 
     return {
       ok: false,
-      error:
-        configurationError
+      error: configurationError,
     };
   }
 
+  /*
+   * One combat-mode-neutral context is shared by the spell handler and
+   * every custom talent lifecycle hook.
+   */
+  const spellContext: SpellHandlerContext = {
+    playerId: player.playerId,
+
+    spell,
+
+    player: player.stats,
+
+    enemy: spellEnemy,
+
+    currentPlayerHP: player.hp,
+
+    currentPlayerSP: player.sp,
+
+    maxPlayerHP: player.maxHp,
+
+    maxPlayerSP: player.maxSp,
+
+    targetPlayerId: targetPlayer ? targetPlayer.playerId : undefined,
+
+    targetPlayer: targetPlayer ? targetPlayer.stats : undefined,
+
+    currentTargetHP: targetPlayer ? targetPlayer.hp : undefined,
+
+    currentTargetSP: targetPlayer ? targetPlayer.sp : undefined,
+
+    maxTargetHP: targetPlayer ? targetPlayer.maxHp : undefined,
+
+    maxTargetSP: targetPlayer ? targetPlayer.maxSp : undefined,
+
+    allies: alliedPlayers,
+
+    talents: preparedCast.talents,
+
+    castState: preparedCast.castState,
+
+    hasTalent: preparedCast.hasTalent,
+
+    getTalent: preparedCast.getTalent,
+
+    getTalentConfig: preparedCast.getTalentConfig,
+  };
+
+  (spellContext as any).alliesIncludingDefeated = Array.from(session.players.values()).map(
+    (member) => ({
+      playerId: member.playerId,
+      name: member.name,
+      stats: member.stats,
+      hp: member.hp,
+      maxHp: member.maxHp,
+      sp: member.sp,
+      maxSp: member.maxSp
+    })
+  );
+
+  // Talent-specific casting rules fail before SP or the ATB turn is spent.
+  const talentValidationError = await validatePreparedSpellTalents(
+    preparedCast,
+    spellContext,
+  );
+
+  if (talentValidationError) {
+    return {
+      ok: false,
+      error: talentValidationError,
+    };
+  }
 
   // =====================================================
   // SP VALIDATION
   // =====================================================
 
-  const manaCost =
-    Math.max(
-      0,
-      Number(
-        spell.mana_cost ??
-        0
-      )
-    );
+  const manaCost = warlordOrder.free
+    ? 0
+    : Math.max(0, Number(preparedCast.castState.manaCost ?? 0));
 
-
-  if (
-    player.sp <
-    manaCost
-  ) {
+  if (player.sp < manaCost) {
     return {
       ok: false,
-      error:
-        "Not enough SP."
+      error: "Not enough SP.",
     };
   }
-
 
   // =====================================================
   // COOLDOWN VALIDATION
   // =====================================================
 
-  const now =
-    Date.now();
+  const now = Date.now();
 
+  const cooldownKey = `spell:${spellId}`;
 
-  const cooldownKey =
-    `spell:${spellId}`;
+  const cooldownUntil = Number(player.cooldowns[cooldownKey] ?? 0);
 
-
-  const cooldownUntil =
-    Number(
-      player.cooldowns[
-        cooldownKey
-      ] ??
-      0
-    );
-
-
-  if (
-    cooldownUntil >
-    now
-  ) {
+  if (cooldownUntil > now) {
     return {
       ok: false,
-      error:
-        "That spell is still on cooldown."
+      error: "That spell is still on cooldown.",
     };
   }
 
+  if (warlordOrder.free || isDamagingSpell) {
+    await consumeWarlordNextSpellOrder(playerId, warlordOrder);
+  }
 
   // =====================================================
   // PRE-CAST ENEMY SNAPSHOT
@@ -2382,15 +1703,14 @@ async function castHuntSpellUnlocked(
    * Used to derive direct damage regardless
    * of which shared handler performed it.
    */
-  const enemyHPBeforeCast =
-    Math.max(
-      0,
-      Number(
-        session.enemy.hp
-      ) ||
-      0
-    );
+  const enemyHPBeforeCast = Math.max(0, Number(session.enemy.hp) || 0);
 
+  const playerHPBeforeCast = new Map(
+    Array.from(session.players.values()).map((member) => [
+      member.playerId,
+      member.hp,
+    ]),
+  );
 
   // =====================================================
   // SPEND SP
@@ -2400,13 +1720,7 @@ async function castHuntSpellUnlocked(
    * Resource cost is paid only after every
    * normal validation has succeeded.
    */
-  player.sp =
-    Math.max(
-      0,
-      player.sp -
-      manaCost
-    );
-
+  player.sp = Math.max(0, player.sp - manaCost);
 
   await db.query(
     `
@@ -2416,92 +1730,100 @@ async function castHuntSpellUnlocked(
 
       WHERE id = ?
     `,
-    [
-      player.sp,
-      playerId
-    ]
+    [player.sp, playerId],
   );
 
+  /*
+   * Side-effecting pre-cast hooks only run after all normal validation has
+   * passed and the spell's adjusted SP cost has been paid.
+   */
+  spellContext.currentPlayerSP = player.sp;
+
+  await runBeforeCastTalents(preparedCast, spellContext);
 
   // =====================================================
   // EXECUTE SHARED SPELL HANDLER
   // =====================================================
 
-  const result =
-    await handler.execute({
-      playerId:
-        player.playerId,
+  const berserkerDamageMultiplier = await getActiveBerserkerDamageMultiplier(
+    playerId,
+    player.hp,
+    player.maxHp
+  );
+  if (berserkerDamageMultiplier > 1) {
+    if (Number(spell.damage) > 0) spell.damage = Math.round(Number(spell.damage) * berserkerDamageMultiplier);
+    if (Number(spell.dot_damage) > 0) spell.dot_damage = Math.round(Number(spell.dot_damage) * berserkerDamageMultiplier);
+  }
 
-      spell,
+  let result = await handler.execute(spellContext);
 
-      /*
-       * Spell scaling always comes from
-       * the caster.
-       */
-      player:
-        player.stats,
+  result = await runAfterCastTalents(preparedCast, spellContext, result);
 
-      /*
-       * Enemy-targeted context.
-       */
-      enemy:
-        spellEnemy,
+  const berserkerCriticalGauge = await processBerserkerCriticalGauge(playerId, Boolean(result.crit));
+  if (berserkerCriticalGauge > 0 && Number(result.damage) > 0) {
+    result.casterGaugeGain = (Number(result.casterGaugeGain) || 0) + berserkerCriticalGauge;
+  }
 
-      /*
-       * Caster resources.
-       */
-      currentPlayerHP:
-        player.hp,
+  if (Number(result.damage) > 0 && Number(player.stats.lifesteal || 0) > 0) {
+    const raw = Math.max(0, Math.floor(Number(result.damage) * Number(player.stats.lifesteal)));
+    const actual = Math.max(0, Math.min(raw, player.maxHp - player.hp));
+    const overheal = Math.max(0, raw - actual);
+    if (actual > 0) {
+      player.hp += actual;
+      player.stats.hpoints = player.hp;
+      result.playerHP = player.hp;
+      result.healing = (Number(result.healing) || 0) + actual;
+      await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [player.hp, playerId]);
+    }
+    await convertBerserkerLifestealOverhealToShield(playerId, overheal);
+  }
 
-      currentPlayerSP:
-        player.sp,
+  await processJudgmentSpellHit(spellEnemy, {
+    playerId,
+    spellId: Number(spell.id),
+    spellName: String(spell.name),
+    damage:
+      Number(result.damage) ||
+      (["dot", "damage_dot"].includes(String(spell.type)) ? 1 : 0),
+    crit: Boolean(result.crit),
+  });
 
-      maxPlayerHP:
-        player.maxHp,
+  const restoredMana = Math.max(
+    0,
+    Number(result.manaRestored) ||
+      Math.floor(
+        (player.maxSp * (Number(result.restoreManaPercent) || 0)) / 100,
+      ),
+  );
+  if (restoredMana > 0) {
+    player.sp = Math.min(player.maxSp, player.sp + restoredMana);
+    player.stats.spoints = player.sp;
+    await db.query(`UPDATE players SET spoints = ? WHERE id = ?`, [
+      player.sp,
+      playerId,
+    ]);
+  }
 
-      maxPlayerSP:
-        player.maxSp,
+  // Toxic Precision refreshes the caster's active Poison Arrow DOT. Resetting
+  // ticksApplied restores the complete remaining poison package instead of
+  // merely extending an already exhausted effect shell.
+  const refreshPoisonDuration = Math.max(
+    0,
+    Number(result.refreshPoisonDuration) || 0,
+  );
 
-      /*
-       * Single friendly target.
-       */
-      targetPlayerId:
-        targetPlayer
-          ? targetPlayer.playerId
-          : undefined,
+  if (refreshPoisonDuration > 0) {
+    const poison = session.dots.find(
+      (effect) => effect.sourcePlayerId === playerId && effect.spellId === 62,
+    );
 
-      targetPlayer:
-        targetPlayer
-          ? targetPlayer.stats
-          : undefined,
-
-      currentTargetHP:
-        targetPlayer
-          ? targetPlayer.hp
-          : undefined,
-
-      currentTargetSP:
-        targetPlayer
-          ? targetPlayer.sp
-          : undefined,
-
-      maxTargetHP:
-        targetPlayer
-          ? targetPlayer.maxHp
-          : undefined,
-
-      maxTargetSP:
-        targetPlayer
-          ? targetPlayer.maxSp
-          : undefined,
-
-      /*
-       * Party-wide friendly targets.
-       */
-      allies:
-        alliedPlayers
-    });
-
+    if (poison) {
+      poison.ticksApplied = 0;
+      poison.nextTickAt = Date.now() + poison.tickIntervalMs;
+      poison.expiresAt = Date.now() + refreshPoisonDuration * 1000;
+      result.log = `${result.log ?? ""} ☠ Poison Arrow is refreshed.`;
+    }
+  }
 
   // =====================================================
   // RECONCILE ENEMY HP
@@ -2514,65 +1836,30 @@ async function castHuntSpellUnlocked(
    * Some handlers also return enemyHP.
    * Honor that value as well.
    */
-  if (
-    result.enemyHP !==
-    undefined
-  ) {
+  if (result.enemyHP !== undefined) {
+    const returnedEnemyHP = Math.max(
+      0,
+      Math.floor(Number(result.enemyHP) || 0),
+    );
 
-    const returnedEnemyHP =
-      Math.max(
-        0,
-        Math.floor(
-          Number(
-            result.enemyHP
-          ) ||
-          0
-        )
-      );
-
-
-    if (
-      returnedEnemyHP !==
-      session.enemy.hp
-    ) {
-
-      if (
-        spellEnemy.setHP
-      ) {
-
-        await spellEnemy.setHP(
-          returnedEnemyHP
-        );
-
+    if (returnedEnemyHP !== session.enemy.hp) {
+      if (spellEnemy.setHP) {
+        await spellEnemy.setHP(returnedEnemyHP);
       } else {
+        session.enemy.hp = returnedEnemyHP;
 
-        session.enemy.hp =
-          returnedEnemyHP;
-
-        session.enemy.stats.hpoints =
-          returnedEnemyHP;
+        session.enemy.stats.hpoints = returnedEnemyHP;
       }
     }
   }
-
 
   /*
    * Ensure local Hunt representation remains
    * valid after the handler runs.
    */
-  session.enemy.hp =
-    Math.max(
-      0,
-      Number(
-        session.enemy.hp
-      ) ||
-      0
-    );
+  session.enemy.hp = Math.max(0, Number(session.enemy.hp) || 0);
 
-
-  session.enemy.stats.hpoints =
-    session.enemy.hp;
-
+  session.enemy.stats.hpoints = session.enemy.hp;
 
   // =====================================================
   // CALCULATE DIRECT DAMAGE
@@ -2585,25 +1872,40 @@ async function castHuntSpellUnlocked(
    * DOT effects therefore don't count here
    * until an actual DOT tick occurs.
    */
-  const damage =
-    Math.max(
-      0,
-      enemyHPBeforeCast -
-      session.enemy.hp
+  const damage = Math.max(0, enemyHPBeforeCast - session.enemy.hp);
+
+  if (damage > 0) {
+    const markedHit = await processWarlordMarkedHit(
+      spellEnemy as any,
+      player.playerId,
+      damage,
     );
+    result.casterGaugeGain =
+      (Number(result.casterGaugeGain) || 0) + markedHit.gaugeGain;
+  }
 
+  if (session.enemy.hp <= 0) {
+    const livingIds = Array.from(session.players.values())
+      .filter((member) => member.hp > 0)
+      .map((member) => member.playerId);
+    const claim = await processWarlordClaimThePrize(spellEnemy as any, livingIds);
+    const bonuses = { ...((result as any).playerGaugeBonuses ?? {}) };
+    for (const claimed of claim.players) {
+      const member = session.players.get(claimed.playerId);
+      if (!member) continue;
+      member.hp = claimed.hp;
+      member.sp = claimed.sp;
+      member.stats.hpoints = claimed.hp;
+      member.stats.spoints = claimed.sp;
+      bonuses[claimed.playerId] =
+        (Number(bonuses[claimed.playerId]) || 0) + claim.gaugeGain;
+    }
+    (result as any).playerGaugeBonuses = bonuses;
+  }
 
-  const crit =
-    Boolean(
-      result.crit
-    );
+  const crit = Boolean(result.crit);
 
-
-  const dodged =
-    Boolean(
-      result.dodged
-    );
-
+  const dodged = Boolean(result.dodged);
 
   // =====================================================
   // FRIENDLY STATE REFRESH HELPER
@@ -2623,102 +1925,51 @@ async function castHuntSpellUnlocked(
    * Refresh from the authoritative player
    * stat engine after the cast.
    */
-  const refreshHuntPlayer =
-    async (
-      member: HuntCombatPlayer
-    ) => {
+  const refreshHuntPlayer = async (member: HuntCombatPlayer) => {
+    const refreshed = await getFinalPlayerStats(member.playerId);
 
-      const refreshed =
-        await getFinalPlayerStats(
-          member.playerId
-        );
+    if (!refreshed) {
+      return;
+    }
 
+    member.stats = refreshed;
 
-      if (
-        !refreshed
-      ) {
-        return;
-      }
+    member.maxHp = Math.max(1, Number(refreshed.maxhp ?? member.maxHp));
 
+    member.maxSp = Math.max(0, Number(refreshed.maxspoints ?? member.maxSp));
 
-      member.stats =
-        refreshed;
+    member.hp = Math.max(
+      0,
+      Math.min(
+        member.maxHp,
 
+        Number(refreshed.hpoints ?? member.hp),
+      ),
+    );
 
-      member.maxHp =
-        Math.max(
-          1,
-          Number(
-            refreshed.maxhp ??
-            member.maxHp
-          )
-        );
+    member.sp = Math.max(
+      0,
+      Math.min(
+        member.maxSp,
 
-
-      member.maxSp =
-        Math.max(
-          0,
-          Number(
-            refreshed.maxspoints ??
-            member.maxSp
-          )
-        );
-
-
-      member.hp =
-        Math.max(
-          0,
-          Math.min(
-            member.maxHp,
-
-            Number(
-              refreshed.hpoints ??
-              member.hp
-            )
-          )
-        );
-
-
-      member.sp =
-        Math.max(
-          0,
-          Math.min(
-            member.maxSp,
-
-            Number(
-              refreshed.spoints ??
-              member.sp
-            )
-          )
-        );
-    };
-
+        Number(refreshed.spoints ?? member.sp),
+      ),
+    );
+  };
 
   // =====================================================
   // SYNCHRONIZE FRIENDLY PLAYER STATE
   // =====================================================
 
-  if (
-    targetType ===
-    "all_allies"
-  ) {
-
+  if (targetType === "all_allies") {
     /*
      * Party-wide spells can affect every
      * player simultaneously.
      */
-    for (
-      const member of
-      session.players.values()
-    ) {
-
-      await refreshHuntPlayer(
-        member
-      );
+    for (const member of session.players.values()) {
+      await refreshHuntPlayer(member);
     }
-
   } else {
-
     /*
      * The caster may always have changed:
      *
@@ -2728,26 +1979,15 @@ async function castHuntSpellUnlocked(
      * - life siphon
      * - health-cost abilities
      */
-    await refreshHuntPlayer(
-      player
-    );
-
+    await refreshHuntPlayer(player);
 
     /*
      * Refresh an explicitly selected ally.
      */
-    if (
-      targetPlayer &&
-      targetPlayer.playerId !==
-        player.playerId
-    ) {
-
-      await refreshHuntPlayer(
-        targetPlayer
-      );
+    if (targetPlayer && targetPlayer.playerId !== player.playerId) {
+      await refreshHuntPlayer(targetPlayer);
     }
   }
-
 
   // =====================================================
   // LEGACY EXPLICIT CASTER HP RESULT
@@ -2764,34 +2004,62 @@ async function castHuntSpellUnlocked(
    * refreshHuntPlayer() synchronize it.
    */
   if (
-    result.playerHP !==
-      undefined &&
-    (
-      targetType ===
-        "self" ||
-      targetType ===
-        "enemy"
-    )
+    result.playerHP !== undefined &&
+    (targetType === "self" || targetType === "enemy")
   ) {
+    player.hp = Math.max(
+      0,
+      Math.min(
+        player.maxHp,
 
-    player.hp =
-      Math.max(
-        0,
-        Math.min(
-          player.maxHp,
+        Number(result.playerHP) || 0,
+      ),
+    );
 
-          Number(
-            result.playerHP
-          ) ||
-          0
-        )
-      );
-
-
-    player.stats.hpoints =
-      player.hp;
+    player.stats.hpoints = player.hp;
   }
 
+  const effectiveHealing = Array.from(session.players.values()).reduce(
+    (total, member) =>
+      total +
+      Math.max(
+        0,
+        member.hp - (playerHPBeforeCast.get(member.playerId) ?? member.hp),
+      ),
+    0,
+  );
+
+  const persistentThreatMultiplier = await getPlayerCombatThreatMultiplier(
+    player.playerId,
+  );
+
+  const generatedThreat = calculateCombatThreat({
+    damage,
+    effectiveHealing,
+    threatMultiplier:
+      Math.max(0, Number(result.threatMultiplier) || 1) *
+      persistentThreatMultiplier,
+    bonusThreat: result.threatGenerated,
+  });
+
+  addCombatThreat(
+    session.enemy,
+    session.players.values(),
+    player.playerId,
+    generatedThreat,
+  );
+
+  if (Number(result.forceThreatTargetPlayerId) === player.playerId) {
+    const highestThreat = Math.max(
+      0,
+      ...Object.values(session.enemy.threat).map((value) => Number(value) || 0),
+    );
+    session.enemy.threat[player.playerId] = highestThreat + 1;
+    session.enemy.targetPlayerId = player.playerId;
+    session.log.push(
+      `🌿 ${player.name} forces ${session.enemy.name} to focus on them!`,
+    );
+  }
 
   // =====================================================
   // GLOBAL PLAYER STATE
@@ -2805,83 +2073,94 @@ async function castHuntSpellUnlocked(
    * been refreshed from the authoritative stat engine,
    * so publish their vitals to each player's global HUD.
    */
-  if (
-    targetType ===
-    "all_allies"
-  ) {
-    for (
-      const member of
-      session.players.values()
-    ) {
-      publishHuntPlayerVitals(
-        member
-      );
+  if (targetType === "all_allies") {
+    for (const member of session.players.values()) {
+      publishHuntPlayerVitals(member);
     }
   } else {
-    publishHuntPlayerVitals(
-      player
-    );
+    publishHuntPlayerVitals(player);
 
-    if (
-      targetPlayer &&
-      targetPlayer.playerId !==
-        player.playerId
-    ) {
-      publishHuntPlayerVitals(
-        targetPlayer
-      );
+    if (targetPlayer && targetPlayer.playerId !== player.playerId) {
+      publishHuntPlayerVitals(targetPlayer);
     }
   }
-
 
   // =====================================================
   // COOLDOWN
   // =====================================================
 
-  const cooldownSeconds =
-    Math.max(
-      0,
-      Number(
-        spell.cooldown ??
-        0
-      )
-    );
+  const cooldownSeconds = Math.max(
+    0,
+    Number(preparedCast.castState.cooldownSeconds ?? 0),
+  );
 
+  const currentCooldownReduction = Math.max(
+    0,
+    Number(result.reduceCurrentCooldownSeconds) || 0,
+  );
 
-  player.cooldowns[
-    cooldownKey
-  ] =
-    now +
-    cooldownSeconds *
-    1000;
+  player.cooldowns[cooldownKey] =
+    now + Math.max(0, cooldownSeconds - currentCooldownReduction) * 1000;
 
+  if (Number(result.resetSpellCooldown) === Number(spell.id))
+    player.cooldowns[cooldownKey] = now;
+
+  const resetSpellIds = Array.isArray(result.resetSpellIds)
+    ? result.resetSpellIds.map(Number).filter(Number.isFinite)
+    : [];
+  for (const resetSpellId of resetSpellIds) {
+    player.cooldowns[`spell:${resetSpellId}`] = now;
+  }
+
+  // Relentless Pace reduces only other spell cooldowns. The newly assigned
+  // Quick Shot cooldown and all item cooldowns remain unchanged.
+  const reduceOtherCooldownsSeconds = Math.max(
+    0,
+    Number(result.reduceOtherCooldownsSeconds) || 0,
+  );
+
+  if (reduceOtherCooldownsSeconds > 0) {
+    reduceCombatSpellCooldowns(player, reduceOtherCooldownsSeconds, [Number(spell.id)], now);
+  }
+
+  const reducePartyCooldownsSeconds = Math.max(
+    0,
+    Number((result as any).reducePartyCooldownsSeconds) || 0,
+  );
+
+  if (reducePartyCooldownsSeconds > 0) {
+    for (const member of session.players.values()) {
+      reduceCombatSpellCooldowns(member, reducePartyCooldownsSeconds, [18], now);
+    }
+  }
 
   // =====================================================
   // CONSUME PLAYER ATB
   // =====================================================
 
-  player.gauge =
-    0;
+  player.gauge = 0;
 
+  player.ready = false;
 
-  player.ready =
-    false;
+  player.recoveryUntil = now + HUNT_SPELL_RECOVERY_MS;
 
-
-  player.recoveryUntil =
-    now +
-    HUNT_SPELL_RECOVERY_MS;
-
+  if (Number.isFinite(Number(result.setGaugeTo))) {
+    player.gauge = Math.max(0, Math.min(100, Number(result.setGaugeTo)));
+    player.ready = player.gauge >= 100;
+  }
 
   // Party-wide ATB advances are applied after consuming
   // the caster's action so the caster also ends at the
   // configured post-cast gauge instead of being reset to 0.
-  const partyGaugeGain =
-    Math.max(
-      0,
-      Number(result.partyGaugeGain) || 0
-    );
+  const partyGaugeGain = Math.max(0, Number(result.partyGaugeGain) || 0);
 
+  const casterGaugeGain = Math.max(0, Number(result.casterGaugeGain) || 0);
+  const targetGaugeGain = Math.max(0, Number(result.targetGaugeGain) || 0);
+  const targetGaugePlayerId = Number(result.targetGaugePlayerId);
+  const enemyGaugeReduction = Math.max(
+    0,
+    Number(result.enemyGaugeReduction) || 0,
+  );
 
   if (partyGaugeGain > 0) {
     for (const member of session.players.values()) {
@@ -2889,141 +2168,127 @@ async function castHuntSpellUnlocked(
         continue;
       }
 
-      member.gauge = Math.min(
-        100,
-        member.gauge + partyGaugeGain
-      );
+      member.gauge = Math.min(100, member.gauge + partyGaugeGain);
 
-      member.ready =
-        member.gauge >= 100;
+      member.ready = member.gauge >= 100;
     }
   }
 
+  if (casterGaugeGain > 0 && player.hp > 0) {
+    player.gauge = Math.min(100, player.gauge + casterGaugeGain);
+    player.ready = player.gauge >= 100;
+  }
+  if (targetGaugeGain > 0 && Number.isFinite(targetGaugePlayerId)) {
+    for (const member of session.players.values()) {
+      if (Number(member.playerId) === targetGaugePlayerId && member.hp > 0) {
+        member.gauge = Math.min(100, member.gauge + targetGaugeGain);
+        member.ready = member.gauge >= 100;
+        break;
+      }
+    }
+  }
+
+  if (enemyGaugeReduction > 0) {
+    session.enemy.gauge = Math.max(
+      0,
+      session.enemy.gauge - enemyGaugeReduction,
+    );
+    session.enemy.ready = session.enemy.gauge >= 100;
+  }
+
+  const playerGaugeBonuses = (result as any).playerGaugeBonuses ?? {};
+  const playerGaugeOverrides = (result as any).playerGaugeOverrides ?? {};
+
+  for (const member of session.players.values()) {
+    const bonus = Math.max(0, Number(playerGaugeBonuses[member.playerId]) || 0);
+    if (bonus > 0 && member.hp > 0) {
+      member.gauge = Math.min(100, member.gauge + bonus);
+      member.ready = member.gauge >= 100;
+    }
+
+    if (Number.isFinite(Number(playerGaugeOverrides[member.playerId])) && member.hp > 0) {
+      member.gauge = Math.max(0, Math.min(100, Number(playerGaugeOverrides[member.playerId])));
+      member.ready = member.gauge >= 100;
+    }
+  }
+
+  if (damage > 0) {
+    await db.query(
+      `DELETE FROM player_buffs WHERE player_id=? AND source LIKE 'knight-answer:%'`,
+      [player.playerId]
+    );
+  }
 
   // =====================================================
   // COMBAT LOG
   // =====================================================
 
-  if (
-    result.log
-  ) {
-
-    session.log.push(
-      result.log
-    );
-
+  if (result.log) {
+    session.log.push(result.log);
   } else {
-
-    session.log.push(
-      `✨ ${player.name} casts ${spellName}.`
-    );
+    session.log.push(`✨ ${player.name} casts ${spellName}.`);
   }
-
 
   // =====================================================
   // DIRECT DAMAGE EVENT
   // =====================================================
 
-  if (
-    damage >
-    0
-  ) {
-
+  if (damage > 0) {
     session.damageEvents.push({
-      id:
-        session.nextDamageEventId++,
+      id: session.nextDamageEventId++,
 
-      type:
-        "damage",
+      type: "damage",
 
-      source:
-        "player",
+      source: "player",
 
-      playerId:
-        player.playerId,
+      playerId: player.playerId,
 
-      target:
-        "enemy",
+      target: "enemy",
 
-      amount:
-        damage,
+      amount: damage,
 
       crit,
 
-      spellId:
-        Number(
-          spell.id
-        ),
+      spellId: Number(spell.id),
 
       spellName,
 
-      kind:
-        "spell",
+      kind: "spell",
 
-      createdAt:
-        now
+      createdAt: now,
     });
 
-
-    if (
-      session.damageEvents.length >
-      40
-    ) {
-
-      session.damageEvents =
-        session.damageEvents.slice(
-          -40
-        );
+    if (session.damageEvents.length > 40) {
+      session.damageEvents = session.damageEvents.slice(-40);
     }
   }
-
 
   // =====================================================
   // TRIM COMBAT LOG
   // =====================================================
 
-  if (
-    session.log.length >
-    60
-  ) {
-
-    session.log =
-      session.log.slice(
-        -60
-      );
+  if (session.log.length > 60) {
+    session.log = session.log.slice(-60);
   }
-
 
   // =====================================================
   // VICTORY
   // =====================================================
 
-  if (
-    result.killedEnemy ||
-    session.enemy.hp <= 0
-  ) {
-
-    await completeHuntVictory(
-      session
-    );
+  if (result.killedEnemy || session.enemy.hp <= 0) {
+    await completeHuntVictory(session);
   }
-
 
   // =====================================================
   // FINALIZE
   // =====================================================
 
-  session.updatedAt =
-    Date.now();
-
+  session.updatedAt = Date.now();
 
   return {
     ok: true,
 
-    spellId:
-      Number(
-        spell.id
-      ),
+    spellId: Number(spell.id),
 
     spellName,
 
@@ -3033,10 +2298,7 @@ async function castHuntSpellUnlocked(
 
     dodged,
 
-    snapshot:
-      buildHuntCombatSnapshot(
-        session
-      )
+    snapshot: buildHuntCombatSnapshot(session),
   };
 }
 
@@ -3044,344 +2306,281 @@ export async function castHuntSpell(
   session: HuntCombatSession,
   playerId: number,
   spellId: number,
-  targetPlayerId: number | null = null
+  targetPlayerId: number | null = null,
 ): Promise<HuntSpellCastResult> {
-
-  return withHuntCombatLock(
-    session.encounterId,
-    () =>
-      castHuntSpellUnlocked(
-        session,
-        playerId,
-        spellId,
-        targetPlayerId
-      )
+  return withHuntCombatLock(session.encounterId, () =>
+    castHuntSpellUnlocked(session, playerId, spellId, targetPlayerId),
   );
 }
 
-async function advanceHuntCombatSessionUnlocked(
-  session: HuntCombatSession
-) {
-  if (
-    session.state !== "active"
-  ) {
+async function advanceHuntCombatSessionUnlocked(session: HuntCombatSession) {
+  if (session.state !== "active") {
     return session;
   }
 
   if (session.enemy.hp <= 0) {
-  await completeHuntVictory(session);
-  return session;
-}
+    await completeHuntVictory(session);
+    return session;
+  }
 
-  const now =
-    Date.now();
+  const now = Date.now();
 
+  /*
+   * Process persistent player healing-over-time effects before
+   * advancing combat actions. The HoT service updates authoritative
+   * player HP; synchronize those results into the Hunt session.
+   */
+  const hotTicks = await processDuePlayerHots(
+    Array.from(session.players.keys()),
+  );
+
+  for (const tick of hotTicks) {
+    const member = session.players.get(tick.playerId);
+
+    if (!member) {
+      continue;
+    }
+
+    member.maxHp = Math.max(1, Number(tick.maxHP) || member.maxHp);
+
+    member.hp = Math.max(0, Math.min(member.maxHp, Number(tick.newHP) || 0));
+
+    member.stats.hpoints = member.hp;
+
+    const gaugeGain = Math.max(0, Number(tick.gaugeGain) || 0);
+
+    if (member.hp > 0 && gaugeGain > 0) {
+      member.gauge = Math.min(100, member.gauge + gaugeGain);
+
+      member.ready = member.gauge >= 100;
+    }
+
+    if (tick.healing > 0) {
+      session.log.push(
+        `✨ ${tick.displayName} restores ${tick.healing} HP to ${member.name}!`,
+      );
+    }
+
+    if (tick.refreshed) {
+      session.log.push(
+        `🌟 ${tick.displayName} renews itself on ${member.name}!`,
+      );
+    }
+
+    const casterEcho = tick.casterEchoPlayerId
+      ? session.players.get(tick.casterEchoPlayerId)
+      : null;
+    if (casterEcho && tick.casterEchoHealing > 0) {
+      casterEcho.hp = Math.min(
+        casterEcho.maxHp,
+        casterEcho.hp + tick.casterEchoHealing,
+      );
+      casterEcho.stats.hpoints = casterEcho.hp;
+      publishHuntPlayerVitals(casterEcho);
+      session.log.push(
+        `🌱 Symbiotic Growth restores ${tick.casterEchoHealing} HP to ${casterEcho.name}!`,
+      );
+    }
+
+    const partyEchoHealing = Math.max(0, Number(tick.partyEchoHealing) || 0);
+    if (partyEchoHealing > 0) {
+      for (const ally of session.players.values()) {
+        if (ally.playerId === tick.playerId || ally.hp <= 0) continue;
+        const before = ally.hp;
+        ally.hp = Math.min(ally.maxHp, ally.hp + partyEchoHealing);
+        ally.stats.hpoints = ally.hp;
+        const actualEcho = Math.max(0, ally.hp - before);
+        if (actualEcho > 0) {
+          await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [
+            ally.hp,
+            ally.playerId,
+          ]);
+          publishHuntPlayerVitals(ally);
+          session.log.push(
+            `🌲 Awakening Grove restores ${actualEcho} HP to ${ally.name}!`,
+          );
+        }
+      }
+    }
+
+    publishHuntPlayerVitals(member);
+  }
+
+  for (const member of session.players.values()) {
+    const bannerGauge = await processWarlordBannerGaugeTick(member.playerId);
+    if (bannerGauge > 0 && member.hp > 0) {
+      member.gauge = Math.min(100, member.gauge + bannerGauge);
+      member.ready = member.gauge >= 100;
+    }
+  }
 
   /*
    * Expire timed debuffs before calculating
    * this advancement's combat stats.
    */
-  removeExpiredHuntDebuffs(
-    session,
-    now
-  );
-
+  removeExpiredHuntDebuffs(session, now);
 
   /*
    * Action gauges.
    */
-  advancePlayerATBs(
-    session,
-    now
-  );
+  advancePlayerATBs(session, now);
 
-  advanceEnemyATB(
-    session,
-    now
-  );
-
+  advanceEnemyATB(session, now);
 
   /*
    * Damage-over-time effects.
    */
-  await processHuntDots(
-    session,
-    now
-  );
+  await processHuntDots(session, now);
 
-
-  if (
-    session.state !== "active"
-  ) {
-    session.updatedAt =
-      now;
+  if (session.state !== "active") {
+    session.updatedAt = now;
 
     return session;
   }
-
 
   /*
    * Automatic party weapon attacks.
    */
-  await processPlayerAutoAttacks(
-    session
-  );
+  await processPlayerAutoAttacks(session);
 
-
-  if (
-    session.state !== "active"
-  ) {
-    session.updatedAt =
-      now;
+  if (session.state !== "active") {
+    session.updatedAt = now;
 
     return session;
   }
 
-
   /*
    * Hunt target action.
    */
-  await processEnemyAttack(
-    session
-  );
+  await processEnemyAttack(session);
 
-
-  session.updatedAt =
-    now;
+  session.updatedAt = now;
 
   return session;
 }
 
-export async function advanceHuntCombatSession(
-  session: HuntCombatSession
-) {
-  return withHuntCombatLock(
-    session.encounterId,
-    () =>
-      advanceHuntCombatSessionUnlocked(
-        session
-      )
+export async function advanceHuntCombatSession(session: HuntCombatSession) {
+  return withHuntCombatLock(session.encounterId, () =>
+    advanceHuntCombatSessionUnlocked(session),
   );
 }
 
-
-export function buildHuntCombatSnapshot(
-  session: HuntCombatSession
-) {
-  const now =
-    Date.now();
+export function buildHuntCombatSnapshot(session: HuntCombatSession) {
+  const now = Date.now();
 
   return {
-    encounterId:
-      session.encounterId,
+    encounterId: session.encounterId,
 
-    partyHuntId:
-      session.partyHuntId,
+    partyHuntId: session.partyHuntId,
 
-    partyId:
-      session.partyId,
+    partyId: session.partyId,
 
-    state:
-      session.state,
+    state: session.state,
 
-enemy: {
-  name:
-    session.enemy.name,
+    enemy: {
+      name: session.enemy.name,
 
-  level:
-    session.enemy.level,
+      level: session.enemy.level,
 
-  description:
-    session.enemy.description,
+      description: session.enemy.description,
 
-  image:
-    session.enemy.image,
+      image: session.enemy.image,
 
-  hp:
-    session.enemy.hp,
+      hp: session.enemy.hp,
 
-  maxHp:
-    session.enemy.maxHp,
+      maxHp: session.enemy.maxHp,
 
-  gauge:
-    session.enemy.gauge,
+      gauge: session.enemy.gauge,
 
-  ready:
-    session.enemy.ready,
+      ready: session.enemy.ready,
 
-  recoveryMs:
-    Math.max(
-      0,
-      session.enemy.recoveryUntil -
-        now
-    ),
+      recoveryMs: Math.max(0, session.enemy.recoveryUntil - now),
 
-  readyInMs:
-    getHuntEnemyReadyInMs(
-      session,
-      now
-    )
-},
+      readyInMs: getHuntEnemyReadyInMs(session, now),
 
-    players:
-      Array.from(
-        session.players.values()
-      ).map(player => ({
-        playerId:
-          player.playerId,
+      targetPlayerId: session.enemy.targetPlayerId,
+    },
 
-        name:
-          player.name,
+    players: Array.from(session.players.values()).map((player) => ({
+      playerId: player.playerId,
 
-        hp:
-          player.hp,
+      name: player.name,
 
-        maxHp:
-          player.maxHp,
+      hp: player.hp,
 
-        sp:
-          player.sp,
+      maxHp: player.maxHp,
 
-        maxSp:
-          player.maxSp,
+      sp: player.sp,
 
-        gauge:
-          player.gauge,
+      maxSp: player.maxSp,
 
-        ready:
-          player.ready,
+      gauge: player.gauge,
 
-        recoveryMs:
-          Math.max(
-            0,
-            player.recoveryUntil -
-              now
-          ),
+      ready: player.ready,
 
-        readyInMs:
-          getHuntPlayerReadyInMs(
-            player,
-            now
-          ),
+      recoveryMs: Math.max(0, player.recoveryUntil - now),
 
-        autoAttackMs:
-          Math.max(
-            0,
-            player.nextAutoAttackAt -
-              now
-          ),
+      readyInMs: getHuntPlayerReadyInMs(player, now),
 
-        autoAttackTotalMs:
-          PLAYER_AUTO_ATTACK_MS,
+      autoAttackMs: Math.max(0, player.nextAutoAttackAt - now),
 
-        cooldowns:
-          player.cooldowns
+      autoAttackTotalMs: PLAYER_AUTO_ATTACK_MS,
+
+      cooldowns: player.cooldowns,
+
+      threat: getCombatThreat(session.enemy, player.playerId),
+    })),
+
+    log: session.log,
+
+    damageEvents: session.damageEvents,
+
+    effects: {
+      dots: session.dots.map((dot) => ({
+        id: dot.id,
+
+        sourcePlayerId: dot.sourcePlayerId,
+
+        spellId: dot.spellId,
+
+        spellName: dot.spellName,
+
+        ticksApplied: dot.ticksApplied,
+
+        totalTicks: dot.totalTicks,
+
+        nextTickMs: getEffectRemainingMs(dot.nextTickAt, now),
+
+        remainingMs: getEffectRemainingMs(dot.expiresAt, now),
       })),
 
-log:
-  session.log,
+      debuffs: session.debuffs
+        .filter((debuff) => debuff.expiresAt > now)
+        .map((debuff) => ({
+          id: debuff.id,
 
-damageEvents:
-  session.damageEvents,
+          sourcePlayerId: debuff.sourcePlayerId,
 
-effects: {
-  dots:
-    session.dots.map(
-      dot => ({
-        id:
-          dot.id,
+          spellId: debuff.spellId,
 
-        sourcePlayerId:
-          dot.sourcePlayerId,
+          spellName: debuff.spellName,
 
-        spellId:
-          dot.spellId,
+          stat: debuff.stat,
 
-        spellName:
-          dot.spellName,
+          value: debuff.value,
 
-        ticksApplied:
-          dot.ticksApplied,
+          remainingMs: getEffectRemainingMs(debuff.expiresAt, now),
+        })),
+    },
 
-        totalTicks:
-          dot.totalTicks,
-
-        nextTickMs:
-          Math.max(
-            0,
-            dot.nextTickAt -
-              now
-          ),
-
-        remainingMs:
-          Math.max(
-            0,
-            dot.expiresAt -
-              now
-          )
-      })
-    ),
-
-  debuffs:
-    session.debuffs
-      .filter(
-        debuff =>
-          debuff.expiresAt >
-          now
-      )
-      .map(
-        debuff => ({
-          id:
-            debuff.id,
-
-          sourcePlayerId:
-            debuff.sourcePlayerId,
-
-          spellId:
-            debuff.spellId,
-
-          spellName:
-            debuff.spellName,
-
-          stat:
-            debuff.stat,
-
-          value:
-            debuff.value,
-
-          remainingMs:
-            Math.max(
-              0,
-              debuff.expiresAt -
-                now
-            )
-        })
-      )
-},
-
-rewards:
-  session.rewards
+    rewards: session.rewards,
   };
 }
 
+function advanceEnemyATB(session: HuntCombatSession, now: number) {
+  const enemy = session.enemy;
 
-
-
-
-
-
-
-
-function advanceEnemyATB(
-  session: HuntCombatSession,
-  now: number
-) {
-  const enemy =
-    session.enemy;
-
-  if (
-    session.state !== "active"
-  ) {
+  if (session.state !== "active") {
     return;
   }
 
@@ -3393,87 +2592,24 @@ function advanceEnemyATB(
     return;
   }
 
-  const fillStartedAt =
-    Math.max(
-      session.updatedAt,
-      enemy.recoveryUntil
-    );
+  const effectiveStats = getEffectiveHuntEnemyStats(session, now);
+  const atbRateMult = getHuntEnemyAtbRateMult(session, now);
+  const timingActor = { ...enemy, stats: effectiveStats, atbRateMult };
+  advanceCombatActorGauge(timingActor, session.updatedAt, now);
+  enemy.gauge = timingActor.gauge;
+  enemy.ready = timingActor.ready;
+}
 
-  const fillElapsedMs =
-    Math.max(
-      0,
-      now -
-      fillStartedAt
-    );
+function getLivingHuntPlayers(session: HuntCombatSession) {
+  return Array.from(session.players.values()).filter((player) => player.hp > 0);
+}
 
-  if (
-    fillElapsedMs <= 0
-  ) {
+async function completeHuntCombatDefeat(session: HuntCombatSession) {
+  if (session.state !== "active") {
     return;
   }
 
-  const effectiveStats =
-    getEffectiveHuntEnemyStats(
-      session,
-      now
-    );
-
-  const baseFillRate =
-    getHuntATBFillRate(
-      effectiveStats.agility
-    );
-
-  const atbRateMult =
-    getHuntEnemyAtbRateMult(
-      session,
-      now
-    );
-
-  const fillRate =
-    baseFillRate *
-    atbRateMult;
-
-  enemy.gauge =
-    Math.min(
-      100,
-      enemy.gauge +
-        fillRate *
-        (
-          fillElapsedMs /
-          1000
-        )
-    );
-
-  if (
-    enemy.gauge >= 100
-  ) {
-    enemy.gauge = 100;
-    enemy.ready = true;
-  }
-}
-
-function getLivingHuntPlayers(
-  session: HuntCombatSession
-) {
-  return Array.from(
-    session.players.values()
-  ).filter(
-    player =>
-      player.hp > 0
-  );
-}
-
-async function completeHuntCombatDefeat(
-  session: HuntCombatSession
-) {
-  if (
-    session.state !== "active"
-  ) {
-    return;
-  }
-
-  session.state =
-    "defeat";
+  session.state = "defeat";
 
   await db.query(
     `
@@ -3485,99 +2621,63 @@ async function completeHuntCombatDefeat(
 
       WHERE id = ?
     `,
-    [
-      session.encounterId
-    ]
+    [session.encounterId],
   );
 
-  session.log.push(
-    `☠ Your party has been defeated by ${session.enemy.name}.`
-  );
+  session.log.push(`☠ Your party has been defeated by ${session.enemy.name}.`);
 
-  if (
-    session.log.length > 60
-  ) {
-    session.log =
-      session.log.slice(-60);
+  if (session.log.length > 60) {
+    session.log = session.log.slice(-60);
   }
 }
 
-async function processEnemyAttack(
-  session: HuntCombatSession
-) {
-  if (
-    session.state !== "active"
-  ) {
+async function processEnemyAttack(session: HuntCombatSession) {
+  if (session.state !== "active") {
     return;
   }
 
-  const enemy =
-    session.enemy;
+  const enemy = session.enemy;
 
-  if (
-    enemy.hp <= 0 ||
-    !enemy.ready
-  ) {
+  if (enemy.hp <= 0 || !enemy.ready) {
     return;
   }
 
-  const livingPlayers =
-    getLivingHuntPlayers(
-      session
-    );
+  const livingPlayers = getLivingHuntPlayers(session);
 
-  if (
-    livingPlayers.length === 0
-  ) {
-    await completeHuntCombatDefeat(
-      session
-    );
+  if (livingPlayers.length === 0) {
+    await completeHuntCombatDefeat(session);
 
     return;
   }
 
-  /*
-   * Random living Hunt participant.
-   */
-  const target =
-    livingPlayers[
-      Math.floor(
-        Math.random() *
-        livingPlayers.length
-      )
-    ];
+  const target = getHighestThreatTarget(
+    session.enemy,
+    session.players.values(),
+  );
+
+  if (!target) {
+    await completeHuntCombatDefeat(session);
+    return;
+  }
+
+  enemy.targetPlayerId = target.playerId;
 
   /*
    * Apply active Hunt debuffs before
    * resolving the boss attack.
    */
-  const effectiveEnemyStats =
-    getEffectiveHuntEnemyStats(
-      session
-    );
+  const effectiveEnemyStats = getEffectiveHuntEnemyStats(session);
 
-  const result =
-    resolveAttack(
-      effectiveEnemyStats as any,
-      target.stats as any
-    );
+  const result = resolveAttack(effectiveEnemyStats as any, target.stats as any);
 
   /*
    * Damage after normal combat-engine
    * defense/dodge calculations, but before
    * shields and defensive statuses.
    */
-  const incomingDamage =
-    result.dodged
-      ? 0
-      : Math.max(
-          0,
-          Math.floor(
-            Number(
-              result.damage ?? 0
-            )
-          )
-        );
+  const incomingDamage = result.dodged
+    ? 0
+    : Math.max(0, Math.floor(Number(result.damage ?? 0)));
 
   /*
    * Shared player defensive pipeline.
@@ -3591,19 +2691,16 @@ async function processEnemyAttack(
    * by dungeons and raids.
    */
   const mitigation =
-    !result.dodged &&
-    incomingDamage > 0
+    !result.dodged && incomingDamage > 0
       ? await mitigateIncomingPlayerDamage(
           target.playerId,
           target.hp,
-          incomingDamage
+          incomingDamage,
+          target.maxHp,
         )
       : null;
 
-  const damage =
-    mitigation
-      ? mitigation.finalDamage
-      : incomingDamage;
+  const damage = mitigation ? mitigation.finalDamage : incomingDamage;
 
   /*
    * Consume enemy turn regardless
@@ -3612,36 +2709,240 @@ async function processEnemyAttack(
   enemy.gauge = 0;
   enemy.ready = false;
 
-  enemy.recoveryUntil =
-    Date.now() +
-    HUNT_ENEMY_RECOVERY_MS;
+  enemy.recoveryUntil = Date.now() + HUNT_ENEMY_RECOVERY_MS;
 
   // =====================================================
   // MISS
   // =====================================================
 
-  if (
-    result.dodged
-  ) {
-    session.log.push(
-      `🛡 ${target.name} evades ${enemy.name}'s attack!`
-    );
-
+  if (result.dodged) {
+    session.log.push(`🛡 ${target.name} evades ${enemy.name}'s attack!`);
   } else {
-
     // =====================================================
     // APPLY FINAL HP DAMAGE
     // =====================================================
 
-    target.hp =
-      Math.max(
-        0,
+    target.hp = Math.max(
+      0,
+      Math.min(
+        target.maxHp,
         target.hp -
-        damage
+          damage +
+          (mitigation?.aegisHealing ?? 0) +
+          (mitigation?.shieldBreakHealing ?? 0) +
+          (mitigation?.thornsHealing ?? 0),
+      ),
+    );
+
+    target.stats.hpoints = target.hp;
+
+    if ((mitigation?.sageTriggerGaugeGain ?? 0) > 0) {
+      target.gauge = Math.min(100, target.gauge + mitigation!.sageTriggerGaugeGain);
+      target.ready = target.gauge >= 100;
+      session.log.push(
+        `🌳 Undying Grove restores ${mitigation!.sageReviveHealing} HP to ${target.name} and grants ${mitigation!.sageTriggerGaugeGain} action gauge!`,
+      );
+    }
+
+    if (
+      (mitigation?.redirectedDamage ?? 0) > 0 &&
+      mitigation?.redirectPlayerId
+    ) {
+      const redirectTarget = session.players.get(mitigation.redirectPlayerId);
+      if (redirectTarget && redirectTarget.hp > 0) {
+        const redirectedMitigation = await mitigateIncomingPlayerDamage(
+          redirectTarget.playerId,
+          redirectTarget.hp,
+          mitigation.redirectedDamage,
+          redirectTarget.maxHp,
+        );
+        redirectTarget.hp = Math.max(
+          0,
+          Math.min(
+            redirectTarget.maxHp,
+            redirectTarget.hp -
+              redirectedMitigation.finalDamage +
+              (redirectedMitigation.aegisHealing ?? 0) +
+              (redirectedMitigation.shieldBreakHealing ?? 0) +
+              (redirectedMitigation.thornsHealing ?? 0),
+          ),
+        );
+        redirectTarget.stats.hpoints = redirectTarget.hp;
+        await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [
+          redirectTarget.hp,
+          redirectTarget.playerId,
+        ]);
+        if (mitigation.spatialGaugeGain > 0) {
+          target.gauge = Math.min(
+            100,
+            target.gauge + mitigation.spatialGaugeGain,
+          );
+          redirectTarget.gauge = Math.min(
+            100,
+            redirectTarget.gauge + mitigation.spatialGaugeGain,
+          );
+        }
+        session.log.push(
+          mitigation.sentinelInterceptTriggered
+            ? `🌲 Ancient Protector intercepts ${mitigation.redirectedDamage} damage from ${target.name}!`
+            : `🌀 Spatial Exchange redirects ${mitigation.redirectedDamage} damage from ${target.name} to ${redirectTarget.name}!`,
+        );
+
+        const redirectedThorns = redirectedMitigation.thornsDamage ?? 0;
+        if (redirectedThorns > 0) {
+          const reflected = Math.min(enemy.hp, redirectedThorns);
+          enemy.hp = Math.max(0, enemy.hp - reflected);
+          enemy.stats.hpoints = enemy.hp;
+          await db.query(`UPDATE hunt_encounters SET hp = ? WHERE id = ?`, [
+            enemy.hp,
+            session.encounterId,
+          ]);
+          session.log.push(
+            redirectedMitigation.knightThornsTriggered
+              ? `🛡️ ${redirectTarget.name}'s defenses retaliate against ${enemy.name} for ${reflected} damage!`
+              : `🌿 Ironbark retaliates against ${enemy.name} for ${reflected} damage!`,
+          );
+        }
+        if ((redirectedMitigation.thornsHealing ?? 0) > 0) {
+          session.log.push(
+            `🌱 Living Bark restores ${redirectedMitigation.thornsHealing} HP to ${redirectTarget.name}!`,
+          );
+        }
+        const redirectedPartyHeal =
+          redirectedMitigation.shieldBreakPartyHealPercent ?? 0;
+        if (redirectedPartyHeal > 0) {
+          for (const ally of session.players.values()) {
+            if (ally.hp <= 0) continue;
+            const amount = Math.max(
+              1,
+              Math.floor((ally.maxHp * redirectedPartyHeal) / 100),
+            );
+            ally.hp = Math.min(ally.maxHp, ally.hp + amount);
+            ally.stats.hpoints = ally.hp;
+            await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [
+              ally.hp,
+              ally.playerId,
+            ]);
+            publishHuntPlayerVitals(ally);
+          }
+          session.log.push(`🌸 Blooming Aegis restores the party!`);
+        }
+        if (redirectedMitigation.shieldReformed)
+          session.log.push(
+            redirectedMitigation.knightShieldReformed
+              ? `🛡️ Layered Plating reforms Bulwark on ${redirectTarget.name}!`
+              : `🌿 Layered Canopy reforms Nature's Aegis on ${redirectTarget.name}!`,
+          );
+        if (redirectedMitigation.knightSecondWindTriggered)
+          session.log.push(
+            `🛡️ Second Wind restores ${redirectedMitigation.aegisHealing} HP to ${redirectTarget.name}!`,
+          );
+        if (redirectedMitigation.shieldBreakReductionApplied)
+          session.log.push(
+            `🌳 Barkskin Aftermath protects ${redirectTarget.name}!`,
+          );
+        if (redirectedMitigation.shieldBreakHotApplied)
+          session.log.push(
+            `🌱 Seeds of Renewal begins healing ${redirectTarget.name}!`,
+          );
+      }
+    }
+
+    const voidFeedbackDamage = mitigation?.voidFeedbackDamage ?? 0;
+
+    if (voidFeedbackDamage > 0) {
+      const reflected = Math.min(enemy.hp, voidFeedbackDamage);
+
+      enemy.hp = Math.max(0, enemy.hp - reflected);
+
+      enemy.stats.hpoints = enemy.hp;
+
+      await db.query(
+        `
+      UPDATE hunt_encounters
+      SET hp = ?
+      WHERE id = ?
+    `,
+        [enemy.hp, session.encounterId],
       );
 
-    target.stats.hpoints =
-      target.hp;
+      session.log.push(
+        `🌌 Void Feedback strikes ${enemy.name} for ${reflected} damage!`,
+      );
+    }
+
+    const thornsDamage = mitigation?.thornsDamage ?? 0;
+    if (thornsDamage > 0) {
+      const reflected = Math.min(enemy.hp, thornsDamage);
+      enemy.hp = Math.max(0, enemy.hp - reflected);
+      enemy.stats.hpoints = enemy.hp;
+      await db.query(`UPDATE hunt_encounters SET hp = ? WHERE id = ?`, [
+        enemy.hp,
+        session.encounterId,
+      ]);
+      session.log.push(
+        mitigation?.knightThornsTriggered
+          ? `🛡️ ${target.name}'s defenses retaliate against ${enemy.name} for ${reflected} damage!`
+          : `🌿 Ironbark retaliates against ${enemy.name} for ${reflected} damage!`,
+      );
+    }
+
+    if ((mitigation?.shieldBreakHealing ?? 0) > 0) {
+      session.log.push(
+        `🌱 Nature's Aegis blooms, restoring ${mitigation!.shieldBreakHealing} HP to ${target.name}!`,
+      );
+    }
+
+    if ((mitigation?.thornsHealing ?? 0) > 0) {
+      session.log.push(
+        `🌱 Living Bark restores ${mitigation!.thornsHealing} HP to ${target.name}!`,
+      );
+    }
+
+    const partyBreakHealPercent = mitigation?.shieldBreakPartyHealPercent ?? 0;
+    if (partyBreakHealPercent > 0) {
+      for (const ally of session.players.values()) {
+        if (ally.hp <= 0) continue;
+        const amount = Math.max(
+          1,
+          Math.floor((ally.maxHp * partyBreakHealPercent) / 100),
+        );
+        const before = ally.hp;
+        ally.hp = Math.min(ally.maxHp, ally.hp + amount);
+        ally.stats.hpoints = ally.hp;
+        if (ally.hp > before) {
+          await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [
+            ally.hp,
+            ally.playerId,
+          ]);
+          publishHuntPlayerVitals(ally);
+        }
+      }
+      session.log.push(`🌸 Blooming Aegis restores the party!`);
+    }
+
+    if (mitigation?.shieldReformed)
+      session.log.push(
+        mitigation.knightShieldReformed
+          ? `🛡️ Layered Plating reforms Bulwark on ${target.name}!`
+          : `🌿 Layered Canopy reforms Nature's Aegis on ${target.name}!`,
+      );
+    if (mitigation?.knightSecondWindTriggered)
+      session.log.push(
+        `🛡️ Second Wind restores ${mitigation.aegisHealing} HP to ${target.name}!`,
+      );
+    if (mitigation?.berserkerRefuseToFallTriggered)
+      session.log.push(`🩸 Refuse to Fall saves ${target.name}, but Blood Rage ends!`);
+    if (mitigation?.shieldBreakReductionApplied)
+      session.log.push(`🌳 Barkskin Aftermath protects ${target.name}!`);
+    if (mitigation?.shieldBreakHotApplied)
+      session.log.push(`🌱 Seeds of Renewal begins healing ${target.name}!`);
+
+    if (mitigation?.sentinelDeathProtectionTriggered) {
+      session.log.push(
+        `🌲 Ancient Protector prevents a lethal blow against ${target.name}!`,
+      );
+    }
 
     await db.query(
       `
@@ -3651,47 +2952,33 @@ async function processEnemyAttack(
 
         WHERE id = ?
       `,
-      [
-        target.hp,
-        target.playerId
-      ]
+      [target.hp, target.playerId],
     );
-
 
     /*
      * Keep this player's global HUD synchronized
      * even though the Hunt boss action happened
      * inside the server-owned encounter loop.
      */
-    publishHuntPlayerVitals(
-      target
-    );
+    publishHuntPlayerVitals(target);
 
     // =====================================================
     // MAIN ATTACK LOG
     // =====================================================
 
-    if (
-      damage > 0
-    ) {
+    if (damage > 0) {
       session.log.push(
         `☠ ${enemy.name} attacks ${target.name} for ${damage} damage${
-          result.crit
-            ? " (CRITICAL!)"
-            : ""
-        }`
+          result.crit ? " (CRITICAL!)" : ""
+        }`,
       );
-
-    } else if (
-      mitigation?.absorbedDamage
-    ) {
+    } else if (mitigation?.absorbedDamage) {
       session.log.push(
-        `☠ ${enemy.name} attacks ${target.name}, but the blow is absorbed!`
+        `☠ ${enemy.name} attacks ${target.name}, but the blow is absorbed!`,
       );
-
     } else {
       session.log.push(
-        `☠ ${enemy.name} attacks ${target.name}, but deals no damage.`
+        `☠ ${enemy.name} attacks ${target.name}, but deals no damage.`,
       );
     }
 
@@ -3699,43 +2986,31 @@ async function processEnemyAttack(
     // DEFENSIVE EFFECT LOGS
     // =====================================================
 
-    if (
-      mitigation?.absorbedDamage
-    ) {
+    if (mitigation?.absorbedDamage) {
       session.log.push(
-        `🛡 ${target.name}'s shield absorbs ${mitigation.absorbedDamage} damage.`
+        `🛡 ${target.name}'s shield absorbs ${mitigation.absorbedDamage} damage.`,
       );
     }
 
-    if (
-      mitigation?.shieldBroken
-    ) {
+    if (mitigation?.shieldBroken) {
+      session.log.push(`💥 ${target.name}'s shield shatters!`);
+    }
+
+    if (mitigation?.interceptTriggered) {
       session.log.push(
-        `💥 ${target.name}'s shield shatters!`
+        `🛡 Intercept reduces the attack against ${target.name} by ${mitigation.interceptReductionPercent}%!`,
       );
     }
 
-    if (
-      mitigation?.interceptTriggered
-    ) {
+    if (mitigation?.aegisTriggered) {
       session.log.push(
-        `🛡 Intercept reduces the attack against ${target.name} by ${mitigation.interceptReductionPercent}%!`
+        `✨ Aegis of Faith reduces the attack against ${target.name} by ${mitigation.aegisReductionPercent}%!`,
       );
     }
 
-    if (
-      mitigation?.aegisTriggered
-    ) {
+    if (mitigation?.aegisPreventedDeath) {
       session.log.push(
-        `✨ Aegis of Faith reduces the attack against ${target.name} by ${mitigation.aegisReductionPercent}%!`
-      );
-    }
-
-    if (
-      mitigation?.aegisPreventedDeath
-    ) {
-      session.log.push(
-        `🕊 Aegis of Faith prevents a lethal blow against ${target.name}!`
+        `🕊 Aegis of Faith prevents a lethal blow against ${target.name}!`,
       );
     }
 
@@ -3747,48 +3022,29 @@ async function processEnemyAttack(
      * Only actual HP loss should create
      * floating damage.
      */
-    if (
-      damage > 0
-    ) {
+    if (damage > 0) {
       session.damageEvents.push({
-        id:
-          session.nextDamageEventId++,
+        id: session.nextDamageEventId++,
 
-        type:
-          "damage",
+        type: "damage",
 
-        source:
-          "enemy",
+        source: "enemy",
 
-        target:
-          "player",
+        target: "player",
 
-        playerId:
-          target.playerId,
+        playerId: target.playerId,
 
-        amount:
-          damage,
+        amount: damage,
 
-        crit:
-          Boolean(
-            result.crit
-          ),
+        crit: Boolean(result.crit),
 
-        kind:
-          "attack",
+        kind: "attack",
 
-        createdAt:
-          Date.now()
+        createdAt: Date.now(),
       });
 
-      if (
-        session.damageEvents.length >
-        40
-      ) {
-        session.damageEvents =
-          session.damageEvents.slice(
-            -40
-          );
+      if (session.damageEvents.length > 40) {
+        session.damageEvents = session.damageEvents.slice(-40);
       }
     }
 
@@ -3796,61 +3052,41 @@ async function processEnemyAttack(
     // PLAYER DEFEATED
     // =====================================================
 
-    if (
-      target.hp <= 0
-    ) {
+    if (target.hp <= 0) {
       target.hp = 0;
 
       target.gauge = 0;
       target.ready = false;
 
-      session.log.push(
-        `💀 ${target.name} has fallen!`
-      );
+      session.log.push(`💀 ${target.name} has fallen!`);
+
+      enemy.targetPlayerId =
+        refreshCombatThreatTarget(enemy, session.players.values())?.playerId ??
+        null;
     }
   }
 
-  if (
-    session.log.length >
-    60
-  ) {
-    session.log =
-      session.log.slice(
-        -60
-      );
+  if (session.log.length > 60) {
+    session.log = session.log.slice(-60);
   }
 
   /*
    * Last living party member defeated?
    */
-  const survivors =
-    getLivingHuntPlayers(
-      session
-    );
+  const survivors = getLivingHuntPlayers(session);
 
-  if (
-    survivors.length === 0
-  ) {
-    await completeHuntCombatDefeat(
-      session
-    );
+  if (survivors.length === 0) {
+    await completeHuntCombatDefeat(session);
   }
 }
 
 export function findHuntCombatSessionForPlayer(
-  playerId: number
+  playerId: number,
 ): HuntCombatSession | null {
+  const pid = Number(playerId);
 
-  const pid =
-    Number(playerId);
-
-  for (
-    const session of
-    huntCombatSessions.values()
-  ) {
-    if (
-      session.players.has(pid)
-    ) {
+  for (const session of huntCombatSessions.values()) {
+    if (session.players.has(pid)) {
       return session;
     }
   }
@@ -3858,97 +3094,48 @@ export function findHuntCombatSessionForPlayer(
   return null;
 }
 
-function rollHuntItemRewards(
-  rows: any[]
-): HuntCombatRewardItem[] {
-
-  const rewards:
-    HuntCombatRewardItem[] = [];
+function rollHuntItemRewards(rows: any[]): HuntCombatRewardItem[] {
+  const rewards: HuntCombatRewardItem[] = [];
 
   for (const row of rows || []) {
+    const dropChance = Math.max(0, Math.min(100, Number(row.drop_chance ?? 0)));
 
-    const dropChance =
-      Math.max(
-        0,
-        Math.min(
-          100,
-          Number(
-            row.drop_chance ?? 0
-          )
-        )
-      );
-
-    const roll =
-      Math.random() * 100;
+    const roll = Math.random() * 100;
 
     if (roll >= dropChance) {
       continue;
     }
 
-    const minQty =
-      Math.max(
-        1,
-        Math.floor(
-          Number(
-            row.min_qty ?? 1
-          )
-        )
-      );
+    const minQty = Math.max(1, Math.floor(Number(row.min_qty ?? 1)));
 
-    const maxQty =
-      Math.max(
-        minQty,
-        Math.floor(
-          Number(
-            row.max_qty ?? minQty
-          )
-        )
-      );
+    const maxQty = Math.max(minQty, Math.floor(Number(row.max_qty ?? minQty)));
 
-    const quantity =
-      minQty +
-      Math.floor(
-        Math.random() *
-        (
-          maxQty -
-          minQty +
-          1
-        )
-      );
+    const quantity = minQty + Math.floor(Math.random() * (maxQty - minQty + 1));
 
     rewards.push({
-      itemId:
-        Number(row.item_id),
+      itemId: Number(row.item_id),
 
-      name:
-        String(
-          row.name ||
-          "Unknown Item"
-        ),
+      name: String(row.name || "Unknown Item"),
 
-      quantity
+      quantity,
     });
   }
 
   return rewards;
 }
 
-async function completeHuntVictory(
-  session: HuntCombatSession
-) {
+async function completeHuntVictory(session: HuntCombatSession) {
   if (session.state === "victory") {
     return;
   }
 
-  const connection =
-    await db.getConnection();
+  const connection = await db.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const [[encounter]]: any =
-      await connection.query(
-        `
+    const [[encounter]]: any = await connection.query(
+      `
           SELECT
             id,
             party_hunt_id,
@@ -3961,20 +3148,15 @@ async function completeHuntVictory(
 
           FOR UPDATE
         `,
-        [
-          session.encounterId
-        ]
-      );
+      [session.encounterId],
+    );
 
     if (!encounter) {
-      throw new Error(
-        "Hunt encounter not found."
-      );
+      throw new Error("Hunt encounter not found.");
     }
 
-    const [[hunt]]: any =
-      await connection.query(
-        `
+    const [[hunt]]: any = await connection.query(
+      `
           SELECT
             ph.id AS party_hunt_id,
             ph.hunt_id,
@@ -4004,21 +3186,15 @@ async function completeHuntVictory(
 
           LIMIT 1
         `,
-        [
-          session.encounterId,
-          session.partyHuntId
-        ]
-      );
+      [session.encounterId, session.partyHuntId],
+    );
 
     if (!hunt) {
-      throw new Error(
-        "Active Hunt not found."
-      );
+      throw new Error("Active Hunt not found.");
     }
 
-    const [participants]: any =
-      await connection.query(
-        `
+    const [participants]: any = await connection.query(
+      `
           SELECT
             hp.player_id
 
@@ -4026,34 +3202,19 @@ async function completeHuntVictory(
 
           WHERE hp.party_hunt_id = ?
         `,
-        [
-          session.partyHuntId
-        ]
-      );
+      [session.partyHuntId],
+    );
 
-    const expReward =
-      Math.max(
-        0,
-        Number(
-          hunt.exp_reward ?? 0
-        )
-      );
+    const expReward = Math.max(0, Number(hunt.exp_reward ?? 0));
 
-    const goldReward =
-      Math.max(
-        0,
-        Number(
-          hunt.gold_reward ?? 0
-        )
-      );
+    const goldReward = Math.max(0, Number(hunt.gold_reward ?? 0));
 
     /*
      * Load the Hunt's personal item
      * reward pool.
      */
-    const [huntRewardRows]: any =
-      await connection.query(
-        `
+    const [huntRewardRows]: any = await connection.query(
+      `
           SELECT
             hr.item_id,
             hr.drop_chance,
@@ -4071,34 +3232,22 @@ async function completeHuntVictory(
           ORDER BY
             hr.id ASC
         `,
-        [
-          Number(
-            hunt.hunt_id
-          )
-        ]
-      );
+      [Number(hunt.hunt_id)],
+    );
 
-    const pendingRewards:
-      HuntCombatReward[] = [];
+    const pendingRewards: HuntCombatReward[] = [];
 
-    for (
-      const participant of
-      participants
-    ) {
-      const playerId =
-        Number(
-          participant.player_id
-        );
+    for (const participant of participants) {
+      const playerId = Number(participant.player_id);
 
       /*
        * EXPERIENCE / LEVEL PROGRESSION
        */
-      const experienceResult =
-        await grantExperienceTx(
-          connection,
-          playerId,
-          expReward
-        );
+      const experienceResult = await grantExperienceTx(
+        connection,
+        playerId,
+        expReward,
+      );
 
       /*
        * GOLD
@@ -4112,20 +3261,14 @@ async function completeHuntVictory(
 
             WHERE id = ?
           `,
-          [
-            goldReward,
-            playerId
-          ]
+          [goldReward, playerId],
         );
       }
 
       /*
        * PERSONAL HUNT MATERIAL ROLLS
        */
-      const materialRewards =
-        rollHuntItemRewards(
-          huntRewardRows
-        );
+      const materialRewards = rollHuntItemRewards(huntRewardRows);
 
       /*
        * PERSONAL EQUIPMENT ROLL
@@ -4133,73 +3276,53 @@ async function completeHuntVictory(
        * Each eligible player rolls
        * independently.
        */
-      const generatedEquipment =
-        await generateLootForCreature(
-          {
-            id:
-              Number(
-                encounter.creature_id
-              ),
+      const generatedEquipment = await generateLootForCreature(
+        {
+          id: Number(encounter.creature_id),
 
-            name:
-              session.enemy.name,
+          name: session.enemy.name,
 
-            level:
-              session.enemy.level,
+          level: session.enemy.level,
 
-            rarity:
-              "boss"
-          },
+          rarity: "boss",
+        },
 
-          {
-            id:
-              playerId,
+        {
+          id: playerId,
 
-            level:
-              session.enemy.level
-          },
+          level: session.enemy.level,
+        },
 
-          1,
+        1,
 
-          {
-            sourceType:
-              "hunt",
+        {
+          sourceType: "hunt",
 
-            /*
-             * Use hunt_id instead of
-             * party_hunt_id because the
-             * active party Hunt is deleted
-             * during victory cleanup.
-             */
-            sourceId:
-              Number(
-                hunt.hunt_id
-              ),
+          /*
+           * Use hunt_id instead of
+           * party_hunt_id because the
+           * active party Hunt is deleted
+           * during victory cleanup.
+           */
+          sourceId: Number(hunt.hunt_id),
 
-            conn:
-              connection
-          }
-        );
+          conn: connection,
+        },
+      );
 
       /*
        * BUILD CHEST DROPS
        */
-      const chestDrops:
-        DropLine[] = [];
+      const chestDrops: DropLine[] = [];
 
       /*
        * Static crafting materials.
        */
-      for (
-        const material of
-        materialRewards
-      ) {
+      for (const material of materialRewards) {
         chestDrops.push({
-          item_id:
-            material.itemId,
+          item_id: material.itemId,
 
-          qty:
-            material.quantity
+          qty: material.quantity,
         });
       }
 
@@ -4210,113 +3333,76 @@ async function completeHuntVictory(
        * created above, but remain unclaimed
        * until the chest is claimed.
        */
-      for (
-        const equipment of
-        generatedEquipment
-      ) {
+      for (const equipment of generatedEquipment) {
         chestDrops.push({
-          player_item_id:
-            equipment.playerItemId,
+          player_item_id: equipment.playerItemId,
 
-          qty:
-            1,
+          qty: 1,
 
-          roll_json:
-            equipment.affixes
+          roll_json: equipment.affixes,
         });
       }
 
       /*
        * CREATE PERSONAL HUNT CHEST
        */
-      const chest =
-        await createChestFromDrops({
-          playerId,
+      const chest = await createChestFromDrops({
+        playerId,
 
-          sourceType:
-            "hunt",
+        sourceType: "hunt",
 
-          sourceId:
-            Number(
-              hunt.hunt_id
-            ),
+        sourceId: Number(hunt.hunt_id),
 
-          drops:
-            chestDrops,
+        drops: chestDrops,
 
-          conn:
-            connection
-        });
+        conn: connection,
+      });
 
       /*
        * FINAL CLIENT-FACING REWARD DATA
        */
-      const rewardItems:
-        HuntCombatRewardItem[] = [
-          ...materialRewards.map(
-            item => ({
-              itemId:
-                item.itemId,
+      const rewardItems: HuntCombatRewardItem[] = [
+        ...materialRewards.map((item) => ({
+          itemId: item.itemId,
 
-              playerItemId:
-                null,
+          playerItemId: null,
 
-              name:
-                item.name,
+          name: item.name,
 
-              quantity:
-                item.quantity,
+          quantity: item.quantity,
 
-              rarity:
-                null,
+          rarity: null,
 
-              isEquipment:
-                false
-            })
-          ),
+          isEquipment: false,
+        })),
 
-          ...generatedEquipment.map(
-            item => ({
-              itemId:
-                null,
+        ...generatedEquipment.map((item) => ({
+          itemId: null,
 
-              playerItemId:
-                item.playerItemId,
+          playerItemId: item.playerItemId,
 
-              name:
-                item.name,
+          name: item.name,
 
-              quantity:
-                1,
+          quantity: 1,
 
-              rarity:
-                item.rarity,
+          rarity: item.rarity,
 
-              isEquipment:
-                true
-            })
-          )
-        ];
+          isEquipment: true,
+        })),
+      ];
 
       pendingRewards.push({
         playerId,
 
-        exp:
-          experienceResult.expGained,
+        exp: experienceResult.expGained,
 
-        gold:
-          goldReward,
+        gold: goldReward,
 
-        items:
-          rewardItems,
+        items: rewardItems,
 
-        chestId:
-          chest?.chestId ??
-          null,
+        chestId: chest?.chestId ?? null,
 
-        levelUp:
-          experienceResult.levelUp ??
-          null
+        levelUp: experienceResult.levelUp ?? null,
       });
     }
 
@@ -4329,9 +3415,7 @@ async function completeHuntVictory(
 
         WHERE party_hunt_id = ?
       `,
-      [
-        session.partyHuntId
-      ]
+      [session.partyHuntId],
     );
 
     /*
@@ -4343,9 +3427,7 @@ async function completeHuntVictory(
 
         WHERE hunt_encounter_id = ?
       `,
-      [
-        session.encounterId
-      ]
+      [session.encounterId],
     );
 
     /*
@@ -4357,9 +3439,7 @@ async function completeHuntVictory(
 
         WHERE id = ?
       `,
-      [
-        session.encounterId
-      ]
+      [session.encounterId],
     );
 
     /*
@@ -4371,9 +3451,7 @@ async function completeHuntVictory(
 
         WHERE party_hunt_id = ?
       `,
-      [
-        session.partyHuntId
-      ]
+      [session.partyHuntId],
     );
 
     /*
@@ -4392,9 +3470,7 @@ async function completeHuntVictory(
 
         WHERE hrc.party_hunt_id = ?
       `,
-      [
-        session.partyHuntId
-      ]
+      [session.partyHuntId],
     );
 
     /*
@@ -4407,9 +3483,7 @@ async function completeHuntVictory(
 
         WHERE party_hunt_id = ?
       `,
-      [
-        session.partyHuntId
-      ]
+      [session.partyHuntId],
     );
 
     /*
@@ -4422,9 +3496,7 @@ async function completeHuntVictory(
 
         WHERE id = ?
       `,
-      [
-        session.partyHuntId
-      ]
+      [session.partyHuntId],
     );
 
     await connection.commit();
@@ -4434,8 +3506,7 @@ async function completeHuntVictory(
      * Preserve a short-lived victory
      * snapshot for all combat clients.
      */
-    session.rewards =
-      pendingRewards;
+    session.rewards = pendingRewards;
 
     /*
      * Rewards were just committed transactionally.
@@ -4444,24 +3515,13 @@ async function completeHuntVictory(
      * EXP, gold, level, stat points, skill points and
      * any level-up HP/SP changes appear immediately.
      */
-    for (
-      const reward of
-      pendingRewards
-    ) {
-      publishPlayerStatePatch(
-        reward.playerId,
-        {
-          refreshDerivedStats: true
-        }
-      );
+    for (const reward of pendingRewards) {
+      publishPlayerStatePatch(reward.playerId, {
+        refreshDerivedStats: true,
+      });
 
-      if (
-        reward.levelUp
-      ) {
-        publishPlayerLevelUp(
-          reward.playerId,
-          reward.levelUp
-        );
+      if (reward.levelUp) {
+        publishPlayerLevelUp(reward.playerId, reward.levelUp);
       }
     }
 
@@ -4471,27 +3531,20 @@ async function completeHuntVictory(
     session.enemy.gauge = 0;
     session.enemy.ready = false;
 
-    session.state =
-      "victory";
+    session.state = "victory";
 
-    session.updatedAt =
-      Date.now();
+    session.updatedAt = Date.now();
 
-    session.log.push(
-      `🏆 ${session.enemy.name} has been defeated!`
-    );
+    session.log.push(`🏆 ${session.enemy.name} has been defeated!`);
+
+    session.log.push("🎖 The Hunt is complete!");
 
     session.log.push(
-      "🎖 The Hunt is complete!"
-    );
-
-    session.log.push(
-      `✨ Each eligible adventurer receives ${expReward} EXP and ${goldReward} gold.`
+      `✨ Each eligible adventurer receives ${expReward} EXP and ${goldReward} gold.`,
     );
 
     if (session.log.length > 60) {
-      session.log =
-        session.log.slice(-60);
+      session.log = session.log.slice(-60);
     }
 
     /*
@@ -4499,16 +3552,11 @@ async function completeHuntVictory(
      * enough for every party client to
      * receive the victory response.
      */
-    scheduleHuntSessionCleanup(
-      session.encounterId
-    );
+    scheduleHuntSessionCleanup(session.encounterId);
   } catch (err) {
     await connection.rollback();
 
-    console.error(
-      "Hunt victory completion failed:",
-      err
-    );
+    console.error("Hunt victory completion failed:", err);
 
     throw err;
   } finally {

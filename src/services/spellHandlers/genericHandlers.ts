@@ -10,6 +10,7 @@ import {
 
 import {
   applyHealingReceivedMultiplier,
+  calculateScaledHealingAmount,
   applySpellDebuff,
   applySpellDot,
   calculateScaledSpellAmount,
@@ -250,6 +251,8 @@ SpellHandlerDefinition = {
     return {
       log,
 
+      damage,
+
       enemyHP,
 
       appliedStatus,
@@ -260,6 +263,11 @@ SpellHandlerDefinition = {
       crit:
         Boolean(
           damageResult.crit
+        ),
+
+      dodged:
+        Boolean(
+          damageResult.dodged
         )
     };
   }
@@ -333,7 +341,7 @@ SpellHandlerDefinition = {
      * caster's scaling stats.
      */
     const baseScaledHealing =
-      calculateScaledSpellAmount(
+      calculateScaledHealingAmount(
         player,
         baseHeal
       );
@@ -620,7 +628,13 @@ SpellHandlerDefinition = {
        * storage after casting.
        */
       healing:
-        actualHealing
+        actualHealing,
+      potentialHealing: scaledHealing,
+      overhealing: Math.max(0, scaledHealing - actualHealing),
+      healedTargetId: Number(healTargetId),
+      healedTargetMaxHP: maximumHP,
+      healedTargetHPBefore: currentHP,
+      healedTargetHPAfter: finalHP
     };
   }
 };
@@ -761,7 +775,11 @@ SpellHandlerDefinition = {
           dot.duration,
 
         tickRateSeconds:
-          dot.tickRate
+          dot.tickRate,
+        immediateFirstTick: Boolean(spell.rank_config?.immediateFirstTick),
+        defenseReductionPerTick: Number(spell.rank_config?.brandDefenseReductionPerTick) || 0,
+        defenseReductionMaxStacks: Number(spell.rank_config?.brandDefenseReductionMaxStacks) || 0,
+        manaRestorePercentPerTick: Number(spell.rank_config?.brandManaRestorePercent) || 0
       }
     );
 
@@ -1036,7 +1054,11 @@ SpellHandlerDefinition = {
           dot.duration,
 
         tickRateSeconds:
-          dot.tickRate
+          dot.tickRate,
+        immediateFirstTick: Boolean(spell.rank_config?.immediateFirstTick),
+        defenseReductionPerTick: Number(spell.rank_config?.brandDefenseReductionPerTick) || 0,
+        defenseReductionMaxStacks: Number(spell.rank_config?.brandDefenseReductionMaxStacks) || 0,
+        manaRestorePercentPerTick: Number(spell.rank_config?.brandManaRestorePercent) || 0
       }
     );
 
