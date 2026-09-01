@@ -3480,3 +3480,48 @@ body::before{
     gap:12px;
   }
 }
+
+/* =========================================
+   SIDEBAR QUEST TRACKER
+========================================= */
+
+#questTracker.qtracker--sidebar {
+  position: relative !important;
+  inset: auto !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  box-sizing: border-box;
+  transform: none !important;
+  z-index: auto;
+
+  /* The decorative frame supplies the visible border. */
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(420px 160px at 18% 0%, rgba(182,75,46,.10), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.026), rgba(0,0,0,.18)),
+    rgba(0,0,0,.22);
+  box-shadow:
+    0 12px 28px rgba(0,0,0,.28),
+    inset 0 1px 0 rgba(255,255,255,.045);
+}
+
+#questTracker.qtracker--sidebar .qtrackerHead {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(200,163,75,.18);
+}
+
+#questTracker.qtracker--sidebar .qtrackerBody {
+  padding: 12px 14px 14px;
+}
+
+#questTracker.qtracker--sidebar > .frame-border {
+  position: absolute;
+  z-index: 8;
+}

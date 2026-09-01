@@ -33,6 +33,138 @@ const huntCombatTiming = {
   players: new Map()
 };
 
+let huntEnemyCastAnchor = null;
+let lastHuntEnemyCastAlertToken = null;
+
+function playHuntEnemyAlertSound() {
+  const alertSound = new Audio(
+    "/sounds/ui/enemy_alert.ogg"
+  );
+  alertSound.volume = 0.75;
+  alertSound.play().catch(() => {});
+}
+
+function hideHuntEnemyCastWarning() {
+  huntEnemyCastAnchor = null;
+  document
+    .getElementById("huntEnemyCastWarning")
+    ?.classList.add("hidden");
+}
+
+function syncHuntEnemyCastWarning(encounter) {
+  const mechanicState =
+    encounter?.enemy?.mechanic;
+  const cast = mechanicState?.activeCast;
+
+  if (!cast) {
+    hideHuntEnemyCastWarning();
+    return;
+  }
+
+  const warning = document.getElementById(
+    "huntEnemyCastWarning"
+  );
+  if (!warning) return;
+
+  const sequence =
+    Number(mechanicState.sequence ?? 0) || 0;
+  const alertToken =
+    `${encounter.encounterId}:${sequence}:` +
+    `${cast.mechanicKey || cast.name}`;
+  const totalMs = Math.max(
+    1,
+    Number(cast.totalMs) || 1
+  );
+  const remainingMs = Math.max(
+    0,
+    Math.min(
+      totalMs,
+      Number(cast.remainingMs) || 0
+    )
+  );
+
+  huntEnemyCastAnchor = {
+    token: alertToken,
+    receivedAt: performance.now(),
+    totalMs,
+    remainingMs
+  };
+
+  setHuntText(
+    "huntEnemyCastName",
+    cast.name || "Incoming Attack"
+  );
+
+  const targetIds = Array.isArray(
+    cast.targetPlayerIds
+  )
+    ? cast.targetPlayerIds.map(Number)
+    : [];
+  const targetNames = (encounter.players || [])
+    .filter(player =>
+      targetIds.includes(Number(player.playerId))
+    )
+    .map(player => player.name);
+
+  setHuntText(
+    "huntEnemyCastTargets",
+    targetNames.length > 1
+      ? `Targets: ${targetNames.join(", ")}`
+      : targetNames.length === 1
+        ? `Target: ${targetNames[0]}`
+        : "Prepare to react"
+  );
+
+  const interruptLabel = document.getElementById(
+    "huntEnemyCastInterrupt"
+  );
+  if (interruptLabel) {
+    interruptLabel.textContent = cast.interruptible
+      ? "Interruptible"
+      : "Cannot Be Interrupted";
+    interruptLabel.classList.toggle(
+      "is-interruptible",
+      Boolean(cast.interruptible)
+    );
+  }
+
+  warning.classList.remove("hidden");
+
+  if (lastHuntEnemyCastAlertToken !== alertToken) {
+    lastHuntEnemyCastAlertToken = alertToken;
+    warning.classList.remove("is-alerting");
+    void warning.offsetWidth;
+    warning.classList.add("is-alerting");
+    playHuntEnemyAlertSound();
+  }
+}
+
+function renderSmoothHuntEnemyCast(now) {
+  if (!huntEnemyCastAnchor) return;
+
+  const elapsedMs = Math.max(
+    0,
+    now - huntEnemyCastAnchor.receivedAt
+  );
+  const remainingMs = Math.max(
+    0,
+    huntEnemyCastAnchor.remainingMs - elapsedMs
+  );
+  const completedPercent =
+    (1 - remainingMs / huntEnemyCastAnchor.totalMs) * 100;
+
+  setHuntBarPercent(
+    "huntEnemyCastBar",
+    completedPercent
+  );
+  setHuntText(
+    "huntEnemyCastTime",
+    remainingMs > 0
+      ? `${(remainingMs / 1000).toFixed(1)}s`
+      : "IMPACT"
+  );
+}
+
 function clampHuntPercent(
   value
 ) {
@@ -303,6 +435,8 @@ function renderSmoothHuntTimers() {
   const now =
     performance.now();
 
+  renderSmoothHuntEnemyCast(now);
+
   // -----------------------
   // Boss ATB
   // -----------------------
@@ -466,6 +600,8 @@ function stopSmoothHuntTimers() {
   huntCombatTiming.enemy =
     null;
 
+  hideHuntEnemyCastWarning();
+
   huntCombatTiming.players.clear();
 }
 
@@ -530,6 +666,47 @@ function ensureHuntCombatModal() {
         </header>
 
         <div class="hunt-combat-layout">
+
+          <section
+            id="huntEnemyCastWarning"
+            class="hunt-enemy-cast-warning hidden"
+            role="alert"
+            aria-live="assertive"
+          >
+            <div class="hunt-enemy-cast-warning__icon">⚠</div>
+
+            <div class="hunt-enemy-cast-warning__content">
+              <div class="hunt-enemy-cast-warning__eyebrow">
+                Enemy Ability Incoming
+              </div>
+
+              <div class="hunt-enemy-cast-warning__heading">
+                <strong id="huntEnemyCastName">
+                  Incoming Attack
+                </strong>
+                <span id="huntEnemyCastTime">0.0s</span>
+              </div>
+
+              <div class="hunt-enemy-cast-warning__track">
+                <div
+                  id="huntEnemyCastBar"
+                  class="hunt-enemy-cast-warning__fill"
+                ></div>
+              </div>
+
+              <div class="hunt-enemy-cast-warning__footer">
+                <span id="huntEnemyCastTargets">
+                  Prepare to react
+                </span>
+                <span
+                  id="huntEnemyCastInterrupt"
+                  class="hunt-enemy-cast-warning__interrupt"
+                >
+                  Interruptible
+                </span>
+              </div>
+            </div>
+          </section>
 
           <section class="hunt-boss-panel">
 
@@ -916,6 +1093,8 @@ function renderHuntEncounter(
   const target =
     encounter.enemy || {};
 
+  syncHuntEnemyCastWarning(encounter);
+
   setHuntText(
     "huntBossName",
     target.name ||
@@ -998,7 +1177,8 @@ function renderHuntEncounter(
   }
 
   renderHuntParty(
-    encounter.players || []
+    encounter.players || [],
+    target.targetPlayerId
   );
 
   const combatLog =
@@ -1084,7 +1264,11 @@ document
 }
 }
 
-function renderHuntParty(players) {
+function renderHuntParty(
+  players,
+  targetPlayerId =
+    window.__lastHuntEncounter?.enemy?.targetPlayerId ?? null
+) {
   const list =
     document.getElementById(
       "huntPartyList"
@@ -1104,6 +1288,13 @@ function renderHuntParty(players) {
 
     return;
   }
+
+  const highestThreat = Math.max(
+    0,
+    ...players
+      .filter(player => Number(player.hp ?? player.hpoints ?? 0) > 0)
+      .map(player => Math.max(0, Number(player.threat) || 0))
+  );
 
   list.innerHTML =
     players
@@ -1201,8 +1392,22 @@ const isSelf =
   Number(player.playerId) ===
   Number(huntCombatPlayerId);
 
-  const isAlive =
+const isAlive =
   hp > 0;
+
+const threat = Math.max(
+  0,
+  Math.round(Number(player.threat) || 0)
+);
+
+const threatPct =
+  highestThreat > 0
+    ? Math.max(0, Math.min(100, threat / highestThreat * 100))
+    : 0;
+
+const isBossTarget =
+  isAlive &&
+  Number(player.playerId) === Number(targetPlayerId);
 
 const selectingAlly =
   Boolean(
@@ -1227,7 +1432,7 @@ const clickHandler =
 
         return `
           <div
-            class="hunt-party-member ${isSelf ? "is-self" : ""} ${targetClass}"
+            class="hunt-party-member ${isSelf ? "is-self" : ""} ${isBossTarget ? "is-boss-target" : ""} ${targetClass}"
             ${clickHandler}
           >
 
@@ -1256,6 +1461,11 @@ const clickHandler =
                 </div>
               </div>
 
+            <div class="hunt-party-member__indicators">
+            ${isBossTarget
+              ? `<span class="hunt-party-threat-target">⚔ Boss Target</span>`
+              : ""
+            }
             ${
             hp <= 0
                 ? `
@@ -1275,6 +1485,22 @@ const clickHandler =
                     </span>
                 `
             }
+            </div>
+            </div>
+
+            <div class="hunt-party-stat hunt-party-stat--threat">
+
+              <span>Threat</span>
+
+              <div class="hunt-party-track">
+                <div
+                  class="hunt-party-fill threat ${isBossTarget ? "targeted" : ""}"
+                  style="width:${threatPct}%"
+                ></div>
+              </div>
+
+              <span>${threat.toLocaleString()}</span>
+
             </div>
 
             <div class="hunt-party-stat">

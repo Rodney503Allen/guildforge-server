@@ -70,6 +70,17 @@ import {
   getPlayerCombatThreatMultiplier,
   refreshCombatThreatTarget,
 } from "./combatThreatService";
+import {
+  advanceEnemyMechanics,
+  buildEnemyMechanicSnapshot,
+  createEnemyMechanicRuntime,
+  interruptEnemyMechanic,
+  loadEnemyMechanicDefinitions,
+} from "./enemyMechanics";
+import type {
+  EnemyMechanicAdapter,
+  EnemyMechanicRuntime,
+} from "./enemyMechanics";
 
 export type HuntCombatPlayer = {
   playerId: number;
@@ -96,6 +107,8 @@ export type HuntCombatPlayer = {
 
 export type HuntCombatEnemy = {
   encounterId: number;
+  creatureId: number;
+  huntTargetId: number;
 
   name: string;
 
@@ -224,6 +237,8 @@ export type HuntCombatSession = {
 
   enemy: HuntCombatEnemy;
 
+  mechanics: EnemyMechanicRuntime;
+
   log: string[];
 
   nextDamageEventId: number;
@@ -335,6 +350,7 @@ export async function createHuntCombatSession(
         he.party_hunt_id,
         he.party_id,
         he.creature_id,
+        he.hunt_target_id,
         he.hp,
         he.max_hp,
         he.status,
@@ -472,6 +488,17 @@ export async function createHuntCombatSession(
     damageTakenMult: 1,
   };
 
+  const mechanicDefinitions = await loadEnemyMechanicDefinitions([
+    {
+      sourceType: "hunt_target",
+      sourceId: Number(encounter.hunt_target_id),
+    },
+    {
+      sourceType: "creature",
+      sourceId: Number(encounter.creature_id),
+    },
+  ]);
+
   const session: HuntCombatSession = {
     encounterId: Number(encounter.encounter_id),
 
@@ -488,6 +515,8 @@ export async function createHuntCombatSession(
 
     enemy: {
       encounterId: Number(encounter.encounter_id),
+      creatureId: Number(encounter.creature_id),
+      huntTargetId: Number(encounter.hunt_target_id),
 
       name: String(encounter.name ?? "Hunt Target"),
 
@@ -511,6 +540,8 @@ export async function createHuntCombatSession(
       threat: createCombatThreatTable(players.keys()),
       targetPlayerId: null,
     },
+
+    mechanics: createEnemyMechanicRuntime(mechanicDefinitions),
 
     log: [`⚠ ${encounter.name ?? "The quarry"} faces your party!`],
 
@@ -2452,7 +2483,7 @@ async function advanceHuntCombatSessionUnlocked(session: HuntCombatSession) {
   /*
    * Hunt target action.
    */
-  await processEnemyAttack(session);
+  await processHuntEnemyTurn(session, now);
 
   session.updatedAt = now;
 
@@ -2467,6 +2498,8 @@ export async function advanceHuntCombatSession(session: HuntCombatSession) {
 
 export function buildHuntCombatSnapshot(session: HuntCombatSession) {
   const now = Date.now();
+
+  refreshCombatThreatTarget(session.enemy, session.players.values());
 
   return {
     encounterId: session.encounterId,
@@ -2499,6 +2532,8 @@ export function buildHuntCombatSnapshot(session: HuntCombatSession) {
       readyInMs: getHuntEnemyReadyInMs(session, now),
 
       targetPlayerId: session.enemy.targetPlayerId,
+
+      mechanic: buildEnemyMechanicSnapshot(session.mechanics, now),
     },
 
     players: Array.from(session.players.values()).map((player) => ({
@@ -2631,7 +2666,133 @@ async function completeHuntCombatDefeat(session: HuntCombatSession) {
   }
 }
 
-async function processEnemyAttack(session: HuntCombatSession) {
+function createHuntEnemyMechanicAdapter(
+  session: HuntCombatSession,
+): EnemyMechanicAdapter {
+  return {
+    enemyName: session.enemy.name,
+    enemyMaxHp: session.enemy.maxHp,
+    participants: getLivingHuntPlayers(session).map((player) => ({
+      playerId: player.playerId,
+      name: player.name,
+      hp: player.hp,
+      maxHp: player.maxHp,
+      gauge: player.gauge,
+      ready: player.ready,
+    })),
+    threatState: {
+      threat: session.enemy.threat,
+      targetPlayerId: session.enemy.targetPlayerId,
+    },
+    attackPlayer: async (playerId, options) => {
+      await processEnemyAttack(session, {
+        targetPlayerId: playerId,
+        damageMultiplier: options.damageMultiplier,
+        abilityName: options.abilityName,
+        consumeTurn: false,
+      });
+    },
+    healEnemy: async (amount) => {
+      const before = session.enemy.hp;
+      session.enemy.hp = Math.min(
+        session.enemy.maxHp,
+        session.enemy.hp + Math.max(0, Math.floor(Number(amount) || 0)),
+      );
+      session.enemy.stats.hpoints = session.enemy.hp;
+      const actualHealing = Math.max(0, session.enemy.hp - before);
+      if (actualHealing > 0) {
+        await db.query(`UPDATE hunt_encounters SET hp = ? WHERE id = ?`, [
+          session.enemy.hp,
+          session.encounterId,
+        ]);
+      }
+      return actualHealing;
+    },
+    changePlayerGauge: async (playerId, amount) => {
+      const player = session.players.get(Number(playerId));
+      if (!player || player.hp <= 0) return 0;
+      const before = player.gauge;
+      player.gauge = clamp(player.gauge + Number(amount || 0), 0, 100);
+      player.ready = player.gauge >= 100;
+      return player.gauge - before;
+    },
+    appendLog: (line) => {
+      session.log.push(line);
+    },
+  };
+}
+
+async function processHuntEnemyTurn(
+  session: HuntCombatSession,
+  now: number,
+) {
+  const enemy = session.enemy;
+  if (session.state !== "active" || enemy.hp <= 0) return;
+  if (!session.mechanics.activeCast && !enemy.ready) return;
+
+  refreshCombatThreatTarget(session.enemy, session.players.values());
+
+  const result = await advanceEnemyMechanics({
+    runtime: session.mechanics,
+    adapter: createHuntEnemyMechanicAdapter(session),
+    enemyHp: enemy.hp,
+    encounterStartedAt: session.createdAt,
+    now,
+  });
+
+  if (result.kind === "none") {
+    await processEnemyAttack(session);
+    return;
+  }
+  if (result.kind === "casting") return;
+  if (result.kind === "started") {
+    enemy.recoveryUntil = Math.max(enemy.recoveryUntil, result.cast.resolvesAt);
+    return;
+  }
+
+  enemy.gauge = 0;
+  enemy.ready = false;
+  enemy.recoveryUntil = now + result.recoveryMs;
+  if (getLivingHuntPlayers(session).length === 0) {
+    await completeHuntCombatDefeat(session);
+  }
+}
+
+export async function interruptHuntEnemyMechanic(
+  encounterId: number,
+  sourcePlayerId: number,
+) {
+  return withHuntCombatLock(Number(encounterId), async () => {
+    const session = huntCombatSessions.get(Number(encounterId));
+    const player = session?.players.get(Number(sourcePlayerId));
+    if (!session || session.state !== "active" || !player || player.hp <= 0) {
+      return { interrupted: false, cast: null };
+    }
+    const result = interruptEnemyMechanic(session.mechanics);
+    if (result.interrupted && result.cast) {
+      session.enemy.gauge = 0;
+      session.enemy.ready = false;
+      session.enemy.recoveryUntil = Date.now() + HUNT_ENEMY_RECOVERY_MS;
+      session.log.push(
+        `⚡ ${player.name} interrupts ${session.enemy.name}'s ${result.cast.name}!`,
+      );
+      session.updatedAt = Date.now();
+    }
+    return result;
+  });
+}
+
+type HuntEnemyAttackOptions = {
+  targetPlayerId?: number;
+  damageMultiplier?: number;
+  abilityName?: string;
+  consumeTurn?: boolean;
+};
+
+async function processEnemyAttack(
+  session: HuntCombatSession,
+  options: HuntEnemyAttackOptions = {},
+) {
   if (session.state !== "active") {
     return;
   }
@@ -2650,10 +2811,12 @@ async function processEnemyAttack(session: HuntCombatSession) {
     return;
   }
 
-  const target = getHighestThreatTarget(
-    session.enemy,
-    session.players.values(),
-  );
+  const requestedTarget = options.targetPlayerId == null
+    ? null
+    : session.players.get(Number(options.targetPlayerId));
+  const target = requestedTarget && requestedTarget.hp > 0
+    ? requestedTarget
+    : refreshCombatThreatTarget(session.enemy, session.players.values());
 
   if (!target) {
     await completeHuntCombatDefeat(session);
@@ -2666,7 +2829,18 @@ async function processEnemyAttack(session: HuntCombatSession) {
    * Apply active Hunt debuffs before
    * resolving the boss attack.
    */
-  const effectiveEnemyStats = getEffectiveHuntEnemyStats(session);
+  const damageMultiplier = Math.max(
+    0,
+    Number(options.damageMultiplier ?? 1) || 0,
+  );
+  const baseEffectiveEnemyStats = getEffectiveHuntEnemyStats(session);
+  const effectiveEnemyStats = {
+    ...baseEffectiveEnemyStats,
+    attack: Math.max(
+      0,
+      Number(baseEffectiveEnemyStats.attack ?? 0) * damageMultiplier,
+    ),
+  };
 
   const result = resolveAttack(effectiveEnemyStats as any, target.stats as any);
 
@@ -2706,17 +2880,20 @@ async function processEnemyAttack(session: HuntCombatSession) {
    * Consume enemy turn regardless
    * of hit/miss/absorption.
    */
-  enemy.gauge = 0;
-  enemy.ready = false;
-
-  enemy.recoveryUntil = Date.now() + HUNT_ENEMY_RECOVERY_MS;
+  if (options.consumeTurn !== false) {
+    enemy.gauge = 0;
+    enemy.ready = false;
+    enemy.recoveryUntil = Date.now() + HUNT_ENEMY_RECOVERY_MS;
+  }
 
   // =====================================================
   // MISS
   // =====================================================
 
   if (result.dodged) {
-    session.log.push(`🛡 ${target.name} evades ${enemy.name}'s attack!`);
+    session.log.push(
+      `🛡 ${target.name} evades ${enemy.name}'s ${options.abilityName || "attack"}!`,
+    );
   } else {
     // =====================================================
     // APPLY FINAL HP DAMAGE
@@ -2968,17 +3145,25 @@ async function processEnemyAttack(session: HuntCombatSession) {
 
     if (damage > 0) {
       session.log.push(
-        `☠ ${enemy.name} attacks ${target.name} for ${damage} damage${
+        options.abilityName
+          ? `☠ ${enemy.name} uses ${options.abilityName} on ${target.name} for ${damage} damage${
+              result.crit ? " (CRITICAL!)" : ""
+            }`
+          : `☠ ${enemy.name} attacks ${target.name} for ${damage} damage${
           result.crit ? " (CRITICAL!)" : ""
-        }`,
+            }`,
       );
     } else if (mitigation?.absorbedDamage) {
       session.log.push(
-        `☠ ${enemy.name} attacks ${target.name}, but the blow is absorbed!`,
+        options.abilityName
+          ? `☠ ${enemy.name}'s ${options.abilityName} strikes ${target.name}, but the blow is absorbed!`
+          : `☠ ${enemy.name} attacks ${target.name}, but the blow is absorbed!`,
       );
     } else {
       session.log.push(
-        `☠ ${enemy.name} attacks ${target.name}, but deals no damage.`,
+        options.abilityName
+          ? `☠ ${enemy.name}'s ${options.abilityName} strikes ${target.name}, but deals no damage.`
+          : `☠ ${enemy.name} attacks ${target.name}, but deals no damage.`,
       );
     }
 

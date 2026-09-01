@@ -487,6 +487,7 @@
     minmax(300px, .85fr);
 
   grid-template-areas:
+    "alert alert"
     "boss party"
     "log  party"
     "actions actions";
@@ -507,6 +508,136 @@
   scrollbar-color:
     rgba(182,75,46,.95)
     rgba(0,0,0,.25);
+}
+
+/* =========================================================
+   ENEMY CAST WARNING
+========================================================= */
+
+.hunt-enemy-cast-warning{
+  grid-area:alert;
+  position:relative;
+  z-index:5;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:14px 16px;
+  border:1px solid rgba(255,92,58,.9);
+  border-radius:12px;
+  background:
+    radial-gradient(circle at 12% 50%, rgba(255,92,58,.22), transparent 35%),
+    linear-gradient(135deg, rgba(86,14,10,.96), rgba(25,8,9,.98));
+  box-shadow:
+    0 0 24px rgba(255,57,35,.24),
+    inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+.hunt-enemy-cast-warning.hidden{ display:none; }
+.hunt-enemy-cast-warning.is-alerting{ animation:huntEnemyCastAlert .48s ease-out; }
+
+.hunt-enemy-cast-warning__icon{
+  flex:0 0 44px;
+  display:grid;
+  place-items:center;
+  width:44px;
+  height:44px;
+  border:1px solid rgba(255,181,78,.62);
+  border-radius:50%;
+  background:rgba(0,0,0,.26);
+  color:#ffd278;
+  font-size:24px;
+  box-shadow:0 0 18px rgba(255,113,52,.32);
+}
+
+.hunt-enemy-cast-warning__content{ min-width:0; flex:1; }
+
+.hunt-enemy-cast-warning__eyebrow{
+  margin-bottom:2px;
+  color:#ffad8c;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:1.5px;
+  text-transform:uppercase;
+}
+
+.hunt-enemy-cast-warning__heading{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:8px;
+}
+
+.hunt-enemy-cast-warning__heading strong{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#fff0dc;
+  font-family:Cinzel, ui-serif, Georgia, serif;
+  font-size:18px;
+  letter-spacing:1.2px;
+  text-transform:uppercase;
+  text-shadow:0 2px 8px rgba(0,0,0,.9);
+}
+
+#huntEnemyCastTime{
+  flex:0 0 auto;
+  color:#ffe0a0;
+  font-size:15px;
+  font-weight:900;
+  font-variant-numeric:tabular-nums;
+}
+
+.hunt-enemy-cast-warning__track{
+  height:10px;
+  overflow:hidden;
+  border:1px solid rgba(255,181,78,.35);
+  border-radius:999px;
+  background:rgba(0,0,0,.48);
+  box-shadow:inset 0 0 8px rgba(0,0,0,.85);
+}
+
+.hunt-enemy-cast-warning__fill{
+  width:0%;
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg, #d83a24, #ff8b3d, #ffd166);
+  box-shadow:0 0 14px rgba(255,110,45,.72);
+}
+
+.hunt-enemy-cast-warning__footer{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:7px;
+  color:rgba(255,235,218,.82);
+  font-size:11px;
+  font-weight:700;
+}
+
+.hunt-enemy-cast-warning__interrupt{
+  flex:0 0 auto;
+  padding:3px 7px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:999px;
+  color:#d8d8d8;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.7px;
+  text-transform:uppercase;
+}
+
+.hunt-enemy-cast-warning__interrupt.is-interruptible{
+  border-color:rgba(255,210,90,.58);
+  background:rgba(255,194,62,.1);
+  color:#ffe08b;
+}
+
+@keyframes huntEnemyCastAlert{
+  0%{ opacity:.15; transform:scale(.96); box-shadow:0 0 0 rgba(255,57,35,0); }
+  55%{ opacity:1; transform:scale(1.012); box-shadow:0 0 38px rgba(255,57,35,.48); }
+  100%{ transform:scale(1); }
 }
 
 
@@ -1468,6 +1599,7 @@
     grid-template-columns:1fr;
 
     grid-template-areas:
+      "alert"
       "boss"
       "party"
       "log"
@@ -1547,6 +1679,28 @@
     height:96px;
   }
 
+  .hunt-enemy-cast-warning{
+    align-items:flex-start;
+    padding:12px;
+  }
+
+  .hunt-enemy-cast-warning__icon{
+    flex-basis:36px;
+    width:36px;
+    height:36px;
+    font-size:19px;
+  }
+
+  .hunt-enemy-cast-warning__heading strong{
+    font-size:14px;
+  }
+
+  .hunt-enemy-cast-warning__footer{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:5px;
+  }
+
   .hunt-spell-hotbar{
     grid-template-columns:
       repeat(3, 64px);
@@ -1572,4 +1726,43 @@
   #huntLeaveBtn{
     width:100%;
   }
+}
+
+.hunt-party-member__indicators{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:4px;
+}
+
+.hunt-party-threat-target{
+  padding:3px 6px;
+  border:1px solid rgba(224,77,55,.7);
+  border-radius:999px;
+  background:rgba(112,20,16,.46);
+  color:#ffb4a5;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:.65px;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.hunt-party-stat--threat{
+  grid-template-columns:42px minmax(0, 1fr) auto;
+}
+
+.hunt-party-fill.threat{
+  background:linear-gradient(90deg, rgba(150,92,25,.92), rgba(225,133,40,.95));
+}
+
+.hunt-party-fill.threat.targeted{
+  background:linear-gradient(90deg, rgba(155,32,25,.96), rgba(236,76,49,.98));
+  box-shadow:0 0 12px rgba(236,76,49,.3);
+}
+
+.hunt-party-member.is-boss-target{
+  border-color:rgba(224,77,55,.9);
+  background:linear-gradient(90deg, rgba(130,28,20,.18), rgba(0,0,0,.22));
+  box-shadow:0 0 0 1px rgba(224,77,55,.22), 0 0 18px rgba(224,77,55,.18), inset 3px 0 0 rgba(224,77,55,.85);
 }

@@ -99,16 +99,22 @@ export function getHighestThreatTarget<
     )
   );
 
-  const eligibleTargets = highestThreat > 0
-    ? livingParticipants.filter(
-        participant =>
-          getCombatThreat(state, participant.playerId) === highestThreat
-      )
-    : livingParticipants;
+  const eligibleTargets = livingParticipants.filter(
+    participant =>
+      getCombatThreat(state, participant.playerId) === highestThreat
+  );
 
-  return eligibleTargets[
-    Math.floor(Math.random() * eligibleTargets.length)
-  ];
+  const currentTarget = eligibleTargets.find(
+    participant => participant.playerId === state.targetPlayerId
+  );
+
+  if (currentTarget) {
+    return currentTarget;
+  }
+
+  return eligibleTargets.sort(
+    (left, right) => left.playerId - right.playerId
+  )[0] ?? null;
 }
 
 export function refreshCombatThreatTarget<

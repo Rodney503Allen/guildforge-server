@@ -459,6 +459,7 @@ res.send(`
   <link rel="stylesheet" href="/ui/itemTooltip.css">
   <link rel="stylesheet" href="/hunt-ready-check.css">
   <link rel="stylesheet" href="/hunt-combat.css">
+
 </head>
 
 <body data-gf-terrain="${currentTerrain}">
@@ -792,6 +793,35 @@ res.send(`
   </div>
 </section>
 
+<!-- Tracked Quest -->
+<aside
+  id="questTracker"
+  class="qtracker qtracker--sidebar world-sidebar-card frame-host hidden"
+  aria-label="Tracked quest"
+>
+  <span class="frame-border sub" aria-hidden="true"></span>
+
+  <div class="qtrackerHead">
+    <div class="qtrackerTitle" id="qtTitle">
+      Tracking
+    </div>
+
+    <div class="qtrackerBtns">
+      <button
+        id="qtMinBtn"
+        class="qtrackerBtn"
+        type="button"
+        title="Minimize"
+        aria-label="Minimize quest tracker"
+      >
+        —
+      </button>
+    </div>
+  </div>
+
+  <div class="qtrackerBody" id="qtBody">—</div>
+</aside>
+
   <!-- Keep these outside the world frame -->
   <div class="world-right">
     <div id="statpanel-root"></div>
@@ -1106,33 +1136,6 @@ res.send(`
     <img src="/images/chest.png" alt="" aria-hidden="true" />
     <span class="pending-chest-dot" aria-hidden="true"></span>
   </button>
-
-  <!-- Quest Tracker -->
-  <aside
-    id="questTracker"
-    class="qtracker hidden"
-    aria-label="Tracked quest"
-  >
-    <div class="qtrackerHead">
-      <div class="qtrackerTitle" id="qtTitle">
-        Tracking
-      </div>
-
-      <div class="qtrackerBtns">
-        <button
-          id="qtMinBtn"
-          class="qtrackerBtn"
-          type="button"
-          title="Minimize"
-          aria-label="Minimize quest tracker"
-        >
-          —
-        </button>
-      </div>
-    </div>
-
-    <div class="qtrackerBody" id="qtBody">—</div>
-  </aside>
 
   <link rel="stylesheet" href="/statpanel.css" />
   <link rel="stylesheet" href="/ui/toast.css" />
