@@ -18,9 +18,47 @@ import {
   setSpellEnemyHP
 } from "./helpers";
 
-function rankNumber(spell: any, key: string, fallback = 0): number {
-  const value = Number(spell?.rank_config?.[key]);
-  return Number.isFinite(value) ? value : fallback;
+const TANK_ATTACK_THREAT_MULTIPLIER = 3;
+const TANK_BONUS_THREAT_SCALE = 5;
+const SENTINEL_THREAT_GENERATION_PERCENT = 100;
+
+function rankNumber(
+  spell: any,
+  key: string,
+  fallback = 0
+): number {
+  const value =
+    Number(
+      spell?.rank_config?.[key]
+    );
+
+  return Number.isFinite(
+    value
+  )
+    ? value
+    : fallback;
+}
+
+function scaledThreatBonus(
+  spell: any,
+  key: string,
+  minimum: number
+): number {
+  const configured =
+    Math.max(
+      0,
+      rankNumber(
+        spell,
+        key,
+        0
+      )
+    );
+
+  return Math.max(
+    minimum,
+    configured *
+      TANK_BONUS_THREAT_SCALE
+  );
 }
 
 async function applyStatus(
@@ -43,99 +81,99 @@ async function applyStatus(
         expires_at = VALUES(expires_at),
         source = VALUES(source)
     `,
-    [playerId, effectKey, value, charges, duration, source]
+    [
+      playerId,
+      effectKey,
+      value,
+      charges,
+      duration,
+      source
+    ]
   );
 }
 
-function livingTargets(context: any) {
-  const allies = (context.allies ?? []).filter((ally: any) => Number(ally.hp) > 0);
+function livingTargets(
+  context: any
+) {
+  const allies =
+    (context.allies ?? [])
+      .filter(
+        (ally: any) =>
+          Number(
+            ally.hp
+          ) > 0
+      );
+
   return allies.length > 0
     ? allies
     : [{
-        playerId: context.playerId,
-        hp: context.currentPlayerHP ?? context.player?.hpoints ?? 1,
-        maxHp: context.maxPlayerHP ?? context.player?.maxhp ?? 1,
-        stats: context.player
+        playerId:
+          context.playerId,
+
+        hp:
+          context.currentPlayerHP ??
+          context.player?.hpoints ??
+          1,
+
+        maxHp:
+          context.maxPlayerHP ??
+          context.player?.maxhp ??
+          1,
+
+        stats:
+          context.player
       }];
 }
-
 
 // =====================================================
 // BRAMBLE STRIKE
 //
-// Deals damage and weakens enemy damage output.
-//
-// Universal enemy support:
-// - normal combat
-// - Hunt combat
-// - dungeon / raid later
+// Dedicated Sentinel threat attack.
 // =====================================================
 
 export const brambleStrikeHandler:
 SpellHandlerDefinition = {
-
   requiresEnemy:
     true,
 
-
   validate(spell) {
-
     const baseDamage =
       Number(
         spell.damage
       ) || 0;
-
 
     const debuff =
       getConfiguredDebuff(
         spell
       );
 
-
     if (
       baseDamage <= 0
     ) {
-
-      return (
-        `${spell.name} has invalid damage configuration`
-      );
+      return `${spell.name} has invalid damage configuration`;
     }
-
 
     if (
       debuff.stat !==
       "damage_dealt_pct"
     ) {
-
-      return (
-        `${spell.name} must use damage_dealt_pct`
-      );
+      return `${spell.name} must use damage_dealt_pct`;
     }
-
 
     if (
       debuff.value <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid weakening value`
-      );
+      return `${spell.name} has an invalid weakening value`;
     }
-
 
     if (
       debuff.duration <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid weakening duration`
-      );
+      return `${spell.name} has an invalid weakening duration`;
     }
-
 
     return null;
   },
-
 
   async execute({
     playerId,
@@ -143,20 +181,11 @@ SpellHandlerDefinition = {
     player,
     enemy
   }): Promise<SpellHandlerResult> {
-
-    if (
-      !enemy
-    ) {
-
+    if (!enemy) {
       throw new Error(
         "Bramble Strike handler received no enemy"
       );
     }
-
-
-    // =================================================
-    // DAMAGE
-    // =================================================
 
     const scaledDamage =
       calculateScaledSpellAmount(
@@ -166,7 +195,6 @@ SpellHandlerDefinition = {
         ) || 0
       );
 
-
     const damageResult =
       resolveDamageAgainstEnemy(
         player,
@@ -174,12 +202,10 @@ SpellHandlerDefinition = {
         scaledDamage
       );
 
-
     const dodged =
       Boolean(
         damageResult.dodged
       );
-
 
     const damage =
       dodged
@@ -191,7 +217,6 @@ SpellHandlerDefinition = {
             ) || 1
           );
 
-
     const enemyHP =
       Math.max(
         0,
@@ -201,32 +226,23 @@ SpellHandlerDefinition = {
         damage
       );
 
-
     await setSpellEnemyHP(
       enemy,
       enemyHP
     );
-
-
-    // =================================================
-    // DEBUFF
-    // =================================================
 
     const debuff =
       getConfiguredDebuff(
         spell
       );
 
-
     let appliedStatus =
       false;
-
 
     if (
       !dodged &&
       enemyHP > 0
     ) {
-
       await applySpellDebuff(
         enemy,
         {
@@ -255,60 +271,39 @@ SpellHandlerDefinition = {
         }
       );
 
-
       appliedStatus =
         true;
     }
 
-
-    // =================================================
-    // LOG
-    // =================================================
-
     let log:
       string;
 
-
-    if (
-      dodged
-    ) {
-
+    if (dodged) {
       log =
         `🌿 ${spell.name} misses the enemy!`;
 
     } else if (
       damageResult.crit
     ) {
-
       log =
-        `🌿 Critical! ${spell.name} strikes for ` +
-        `${damage} damage!`;
+        `🌿 Critical! ${spell.name} strikes for ${damage} damage!`;
 
     } else {
-
       log =
-        `🌿 ${spell.name} strikes for ` +
-        `${damage} damage!`;
+        `🌿 ${spell.name} strikes for ${damage} damage!`;
     }
-
 
     if (
       appliedStatus
     ) {
-
       log +=
-        ` The enemy deals ${debuff.value}% less damage ` +
-        `for ${debuff.duration}s!`;
+        ` The enemy deals ${debuff.value}% less damage for ${debuff.duration}s!`;
     }
-
 
     return {
       log,
-
       damage,
-
       enemyHP,
-
       appliedStatus,
 
       killedEnemy:
@@ -321,179 +316,345 @@ SpellHandlerDefinition = {
 
       dodged,
 
+      threatMultiplier:
+        TANK_ATTACK_THREAT_MULTIPLIER,
+
       threatGenerated:
-        !dodged
-          ? Math.max(0, rankNumber(spell, "bonusThreat", 0))
-          : 0
+        dodged
+          ? 0
+          : scaledThreatBonus(
+              spell,
+              "bonusThreat",
+              100
+            )
     };
   }
 };
-
 
 // =====================================================
 // IRONBARK
 // =====================================================
 
-export const ironbarkHandler: SpellHandlerDefinition = {
-  requiresEnemy: false,
-
-  validate(spell) {
-    const buff = getConfiguredBuff(spell);
-    if (buff.stat !== "defense") return `${spell.name} must use defense`;
-    if (buff.value <= 0 || buff.duration <= 0) return `${spell.name} has invalid buff configuration`;
-    return null;
-  },
-
-  async execute(context): Promise<SpellHandlerResult> {
-    const { playerId, spell, targetPlayerId } = context;
-    const buff = getConfiguredBuff(spell);
-    const targetId = Number(targetPlayerId ?? playerId);
-    const thornsPercent = Math.max(0, rankNumber(spell, "thornsDamagePercent", 0));
-    const source = `spell:${spell.id}:ironbark`;
-
-    await applyBuff(targetId, "defense", buff.value, buff.duration, source);
-    await applyStatus(targetId, "sentinel_thorns_pct", thornsPercent, 99, buff.duration, source);
-
-    return {
-      log: `🌳 ${spell.name} grants ${buff.value} Defense and reflects ${thornsPercent}% of incoming HP damage for ${buff.duration}s!`,
-      appliedStatus: true,
-      buffedTargetId: targetId
-    };
-  }
-};
-
-
-// =====================================================
-// ROOTSNARE
-// =====================================================
-
-export const rootsnareHandler: SpellHandlerDefinition = {
-  requiresEnemy: true,
-
-  validate(spell) {
-    const debuff = getConfiguredDebuff(spell);
-    if (debuff.stat !== "attack_speed_pct") return `${spell.name} must use attack_speed_pct`;
-    if (debuff.value <= 0 || debuff.duration <= 0) return `${spell.name} has invalid debuff configuration`;
-    return null;
-  },
-
-  async execute({ playerId, spell, enemy }): Promise<SpellHandlerResult> {
-    if (!enemy) throw new Error("Rootsnare handler received no enemy");
-    const debuff = getConfiguredDebuff(spell);
-    const enemyGaugeReduction = Math.max(0, rankNumber(spell, "enemyGaugeReduction", 0));
-
-    await applySpellDebuff(enemy, {
-      sourcePlayerId: playerId,
-      spellId: Number(spell.id),
-      spellName: String(spell.name),
-      stat: debuff.stat,
-      value: debuff.value,
-      durationSeconds: debuff.duration
-    });
-
-    return {
-      log: `🌿 ${spell.name} slows the enemy by ${debuff.value}% for ${debuff.duration}s and removes ${enemyGaugeReduction} action gauge!`,
-      enemyHP: Number(enemy.hp),
-      enemyGaugeReduction,
-      appliedStatus: true
-    };
-  }
-};
-
-
-// =====================================================
-// GUARDIAN GROVE
-// =====================================================
-
-export const guardianGroveHandler: SpellHandlerDefinition = {
-  requiresEnemy: false,
-
-  validate(spell) {
-    const buff = getConfiguredBuff(spell);
-    if (buff.stat !== "damage_reduction") return `${spell.name} must use damage_reduction`;
-    if (buff.value <= 0 || buff.duration <= 0) return `${spell.name} has invalid buff configuration`;
-    return null;
-  },
-
-  async execute(context): Promise<SpellHandlerResult> {
-    const { spell } = context;
-    const buff = getConfiguredBuff(spell);
-    const healingReceived = Math.max(0, rankNumber(spell, "healingReceivedPercent", 0));
-    const targets = livingTargets(context);
-
-    for (const ally of targets) {
-      await applyBuff(ally.playerId, "damage_reduction", buff.value, buff.duration, `spell:${spell.id}:grove`);
-      await applyBuff(ally.playerId, "healing_received_pct", healingReceived, buff.duration, `spell:${spell.id}:grove-healing`);
-    }
-
-    return {
-      log: `🌲 ${spell.name} protects ${targets.length > 1 ? "the party" : "you"}, granting ${buff.value}% damage reduction and ${healingReceived}% increased healing received for ${buff.duration}s!`,
-      appliedStatus: true
-    };
-  }
-};
-
-
-// =====================================================
-// NATURE'S AEGIS
-//
-// target_type = all_allies
-//
-// Applies a separate max-HP based shield to every
-// living allied player.
-//
-// Solo combat falls back to the caster.
-// =====================================================
-
-export const naturesAegisHandler:
+export const ironbarkHandler:
 SpellHandlerDefinition = {
-
   requiresEnemy:
     false,
 
-
   validate(spell) {
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+    if (
+      buff.stat !==
+      "defense"
+    ) {
+      return `${spell.name} must use defense`;
+    }
+
+    if (
+      buff.value <= 0 ||
+      buff.duration <= 0
+    ) {
+      return `${spell.name} has invalid buff configuration`;
+    }
+
+    return null;
+  },
+
+  async execute(
+    context
+  ): Promise<SpellHandlerResult> {
+    const {
+      playerId,
+      spell,
+      targetPlayerId
+    } = context;
 
     const buff =
       getConfiguredBuff(
         spell
       );
 
+    const targetId =
+      Number(
+        targetPlayerId ??
+        playerId
+      );
+
+    const thornsPercent =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "thornsDamagePercent",
+          0
+        )
+      );
+
+    const source =
+      `spell:${spell.id}:ironbark`;
+
+    await applyBuff(
+      targetId,
+      "defense",
+      buff.value,
+      buff.duration,
+      source
+    );
+
+    await applyStatus(
+      targetId,
+      "sentinel_thorns_pct",
+      thornsPercent,
+      99,
+      buff.duration,
+      source
+    );
+
+    return {
+      log:
+        `🌳 ${spell.name} grants ${buff.value} Defense and reflects ${thornsPercent}% of incoming HP damage for ${buff.duration}s!`,
+
+      appliedStatus:
+        true,
+
+      buffedTargetId:
+        targetId
+    };
+  }
+};
+
+// =====================================================
+// ROOTSNARE
+// =====================================================
+
+export const rootsnareHandler:
+SpellHandlerDefinition = {
+  requiresEnemy:
+    true,
+
+  validate(spell) {
+    const debuff =
+      getConfiguredDebuff(
+        spell
+      );
+
+    if (
+      debuff.stat !==
+      "attack_speed_pct"
+    ) {
+      return `${spell.name} must use attack_speed_pct`;
+    }
+
+    if (
+      debuff.value <= 0 ||
+      debuff.duration <= 0
+    ) {
+      return `${spell.name} has invalid debuff configuration`;
+    }
+
+    return null;
+  },
+
+  async execute({
+    playerId,
+    spell,
+    enemy
+  }): Promise<SpellHandlerResult> {
+    if (!enemy) {
+      throw new Error(
+        "Rootsnare handler received no enemy"
+      );
+    }
+
+    const debuff =
+      getConfiguredDebuff(
+        spell
+      );
+
+    const enemyGaugeReduction =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "enemyGaugeReduction",
+          0
+        )
+      );
+
+    await applySpellDebuff(
+      enemy,
+      {
+        sourcePlayerId:
+          playerId,
+
+        spellId:
+          Number(
+            spell.id
+          ),
+
+        spellName:
+          String(
+            spell.name
+          ),
+
+        stat:
+          debuff.stat,
+
+        value:
+          debuff.value,
+
+        durationSeconds:
+          debuff.duration
+      }
+    );
+
+    return {
+      log:
+        `🌿 ${spell.name} slows the enemy by ${debuff.value}% for ${debuff.duration}s and removes ${enemyGaugeReduction} action gauge!`,
+
+      enemyHP:
+        Number(
+          enemy.hp
+        ),
+
+      enemyGaugeReduction,
+
+      appliedStatus:
+        true
+    };
+  }
+};
+
+// =====================================================
+// GUARDIAN GROVE
+// =====================================================
+
+export const guardianGroveHandler:
+SpellHandlerDefinition = {
+  requiresEnemy:
+    false,
+
+  validate(spell) {
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+    if (
+      buff.stat !==
+      "damage_reduction"
+    ) {
+      return `${spell.name} must use damage_reduction`;
+    }
+
+    if (
+      buff.value <= 0 ||
+      buff.duration <= 0
+    ) {
+      return `${spell.name} has invalid buff configuration`;
+    }
+
+    return null;
+  },
+
+  async execute(
+    context
+  ): Promise<SpellHandlerResult> {
+    const {
+      spell
+    } = context;
+
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
+
+    const healingReceived =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "healingReceivedPercent",
+          0
+        )
+      );
+
+    const targets =
+      livingTargets(
+        context
+      );
+
+    for (
+      const ally of
+      targets
+    ) {
+      await applyBuff(
+        ally.playerId,
+        "damage_reduction",
+        buff.value,
+        buff.duration,
+        `spell:${spell.id}:grove`
+      );
+
+      await applyBuff(
+        ally.playerId,
+        "healing_received_pct",
+        healingReceived,
+        buff.duration,
+        `spell:${spell.id}:grove-healing`
+      );
+    }
+
+    return {
+      log:
+        `🌲 ${spell.name} protects ${targets.length > 1 ? "the party" : "you"}, ` +
+        `granting ${buff.value}% damage reduction and ${healingReceived}% increased healing received for ${buff.duration}s!`,
+
+      appliedStatus:
+        true
+    };
+  }
+};
+
+// =====================================================
+// NATURE'S AEGIS
+// =====================================================
+
+export const naturesAegisHandler:
+SpellHandlerDefinition = {
+  requiresEnemy:
+    false,
+
+  validate(spell) {
+    const buff =
+      getConfiguredBuff(
+        spell
+      );
 
     if (
       buff.stat !==
       "shield_maxhp_pct"
     ) {
-
-      return (
-        `${spell.name} must use shield_maxhp_pct`
-      );
+      return `${spell.name} must use shield_maxhp_pct`;
     }
-
 
     if (
       buff.value <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid shield percentage`
-      );
+      return `${spell.name} has an invalid shield percentage`;
     }
-
 
     if (
       buff.duration <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid shield duration`
-      );
+      return `${spell.name} has an invalid shield duration`;
     }
-
 
     return null;
   },
-
 
   async execute({
     playerId,
@@ -502,19 +663,11 @@ SpellHandlerDefinition = {
     maxPlayerHP,
     allies
   }): Promise<SpellHandlerResult> {
-
     const buff =
       getConfiguredBuff(
         spell
       );
 
-
-    /*
-     * Hunt combat supplies allies[].
-     *
-     * Normal combat does not, so create
-     * a single caster fallback.
-     */
     const targets =
       allies &&
       allies.length > 0
@@ -524,37 +677,31 @@ SpellHandlerDefinition = {
                 ally.hp
               ) > 0
           )
-        : [
-            {
-              playerId,
+        : [{
+            playerId,
 
-              maxHp:
-                Math.max(
-                  1,
-                  Number(
-                    maxPlayerHP ??
-                    player?.maxhp ??
-                    1
-                  )
+            maxHp:
+              Math.max(
+                1,
+                Number(
+                  maxPlayerHP ??
+                  player?.maxhp ??
+                  1
                 )
-            }
-          ];
-
+              )
+          }];
 
     if (
       targets.length === 0
     ) {
-
       return {
         log:
-          `🌳 You cast ${spell.name}, but there are ` +
-          `no living allies to shield.`,
+          `🌳 You cast ${spell.name}, but there are no living allies to shield.`,
 
         appliedStatus:
           false
       };
     }
-
 
     const expiresAt =
       new Date(
@@ -563,28 +710,24 @@ SpellHandlerDefinition = {
         1000
       );
 
-
     const source =
       `spell:${spell.id}`;
 
-
     let totalShield =
       0;
-
 
     for (
       const ally of
       targets
     ) {
-
       const maximumHP =
         Math.max(
           1,
           Number(
-            ally.maxHp ?? 1
+            ally.maxHp ??
+            1
           )
         );
-
 
       const shieldAmount =
         Math.max(
@@ -598,7 +741,6 @@ SpellHandlerDefinition = {
           )
         );
 
-
       await db.query(
         `
           INSERT INTO player_shields
@@ -609,25 +751,12 @@ SpellHandlerDefinition = {
             expires_at,
             source
           )
-
           VALUES
-          (
-            ?,
-            ?,
-            ?,
-            ?,
-            ?
-          )
-
+          (?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
-            max_absorb =
-              VALUES(max_absorb),
-
-            remaining_absorb =
-              VALUES(remaining_absorb),
-
-            expires_at =
-              VALUES(expires_at)
+            max_absorb = VALUES(max_absorb),
+            remaining_absorb = VALUES(remaining_absorb),
+            expires_at = VALUES(expires_at)
         `,
         [
           ally.playerId,
@@ -638,16 +767,26 @@ SpellHandlerDefinition = {
         ]
       );
 
-
       totalShield +=
         shieldAmount;
 
       const breakHealPercent =
-        Math.max(0, rankNumber(spell, "shieldBreakHealMaxHpPercent", 0));
+        Math.max(
+          0,
+          rankNumber(
+            spell,
+            "shieldBreakHealMaxHpPercent",
+            0
+          )
+        );
 
-      if (breakHealPercent > 0) {
+      if (
+        breakHealPercent > 0
+      ) {
         await applyStatus(
-          Number(ally.playerId),
+          Number(
+            ally.playerId
+          ),
           "natures_aegis_break_heal_pct",
           breakHealPercent,
           1,
@@ -657,20 +796,11 @@ SpellHandlerDefinition = {
       }
     }
 
-
     return {
       log:
         targets.length > 1
-          ? (
-              `🌳 You cast ${spell.name}, surrounding your company ` +
-              `with natural barriers worth ${buff.value}% of each ` +
-              `ally's maximum HP for ${buff.duration}s!`
-            )
-          : (
-              `🌳 You cast ${spell.name}, gaining a ` +
-              `${totalShield}-point natural barrier for ` +
-              `${buff.duration}s!`
-            ),
+          ? `🌳 You cast ${spell.name}, surrounding your company with natural barriers worth ${buff.value}% of each ally's maximum HP for ${buff.duration}s!`
+          : `🌳 You cast ${spell.name}, gaining a ${totalShield}-point natural barrier for ${buff.duration}s!`,
 
       appliedStatus:
         true
@@ -678,116 +808,76 @@ SpellHandlerDefinition = {
   }
 };
 
-
 // =====================================================
 // ANCIENT PROTECTOR
-//
-// target_type = self
-//
-// Grants:
-// - damage reduction
-// - healing over time
-//
-// This is intentionally self-only.
+// Self tank cooldown + persistent threat generation.
 // =====================================================
 
 export const ancientProtectorHandler:
 SpellHandlerDefinition = {
-
   requiresEnemy:
     false,
 
-
   validate(spell) {
-
     const buff =
       getConfiguredBuff(
         spell
       );
-
 
     const baseTotalHealing =
       Number(
         spell.heal
       ) || 0;
 
-
     const hotDuration =
       Number(
         spell.dot_duration
       ) || 0;
-
 
     const tickInterval =
       Number(
         spell.dot_tick_rate
       ) || 0;
 
-
     if (
       buff.stat !==
       "damage_reduction"
     ) {
-
-      return (
-        `${spell.name} must use damage_reduction`
-      );
+      return `${spell.name} must use damage_reduction`;
     }
-
 
     if (
       buff.value <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid mitigation value`
-      );
+      return `${spell.name} has an invalid mitigation value`;
     }
-
 
     if (
       buff.duration <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid buff duration`
-      );
+      return `${spell.name} has an invalid buff duration`;
     }
-
 
     if (
       baseTotalHealing <= 0
     ) {
-
-      return (
-        `${spell.name} has invalid healing configuration`
-      );
+      return `${spell.name} has invalid healing configuration`;
     }
-
 
     if (
       hotDuration <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid HOT duration`
-      );
+      return `${spell.name} has an invalid HOT duration`;
     }
-
 
     if (
       tickInterval <= 0
     ) {
-
-      return (
-        `${spell.name} has an invalid HOT interval`
-      );
+      return `${spell.name} has an invalid HOT interval`;
     }
-
 
     return null;
   },
-
 
   async execute({
     playerId,
@@ -795,16 +885,10 @@ SpellHandlerDefinition = {
     player,
     allies
   }): Promise<SpellHandlerResult> {
-
     const buff =
       getConfiguredBuff(
         spell
       );
-
-
-    // =================================================
-    // DAMAGE REDUCTION
-    // =================================================
 
     await applyBuff(
       playerId,
@@ -814,11 +898,63 @@ SpellHandlerDefinition = {
       `spell:${spell.id}:protection`
     );
 
-    const threatGenerationPercent = Math.max(0, rankNumber(spell, "threatGenerationPercent", 0));
-    const allyInterceptPercent = Math.max(0, rankNumber(spell, "allyInterceptPercent", 0));
-    const redirectedDamageReductionPercent = Math.max(0, rankNumber(spell, "redirectedDamageReductionPercent", 0));
-    const deathPreventionCharges = Math.max(0, Math.floor(rankNumber(spell, "deathPreventionCharges", 0)));
-    const deathPreventionHealPercent = Math.max(0, rankNumber(spell, "deathPreventionHealMaxHpPercent", 0));
+    const configuredThreatPercent =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "threatGenerationPercent",
+          0
+        )
+      );
+
+    const threatGenerationPercent =
+      Math.max(
+        SENTINEL_THREAT_GENERATION_PERCENT,
+        configuredThreatPercent
+      );
+
+    const allyInterceptPercent =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "allyInterceptPercent",
+          0
+        )
+      );
+
+    const redirectedDamageReductionPercent =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "redirectedDamageReductionPercent",
+          0
+        )
+      );
+
+    const deathPreventionCharges =
+      Math.max(
+        0,
+        Math.floor(
+          rankNumber(
+            spell,
+            "deathPreventionCharges",
+            0
+          )
+        )
+      );
+
+    const deathPreventionHealPercent =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "deathPreventionHealMaxHpPercent",
+          0
+        )
+      );
 
     await applyStatus(
       playerId,
@@ -829,7 +965,9 @@ SpellHandlerDefinition = {
       `spell:${spell.id}:ancient`
     );
 
-    if (deathPreventionCharges > 0) {
+    if (
+      deathPreventionCharges > 0
+    ) {
       await applyStatus(
         playerId,
         "sentinel_death_prevention",
@@ -840,10 +978,28 @@ SpellHandlerDefinition = {
       );
     }
 
-    for (const ally of (allies ?? [])) {
-      if (Number(ally.playerId) === Number(playerId) || Number(ally.hp) <= 0) continue;
+    for (
+      const ally of
+      (allies ?? [])
+    ) {
+      if (
+        Number(
+          ally.playerId
+        ) ===
+          Number(
+            playerId
+          ) ||
+        Number(
+          ally.hp
+        ) <= 0
+      ) {
+        continue;
+      }
+
       await applyStatus(
-        Number(ally.playerId),
+        Number(
+          ally.playerId
+        ),
         "sentinel_ancient_intercept",
         allyInterceptPercent,
         99,
@@ -851,9 +1007,13 @@ SpellHandlerDefinition = {
         `ancient_protector:${playerId}`
       );
 
-      if (redirectedDamageReductionPercent > 0) {
+      if (
+        redirectedDamageReductionPercent > 0
+      ) {
         await applyStatus(
-          Number(ally.playerId),
+          Number(
+            ally.playerId
+          ),
           "sentinel_intercept_damage_reduction_pct",
           redirectedDamageReductionPercent,
           99,
@@ -863,28 +1023,20 @@ SpellHandlerDefinition = {
       }
     }
 
-
-    // =================================================
-    // HOT CONFIGURATION
-    // =================================================
-
     const baseTotalHealing =
       Number(
         spell.heal
       ) || 0;
-
 
     const hotDuration =
       Number(
         spell.dot_duration
       ) || 0;
 
-
     const tickInterval =
       Number(
         spell.dot_tick_rate
       ) || 1;
-
 
     const totalTicks =
       Math.max(
@@ -895,20 +1047,17 @@ SpellHandlerDefinition = {
         )
       );
 
-
     const baseScaledHealing =
       calculateScaledSpellAmount(
         player,
         baseTotalHealing
       );
 
-
     const totalHealing =
       applyHealingReceivedMultiplier(
         player,
         baseScaledHealing
       );
-
 
     const healingPerTick =
       Math.max(
@@ -919,24 +1068,16 @@ SpellHandlerDefinition = {
         )
       );
 
-
     const expectedHealing =
       healingPerTick *
       totalTicks;
 
-
     const source =
       `spell:${spell.id}:hot`;
 
-
-    /*
-     * Refresh Ancient Protector's HOT
-     * rather than stacking duplicate copies.
-     */
     await db.query(
       `
         DELETE FROM player_hots
-
         WHERE player_id = ?
           AND source = ?
       `,
@@ -945,7 +1086,6 @@ SpellHandlerDefinition = {
         source
       ]
     );
-
 
     await db.query(
       `
@@ -959,20 +1099,13 @@ SpellHandlerDefinition = {
           source,
           display_name
         )
-
         VALUES
         (
           ?,
           ?,
           ?,
-          DATE_ADD(
-            NOW(3),
-            INTERVAL ? SECOND
-          ),
-          DATE_ADD(
-            NOW(3),
-            INTERVAL ? SECOND
-          ),
+          DATE_ADD(NOW(3), INTERVAL ? SECOND),
+          DATE_ADD(NOW(3), INTERVAL ? SECOND),
           ?,
           ?
         )
@@ -988,20 +1121,24 @@ SpellHandlerDefinition = {
       ]
     );
 
-
     return {
       log:
-        `🌲 You invoke ${spell.name}, gaining ` +
-        `${buff.value}% damage reduction for ` +
-        `${buff.duration}s, ${threatGenerationPercent}% increased threat, ` +
-        `ally interception, one lethal-blow safeguard, and restoring up to ` +
-        `${expectedHealing} HP over ${hotDuration}s!`,
+        `🌲 You invoke ${spell.name}, gaining ${buff.value}% damage reduction for ` +
+        `${buff.duration}s, ${threatGenerationPercent}% increased threat, ally interception, ` +
+        `one lethal-blow safeguard, and restoring up to ${expectedHealing} HP over ${hotDuration}s!`,
 
       appliedStatus:
         true,
 
+      /*
+       * Ancient Protector now gives an immediate burst
+       * of threat as well as its persistent multiplier.
+       */
       threatGenerated:
-        threatGenerationPercent
+        Math.max(
+          100,
+          threatGenerationPercent
+        )
     };
   }
 };

@@ -1592,35 +1592,237 @@ export async function abandonHunt(
   }
 
 
-  const active =
-    await getActivePartyHunt(
-      playerId
+  const connection =
+    await db.getConnection();
+
+
+  try {
+
+    await connection.beginTransaction();
+
+
+    /* =========================================
+       FIND + LOCK ACTIVE HUNT
+    ========================================= */
+
+    const [huntRows]: any =
+      await connection.query(
+        `
+          SELECT
+            id
+
+          FROM party_hunts
+
+          WHERE party_id = ?
+            AND status IN (
+              'tracking',
+              'revealed',
+              'engaged'
+            )
+
+          ORDER BY
+            accepted_at DESC
+
+          LIMIT 1
+
+          FOR UPDATE
+        `,
+        [
+          party.id
+        ]
+      );
+
+
+    if (!huntRows.length) {
+      throw new Error(
+        "Your party does not have an active Hunt."
+      );
+    }
+
+
+    const partyHuntId =
+      Number(
+        huntRows[0].id
+      );
+
+
+    /* =========================================
+       REMOVE ENCOUNTER PLAYER ROWS
+    ========================================= */
+
+    await connection.query(
+      `
+        DELETE hep
+
+        FROM hunt_encounter_players hep
+
+        JOIN hunt_encounters he
+          ON he.id =
+             hep.hunt_encounter_id
+
+        WHERE he.party_hunt_id = ?
+      `,
+      [
+        partyHuntId
+      ]
     );
 
 
-  if (!active) {
-    throw new Error(
-      "Your party does not have an active Hunt."
+    /* =========================================
+       REMOVE HUNT ENCOUNTERS
+    ========================================= */
+
+    await connection.query(
+      `
+        DELETE FROM hunt_encounters
+
+        WHERE party_hunt_id = ?
+      `,
+      [
+        partyHuntId
+      ]
     );
+
+
+    /* =========================================
+       REMOVE READY CHECK PLAYERS
+    ========================================= */
+
+    await connection.query(
+      `
+        DELETE hrcp
+
+        FROM hunt_ready_check_players hrcp
+
+        JOIN hunt_ready_checks hrc
+          ON hrc.id =
+             hrcp.ready_check_id
+
+        WHERE hrc.party_hunt_id = ?
+      `,
+      [
+        partyHuntId
+      ]
+    );
+
+
+    /* =========================================
+       REMOVE READY CHECKS
+    ========================================= */
+
+    await connection.query(
+      `
+        DELETE FROM hunt_ready_checks
+
+        WHERE party_hunt_id = ?
+      `,
+      [
+        partyHuntId
+      ]
+    );
+
+
+    /* =========================================
+       REMOVE SPAWNED CLUES
+    ========================================= */
+
+    await connection.query(
+      `
+        DELETE FROM party_hunt_clues
+
+        WHERE party_hunt_id = ?
+      `,
+      [
+        partyHuntId
+      ]
+    );
+
+
+    /* =========================================
+       REMOVE OBJECTIVE PROGRESS
+    ========================================= */
+
+    await connection.query(
+      `
+        DELETE FROM party_hunt_objectives
+
+        WHERE party_hunt_id = ?
+      `,
+      [
+        partyHuntId
+      ]
+    );
+
+
+    /* =========================================
+       REMOVE FROZEN PARTICIPANT ROSTER
+    ========================================= */
+
+    await connection.query(
+      `
+        DELETE FROM hunt_participants
+
+        WHERE party_hunt_id = ?
+      `,
+      [
+        partyHuntId
+      ]
+    );
+
+
+    /* =========================================
+       REMOVE PARTY HUNT
+    ========================================= */
+
+    const [deleteResult]: any =
+      await connection.query(
+        `
+          DELETE FROM party_hunts
+
+          WHERE id = ?
+            AND party_id = ?
+        `,
+        [
+          partyHuntId,
+          party.id
+        ]
+      );
+
+
+    if (
+      Number(
+        deleteResult.affectedRows
+      ) !== 1
+    ) {
+      throw new Error(
+        "Unable to remove Hunt."
+      );
+    }
+
+
+    await connection.commit();
+
+
+    return {
+      partyHuntId,
+      partyId:
+        party.id
+    };
+
+
+  } catch (err) {
+
+    await connection.rollback();
+
+    throw err;
+
+
+  } finally {
+
+    connection.release();
+
   }
-
-
-  await query(
-    `
-      UPDATE party_hunts
-
-      SET status = 'abandoned'
-
-      WHERE id = ?
-        AND party_id = ?
-    `,
-    [
-      active.partyHuntId,
-      party.id
-    ]
-  );
 }
-
 export async function spawnHuntClues(
   partyHuntId: number,
   huntId: number,

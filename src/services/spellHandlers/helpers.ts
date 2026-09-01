@@ -1,6 +1,5 @@
 // src/services/spellHandlers/helpers.ts
 
-import { ARCHETYPE_SCALING } from "../archetypeScaling";
 import { resolveSpellDamage } from "../combatEngine";
 
 import type {
@@ -9,68 +8,33 @@ import type {
 
 
 // =====================================================
-// PLAYER SCALING
+// PLAYER SPELL SCALING
+//
+// All Guildforge spells scale from Intellect.
+//
+// Attack:
+//   Weapon / basic attack damage
+//
+// Agility:
+//   ATB speed, dodge, crit contribution
+//
+// Intellect:
+//   Spell damage and spell healing
 // =====================================================
 
 export function getPlayerScalingStat(
   player: any
 ): number {
 
-  const archetype =
-    String(
-      player.archetype ||
-      ""
-    );
-
-  if (
-    !(
-      archetype in
-      ARCHETYPE_SCALING
-    )
-  ) {
-
-    console.warn(
-      `Unknown player archetype "${archetype}"`
-    );
-
-    return 0;
-  }
-
-  const scalingStat =
-    ARCHETYPE_SCALING[
-      archetype as keyof typeof ARCHETYPE_SCALING
-    ];
-
-  switch (
-    scalingStat
-  ) {
-
-    case "attack":
-      return (
-        Number(
-          player.attack
-        ) || 0
-      );
-
-    case "agility":
-      return (
-        Number(
-          player.agility
-        ) || 0
-      );
-
-    case "intellect":
-      return (
-        Number(
-          player.intellect
-        ) || 0
-      );
-
-    default:
-      return 0;
-  }
+  return Math.max(
+    0,
+    Number(
+      player?.intellect ??
+      player?.stats?.intellect ??
+      0
+    ) || 0
+  );
 }
-
 
 // =====================================================
 // ENEMY HP

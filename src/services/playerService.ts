@@ -2,7 +2,11 @@
 import { db } from "../db";
 import { computePlayerStats, type ItemMods, type DerivedStats } from "./statEngine";
 import { getActiveBuffs } from "./buffService";
-import type { Archetype } from "./archetypeScaling";
+export type Archetype =
+  | "Arcanist"
+  | "Divine"
+  | "Brute"
+  | "Skirmisher";
 
 /**
  * FINAL, AUTHORITATIVE PLAYER SHAPE

@@ -31,14 +31,20 @@ export async function getPlayerCombatThreatMultiplier(
      WHERE player_id = ?
        AND effect_key IN (
          'sentinel_threat_generation_pct',
-         'knight_threat_generation_pct'
+         'knight_threat_generation_pct',
+         'paladin_threat_generation_pct',
+         'voidwalker_threat_generation_pct'
        )
        AND expires_at > NOW(3)
        AND value > 0`,
     [playerId]
   );
 
-  const increasedPercent = Math.max(0, Number(effect?.total_value) || 0);
+  const increasedPercent = Math.max(
+    0,
+    Number(effect?.total_value) || 0
+  );
+
   return 1 + increasedPercent / 100;
 }
 
@@ -46,7 +52,10 @@ export function createCombatThreatTable(
   playerIds: Iterable<number>
 ): CombatThreatTable {
   return Object.fromEntries(
-    Array.from(playerIds, playerId => [Number(playerId), 0])
+    Array.from(playerIds, playerId => [
+      Number(playerId),
+      0
+    ])
   );
 }
 
@@ -60,12 +69,22 @@ export function calculateCombatThreat({
   const normalThreat =
     Math.max(0, Number(damage) || 0) +
     Math.max(0, Number(effectiveHealing) || 0) *
-      Math.max(0, Number(healingThreatMultiplier) || 0);
+      Math.max(
+        0,
+        Number(healingThreatMultiplier) || 0
+      );
 
   return Math.max(
     0,
-    normalThreat * Math.max(0, Number(threatMultiplier) || 0) +
-      Math.max(0, Number(bonusThreat) || 0)
+    normalThreat *
+      Math.max(
+        0,
+        Number(threatMultiplier) || 0
+      ) +
+      Math.max(
+        0,
+        Number(bonusThreat) || 0
+      )
   );
 }
 
@@ -75,7 +94,11 @@ export function getCombatThreat(
 ): number {
   return Math.max(
     0,
-    Number(state.threat[Number(playerId)]) || 0
+    Number(
+      state.threat[
+        Number(playerId)
+      ]
+    ) || 0
   );
 }
 
@@ -85,36 +108,57 @@ export function getHighestThreatTarget<
   state: CombatThreatState,
   participants: Iterable<T>
 ): T | null {
-  const livingParticipants = Array.from(participants).filter(
-    participant => participant.hp > 0
-  );
+  const livingParticipants =
+    Array.from(participants).filter(
+      participant =>
+        participant.hp > 0
+    );
 
-  if (livingParticipants.length === 0) {
+  if (
+    livingParticipants.length === 0
+  ) {
     return null;
   }
 
-  const highestThreat = Math.max(
-    ...livingParticipants.map(participant =>
-      getCombatThreat(state, participant.playerId)
-    )
-  );
+  const highestThreat =
+    Math.max(
+      ...livingParticipants.map(
+        participant =>
+          getCombatThreat(
+            state,
+            participant.playerId
+          )
+      )
+    );
 
-  const eligibleTargets = livingParticipants.filter(
-    participant =>
-      getCombatThreat(state, participant.playerId) === highestThreat
-  );
+  const eligibleTargets =
+    livingParticipants.filter(
+      participant =>
+        getCombatThreat(
+          state,
+          participant.playerId
+        ) === highestThreat
+    );
 
-  const currentTarget = eligibleTargets.find(
-    participant => participant.playerId === state.targetPlayerId
-  );
+  const currentTarget =
+    eligibleTargets.find(
+      participant =>
+        participant.playerId ===
+        state.targetPlayerId
+    );
 
   if (currentTarget) {
     return currentTarget;
   }
 
-  return eligibleTargets.sort(
-    (left, right) => left.playerId - right.playerId
-  )[0] ?? null;
+  return (
+    eligibleTargets.sort(
+      (left, right) =>
+        left.playerId -
+        right.playerId
+    )[0] ??
+    null
+  );
 }
 
 export function refreshCombatThreatTarget<
@@ -123,8 +167,16 @@ export function refreshCombatThreatTarget<
   state: CombatThreatState,
   participants: Iterable<T>
 ): T | null {
-  const target = getHighestThreatTarget(state, participants);
-  state.targetPlayerId = target?.playerId ?? null;
+  const target =
+    getHighestThreatTarget(
+      state,
+      participants
+    );
+
+  state.targetPlayerId =
+    target?.playerId ??
+    null;
+
   return target;
 }
 
@@ -136,21 +188,44 @@ export function addCombatThreat<
   playerId: number,
   amount: number
 ): number {
-  const normalizedPlayerId = Number(playerId);
-  const participantList = Array.from(participants);
-  const participantExists = participantList.some(
-    participant => participant.playerId === normalizedPlayerId
-  );
+  const normalizedPlayerId =
+    Number(playerId);
+
+  const participantList =
+    Array.from(participants);
+
+  const participantExists =
+    participantList.some(
+      participant =>
+        participant.playerId ===
+        normalizedPlayerId
+    );
 
   if (!participantExists) {
     return 0;
   }
 
-  const normalizedAmount = Math.max(0, Number(amount) || 0);
+  const normalizedAmount =
+    Math.max(
+      0,
+      Number(amount) || 0
+    );
 
-  state.threat[normalizedPlayerId] =
-    getCombatThreat(state, normalizedPlayerId) + normalizedAmount;
+  state.threat[
+    normalizedPlayerId
+  ] =
+    getCombatThreat(
+      state,
+      normalizedPlayerId
+    ) +
+    normalizedAmount;
 
-  refreshCombatThreatTarget(state, participantList);
-  return state.threat[normalizedPlayerId];
+  refreshCombatThreatTarget(
+    state,
+    participantList
+  );
+
+  return state.threat[
+    normalizedPlayerId
+  ];
 }

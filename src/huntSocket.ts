@@ -246,6 +246,7 @@ function startCombatLoop(
             );
           }
         } catch (err) {
+
           console.error(
             "Hunt combat loop failed:",
             {
@@ -253,8 +254,16 @@ function startCombatLoop(
               err,
             },
           );
-        }
-      },
+
+
+          /*
+          * Do not allow an orphaned combat loop
+          * to tick forever.
+          */
+          stopCombatLoop(
+            encounterId
+          );
+        }      },
       COMBAT_TICK_MS,
     );
 

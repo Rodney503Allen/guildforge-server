@@ -191,8 +191,51 @@ export function interruptEnemyMechanic(
 export function buildEnemyMechanicSnapshot(
   runtime: EnemyMechanicRuntime,
   now: number = Date.now(),
+  encounterStartedAt: number = now,
 ) {
   const cast = runtime.activeCast;
+
+  const mechanics = runtime.definitions.map((definition) => {
+    const firstAvailableAt =
+      encounterStartedAt + Math.max(0, Number(definition.availableAfterMs) || 0);
+
+    const cooldownUntil = Math.max(
+      firstAvailableAt,
+      Number(runtime.cooldowns[definition.mechanicKey] ?? 0),
+    );
+
+    const uses = Math.max(
+      0,
+      Number(runtime.uses[definition.mechanicKey] ?? 0) || 0,
+    );
+
+    const exhausted =
+      definition.maximumUses != null &&
+      uses >= definition.maximumUses;
+
+    const casting =
+      cast?.mechanicKey === definition.mechanicKey;
+
+    const remainingMs =
+      exhausted || casting
+        ? 0
+        : Math.max(0, cooldownUntil - now);
+
+    return {
+      mechanicKey: definition.mechanicKey,
+      name: definition.name,
+      description: definition.description,
+      interruptible: definition.interruptible,
+      cooldownMs: Math.max(0, Number(definition.cooldownMs) || 0),
+      remainingMs,
+      ready: !exhausted && !casting && remainingMs <= 0,
+      casting,
+      exhausted,
+      uses,
+      maximumUses: definition.maximumUses,
+    };
+  });
+
   return {
     activeCast: cast
       ? {
@@ -206,5 +249,6 @@ export function buildEnemyMechanicSnapshot(
         }
       : null,
     sequence: runtime.sequence,
+    mechanics,
   };
 }

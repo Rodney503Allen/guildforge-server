@@ -12,24 +12,14 @@ let huntPotionCooldownTimer = null;
 
 let huntPendingSpellTarget = null;
 
-let huntCombatState =
-  null;
-
+let huntCombatState = null;
 
 // =======================================
 // SMOOTH HUNT COMBAT TIMERS
 // =======================================
-//
-// Hunt combat remains server-authoritative.
-// Socket snapshots provide timing anchors;
-// requestAnimationFrame fills the bars
-// smoothly between those snapshots.
 
-let huntCombatTimingFrame =
-  null;
-
-let huntCombatTimingRunning =
-  false;
+let huntCombatTimingFrame = null;
+let huntCombatTimingRunning = false;
 
 const huntCombatTiming = {
   enemy: null,
@@ -39,16 +29,27 @@ const huntCombatTiming = {
 let huntEnemyCastAnchor = null;
 let lastHuntEnemyCastAlertToken = null;
 
+let huntMechanicCooldownAnchors =
+  new Map();
+
+let huntMechanicRenderSignature =
+  "";
+
+let huntPartyRenderSignature =
+  "";
+
 function playHuntEnemyAlertSound() {
   const alertSound = new Audio(
     "/sounds/ui/enemy_alert.ogg"
   );
+
   alertSound.volume = 0.75;
   alertSound.play().catch(() => {});
 }
 
 function hideHuntEnemyCastWarning() {
   huntEnemyCastAnchor = null;
+
   document
     .getElementById("huntEnemyCastWarning")
     ?.classList.add("hidden");
@@ -57,34 +58,45 @@ function hideHuntEnemyCastWarning() {
 function syncHuntEnemyCastWarning(encounter) {
   const mechanicState =
     encounter?.enemy?.mechanic;
-  const cast = mechanicState?.activeCast;
+
+  const cast =
+    mechanicState?.activeCast;
 
   if (!cast) {
     hideHuntEnemyCastWarning();
     return;
   }
 
-  const warning = document.getElementById(
-    "huntEnemyCastWarning"
-  );
+  const warning =
+    document.getElementById(
+      "huntEnemyCastWarning"
+    );
+
   if (!warning) return;
 
   const sequence =
-    Number(mechanicState.sequence ?? 0) || 0;
+    Number(
+      mechanicState.sequence ?? 0
+    ) || 0;
+
   const alertToken =
     `${encounter.encounterId}:${sequence}:` +
     `${cast.mechanicKey || cast.name}`;
-  const totalMs = Math.max(
-    1,
-    Number(cast.totalMs) || 1
-  );
-  const remainingMs = Math.max(
-    0,
-    Math.min(
-      totalMs,
-      Number(cast.remainingMs) || 0
-    )
-  );
+
+  const totalMs =
+    Math.max(
+      1,
+      Number(cast.totalMs) || 1
+    );
+
+  const remainingMs =
+    Math.max(
+      0,
+      Math.min(
+        totalMs,
+        Number(cast.remainingMs) || 0
+      )
+    );
 
   huntEnemyCastAnchor = {
     token: alertToken,
@@ -98,16 +110,21 @@ function syncHuntEnemyCastWarning(encounter) {
     cast.name || "Incoming Attack"
   );
 
-  const targetIds = Array.isArray(
-    cast.targetPlayerIds
-  )
-    ? cast.targetPlayerIds.map(Number)
-    : [];
-  const targetNames = (encounter.players || [])
-    .filter(player =>
-      targetIds.includes(Number(player.playerId))
+  const targetIds =
+    Array.isArray(
+      cast.targetPlayerIds
     )
-    .map(player => player.name);
+      ? cast.targetPlayerIds.map(Number)
+      : [];
+
+  const targetNames =
+    (encounter.players || [])
+      .filter(player =>
+        targetIds.includes(
+          Number(player.playerId)
+        )
+      )
+      .map(player => player.name);
 
   setHuntText(
     "huntEnemyCastTargets",
@@ -118,13 +135,17 @@ function syncHuntEnemyCastWarning(encounter) {
         : "Prepare to react"
   );
 
-  const interruptLabel = document.getElementById(
-    "huntEnemyCastInterrupt"
-  );
+  const interruptLabel =
+    document.getElementById(
+      "huntEnemyCastInterrupt"
+    );
+
   if (interruptLabel) {
-    interruptLabel.textContent = cast.interruptible
-      ? "Interruptible"
-      : "Cannot Be Interrupted";
+    interruptLabel.textContent =
+      cast.interruptible
+        ? "Interruptible"
+        : "Cannot Be Interrupted";
+
     interruptLabel.classList.toggle(
       "is-interruptible",
       Boolean(cast.interruptible)
@@ -133,11 +154,23 @@ function syncHuntEnemyCastWarning(encounter) {
 
   warning.classList.remove("hidden");
 
-  if (lastHuntEnemyCastAlertToken !== alertToken) {
-    lastHuntEnemyCastAlertToken = alertToken;
-    warning.classList.remove("is-alerting");
+  if (
+    lastHuntEnemyCastAlertToken !==
+    alertToken
+  ) {
+    lastHuntEnemyCastAlertToken =
+      alertToken;
+
+    warning.classList.remove(
+      "is-alerting"
+    );
+
     void warning.offsetWidth;
-    warning.classList.add("is-alerting");
+
+    warning.classList.add(
+      "is-alerting"
+    );
+
     playHuntEnemyAlertSound();
   }
 }
@@ -145,21 +178,33 @@ function syncHuntEnemyCastWarning(encounter) {
 function renderSmoothHuntEnemyCast(now) {
   if (!huntEnemyCastAnchor) return;
 
-  const elapsedMs = Math.max(
-    0,
-    now - huntEnemyCastAnchor.receivedAt
-  );
-  const remainingMs = Math.max(
-    0,
-    huntEnemyCastAnchor.remainingMs - elapsedMs
-  );
+  const elapsedMs =
+    Math.max(
+      0,
+      now -
+        huntEnemyCastAnchor.receivedAt
+    );
+
+  const remainingMs =
+    Math.max(
+      0,
+      huntEnemyCastAnchor.remainingMs -
+        elapsedMs
+    );
+
   const completedPercent =
-    (1 - remainingMs / huntEnemyCastAnchor.totalMs) * 100;
+    (
+      1 -
+      remainingMs /
+        huntEnemyCastAnchor.totalMs
+    ) *
+    100;
 
   setHuntBarPercent(
     "huntEnemyCastBar",
     completedPercent
   );
+
   setHuntText(
     "huntEnemyCastTime",
     remainingMs > 0
@@ -167,6 +212,1196 @@ function renderSmoothHuntEnemyCast(now) {
       : "IMPACT"
   );
 }
+
+// =======================================
+// ENEMY MECHANIC COOLDOWNS
+// =======================================
+
+function resolveHuntMechanicEmoji(
+  mechanic
+) {
+  const haystack =
+    `${mechanic?.mechanicKey || ""} ${mechanic?.name || ""}`
+      .toLowerCase();
+
+  const rules = [
+    {
+      terms: [
+        "tide",
+        "wave",
+        "water",
+        "flood",
+        "drown",
+        "surge"
+      ],
+      emoji: "🌊"
+    },
+    {
+      terms: [
+        "grasp",
+        "snare",
+        "bind",
+        "root",
+        "chain"
+      ],
+      emoji: "⛓️"
+    },
+    {
+      terms: [
+        "slam",
+        "crush",
+        "smash",
+        "quake",
+        "stomp"
+      ],
+      emoji: "💥"
+    },
+    {
+      terms: [
+        "storm",
+        "lightning",
+        "thunder",
+        "shock"
+      ],
+      emoji: "⚡"
+    },
+    {
+      terms: [
+        "fire",
+        "flame",
+        "burn",
+        "inferno"
+      ],
+      emoji: "🔥"
+    },
+    {
+      terms: [
+        "frost",
+        "ice",
+        "freeze",
+        "chill"
+      ],
+      emoji: "❄️"
+    },
+    {
+      terms: [
+        "poison",
+        "venom",
+        "toxin",
+        "blight"
+      ],
+      emoji: "☠️"
+    },
+    {
+      terms: [
+        "heal",
+        "recover",
+        "renew",
+        "restore",
+        "regenerate"
+      ],
+      emoji: "💚"
+    },
+    {
+      terms: [
+        "shield",
+        "guard",
+        "barrier",
+        "armor",
+        "defense"
+      ],
+      emoji: "🛡️"
+    },
+    {
+      terms: [
+        "rage",
+        "frenzy",
+        "enrage",
+        "berserk"
+      ],
+      emoji: "😡"
+    },
+    {
+      terms: [
+        "fear",
+        "terror",
+        "doom",
+        "death",
+        "execute"
+      ],
+      emoji: "💀"
+    },
+    {
+      terms: [
+        "void",
+        "shadow",
+        "dark",
+        "abyss"
+      ],
+      emoji: "🌑"
+    },
+    {
+      terms: [
+        "wind",
+        "gust",
+        "air"
+      ],
+      emoji: "💨"
+    }
+  ];
+
+  for (
+    const rule of
+    rules
+  ) {
+    if (
+      rule.terms.some(
+        term =>
+          haystack.includes(
+            term
+          )
+      )
+    ) {
+      return rule.emoji;
+    }
+  }
+
+  return "⚠️";
+}
+
+function formatHuntSeconds(
+  ms
+) {
+  const seconds =
+    Math.max(
+      0,
+      Number(ms) || 0
+    ) /
+    1000;
+
+  if (
+    seconds >= 10
+  ) {
+    return `${Math.ceil(seconds)}s`;
+  }
+
+  return `${seconds.toFixed(1)}s`;
+}
+
+function syncHuntMechanicCooldowns(
+  encounter
+) {
+  const mechanicState =
+    encounter?.enemy?.mechanic;
+
+  const mechanics =
+    Array.isArray(
+      mechanicState?.mechanics
+    )
+      ? mechanicState.mechanics
+      : [];
+
+  const list =
+    document.getElementById(
+      "huntMechanicList"
+    );
+
+  if (!list) {
+    return;
+  }
+
+  if (
+    mechanics.length === 0
+  ) {
+    huntMechanicCooldownAnchors.clear();
+
+    if (
+      huntMechanicRenderSignature !==
+      "empty"
+    ) {
+      huntMechanicRenderSignature =
+        "empty";
+
+      list.innerHTML = `
+        <div class="hunt-icon-strip__empty">
+          No special abilities detected
+        </div>
+      `;
+    }
+
+    return;
+  }
+
+  const structureSignature =
+    JSON.stringify(
+      mechanics.map(
+        mechanic => ({
+          key:
+            String(
+              mechanic.mechanicKey ||
+              ""
+            ),
+
+          name:
+            String(
+              mechanic.name ||
+              ""
+            ),
+
+          description:
+            String(
+              mechanic.description ||
+              ""
+            ),
+
+          interruptible:
+            Boolean(
+              mechanic.interruptible
+            ),
+
+          maximumUses:
+            mechanic.maximumUses ??
+            null
+        })
+      )
+    );
+
+  const mustRebuild =
+    structureSignature !==
+    huntMechanicRenderSignature;
+
+  if (
+    mustRebuild
+  ) {
+    huntMechanicRenderSignature =
+      structureSignature;
+
+    list.innerHTML =
+      mechanics
+        .map(
+          (
+            mechanic,
+            index
+          ) => {
+            const timerId =
+              `huntMechanicTimer-${index}`;
+
+            const iconId =
+              `huntMechanicIcon-${index}`;
+
+            const name =
+              escapeHuntHtml(
+                mechanic.name ||
+                "Unknown Ability"
+              );
+
+            const description =
+              escapeHuntHtml(
+                mechanic.description ||
+                "No description available."
+              );
+
+            const emoji =
+              resolveHuntMechanicEmoji(
+                mechanic
+              );
+
+            const interruptText =
+              mechanic.interruptible
+                ? "Interruptible"
+                : "Cannot be interrupted";
+
+            const maxUses =
+              mechanic.maximumUses == null
+                ? null
+                : Math.max(
+                    0,
+                    Number(
+                      mechanic.maximumUses
+                    ) || 0
+                  );
+
+            const usesText =
+              maxUses == null
+                ? ""
+                : `
+                  <div class="hunt-hover-tooltip__row">
+                    <span>Uses</span>
+                    <strong
+                      id="${timerId}-uses"
+                    >
+                      0/${maxUses}
+                    </strong>
+                  </div>
+                `;
+
+            return `
+              <div
+                id="${iconId}"
+                class="hunt-status-icon hunt-status-icon--mechanic"
+                tabindex="0"
+                aria-label="${name}"
+                onmouseenter="positionHuntStatusTooltip(this)"
+                onfocus="positionHuntStatusTooltip(this)"
+              >
+                <span class="hunt-status-icon__emoji">
+                  ${emoji}
+                </span>
+
+                <span
+                  id="${timerId}"
+                  class="hunt-status-icon__badge"
+                >
+                </span>
+
+                <div
+                  class="hunt-hover-tooltip hunt-hover-tooltip--mechanic"
+                  role="tooltip"
+                >
+                  <div class="hunt-hover-tooltip__title">
+                    <span>${emoji}</span>
+                    <strong>${name}</strong>
+                  </div>
+
+                  <div class="hunt-hover-tooltip__description">
+                    ${description}
+                  </div>
+
+                  <div class="hunt-hover-tooltip__rows">
+                    <div class="hunt-hover-tooltip__row">
+                      <span>Status</span>
+                      <strong
+                        id="${timerId}-tooltip"
+                      >
+                        Checking...
+                      </strong>
+                    </div>
+
+                    <div class="hunt-hover-tooltip__row">
+                      <span>Interrupt</span>
+                      <strong>
+                        ${interruptText}
+                      </strong>
+                    </div>
+
+                    ${usesText}
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+        )
+        .join("");
+  }
+
+  const activeKeys =
+    new Set();
+
+  mechanics.forEach(
+    (
+      mechanic,
+      index
+    ) => {
+      const key =
+        String(
+          mechanic.mechanicKey ||
+          `mechanic-${index}`
+        );
+
+      activeKeys.add(
+        key
+      );
+
+      const previous =
+        huntMechanicCooldownAnchors.get(
+          key
+        );
+
+      const serverRemainingMs =
+        Math.max(
+          0,
+          Number(
+            mechanic.remainingMs
+          ) || 0
+        );
+
+      let remainingMs =
+        serverRemainingMs;
+
+      if (
+        previous &&
+        !mechanic.ready &&
+        !mechanic.casting &&
+        !mechanic.exhausted
+      ) {
+        const elapsed =
+          Math.max(
+            0,
+            performance.now() -
+            previous.receivedAt
+          );
+
+        const visualRemaining =
+          Math.max(
+            0,
+            previous.remainingMs -
+            elapsed
+          );
+
+        /*
+         * Do not let periodic snapshots visibly
+         * increase an already-running cooldown.
+         * The server still remains authoritative
+         * for real state changes.
+         */
+        if (
+          serverRemainingMs > 0 &&
+          Math.abs(
+            serverRemainingMs -
+            visualRemaining
+          ) < 1200
+        ) {
+          remainingMs =
+            Math.min(
+              serverRemainingMs,
+              visualRemaining
+            );
+        }
+      }
+
+      huntMechanicCooldownAnchors.set(
+        key,
+        {
+          elementId:
+            `huntMechanicTimer-${index}`,
+
+          iconId:
+            `huntMechanicIcon-${index}`,
+
+          receivedAt:
+            performance.now(),
+
+          remainingMs,
+
+          ready:
+            Boolean(
+              mechanic.ready
+            ),
+
+          casting:
+            Boolean(
+              mechanic.casting
+            ),
+
+          exhausted:
+            Boolean(
+              mechanic.exhausted
+            )
+        }
+      );
+
+      const usesElement =
+        document.getElementById(
+          `huntMechanicTimer-${index}-uses`
+        );
+
+      if (
+        usesElement &&
+        mechanic.maximumUses != null
+      ) {
+        usesElement.textContent =
+          `${Math.max(
+            0,
+            Number(
+              mechanic.uses
+            ) || 0
+          )}/${Math.max(
+            0,
+            Number(
+              mechanic.maximumUses
+            ) || 0
+          )}`;
+      }
+    }
+  );
+
+  for (
+    const key of
+    huntMechanicCooldownAnchors.keys()
+  ) {
+    if (
+      !activeKeys.has(
+        key
+      )
+    ) {
+      huntMechanicCooldownAnchors.delete(
+        key
+      );
+    }
+  }
+
+  renderSmoothHuntMechanicCooldowns(
+    performance.now()
+  );
+}
+
+function renderSmoothHuntMechanicCooldowns(
+  now
+) {
+  for (
+    const anchor of
+    huntMechanicCooldownAnchors.values()
+  ) {
+    const timer =
+      document.getElementById(
+        anchor.elementId
+      );
+
+    const tooltipStatus =
+      document.getElementById(
+        `${anchor.elementId}-tooltip`
+      );
+
+    const icon =
+      document.getElementById(
+        anchor.iconId
+      );
+
+    if (
+      !timer ||
+      !icon
+    ) {
+      continue;
+    }
+
+    icon.classList.remove(
+      "is-ready",
+      "is-casting",
+      "is-exhausted",
+      "is-cooldown"
+    );
+
+    if (
+      anchor.exhausted
+    ) {
+      timer.textContent =
+        "✓";
+
+      if (tooltipStatus) {
+        tooltipStatus.textContent =
+          "Used";
+      }
+
+      icon.classList.add(
+        "is-exhausted"
+      );
+
+      continue;
+    }
+
+    if (
+      anchor.casting
+    ) {
+      timer.textContent =
+        "!";
+
+      if (tooltipStatus) {
+        tooltipStatus.textContent =
+          "Casting now";
+      }
+
+      icon.classList.add(
+        "is-casting"
+      );
+
+      continue;
+    }
+
+    if (
+      anchor.ready
+    ) {
+      timer.textContent =
+        "✓";
+
+      if (tooltipStatus) {
+        tooltipStatus.textContent =
+          "Ready";
+      }
+
+      icon.classList.add(
+        "is-ready"
+      );
+
+      continue;
+    }
+
+    const elapsedMs =
+      Math.max(
+        0,
+        now -
+          anchor.receivedAt
+      );
+
+    const remainingMs =
+      Math.max(
+        0,
+        anchor.remainingMs -
+          elapsedMs
+      );
+
+    if (
+      remainingMs <= 0
+    ) {
+      timer.textContent =
+        "✓";
+
+      if (tooltipStatus) {
+        tooltipStatus.textContent =
+          "Ready";
+      }
+
+      icon.classList.add(
+        "is-ready"
+      );
+
+      continue;
+    }
+
+    timer.textContent =
+      String(
+        Math.max(
+          1,
+          Math.ceil(
+            remainingMs /
+            1000
+          )
+        )
+      );
+
+    if (tooltipStatus) {
+      tooltipStatus.textContent =
+        `${formatHuntSeconds(
+          remainingMs
+        )} remaining`;
+    }
+
+    icon.classList.add(
+      "is-cooldown"
+    );
+  }
+}
+
+// =======================================
+// HUNT PLAYER BUFFS
+// =======================================
+
+const HUNT_BUFF_EMOJIS = {
+  attack: "⚔️",
+  defense: "🛡️",
+  agility: "💨",
+  vitality: "❤️",
+  intellect: "🔮",
+  crit: "🎯",
+  crit_chance: "🎯",
+  dodge: "🪽",
+  dodge_chance: "🪽",
+  attack_speed_pct: "⏱️",
+  damage_dealt_pct: "🔥",
+  damage_taken_pct: "🛡️",
+  spell_damage_taken_pct: "✨",
+  healing_received_pct: "🌿",
+  healing_dealt_pct: "💚",
+  maxhp: "❤️",
+  max_hp: "❤️",
+  maxsp: "💙",
+  max_sp: "💙",
+  mana: "💙",
+  spell_power: "🔮",
+  spellpower: "🔮"
+};
+
+function normalizeHuntBuffStat(
+  stat
+) {
+  return String(
+    stat ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function resolveHuntBuffEmoji(
+  buff
+) {
+  const stat =
+    normalizeHuntBuffStat(
+      buff?.stat
+    );
+
+  return (
+    HUNT_BUFF_EMOJIS[stat] ||
+    "✨"
+  );
+}
+
+function formatHuntBuffName(
+  stat
+) {
+  return String(
+    stat ||
+    "Buff"
+  )
+    .replace(
+      /_/g,
+      " "
+    )
+    .replace(
+      /\b\w/g,
+      character =>
+        character.toUpperCase()
+    );
+}
+
+function formatHuntBuffSource(
+  source
+) {
+  const raw =
+    String(
+      source ||
+      ""
+    ).trim();
+
+  if (!raw) {
+    return "Unknown source";
+  }
+
+  if (
+    raw.startsWith(
+      "spell:"
+    )
+  ) {
+    return "Spell effect";
+  }
+
+  return raw
+    .replace(
+      /[:_-]+/g,
+      " "
+    )
+    .replace(
+      /\b\w/g,
+      character =>
+        character.toUpperCase()
+    );
+}
+
+function formatHuntBuffValue(
+  buff
+) {
+  const value =
+    Number(
+      buff?.value
+    ) || 0;
+
+  const stat =
+    normalizeHuntBuffStat(
+      buff?.stat
+    );
+
+  const isPercent =
+    stat.endsWith(
+      "_pct"
+    ) ||
+    stat.includes(
+      "chance"
+    );
+
+  const sign =
+    value > 0
+      ? "+"
+      : "";
+
+  return `${sign}${value}${isPercent ? "%" : ""}`;
+}
+
+function renderHuntBuffHtml(
+  buffs
+) {
+  const now =
+    Date.now();
+
+  const active =
+    (
+      Array.isArray(
+        buffs
+      )
+        ? buffs
+        : []
+    )
+      .filter(
+        buff => {
+          const expiresAt =
+            new Date(
+              buff.expires_at
+            ).getTime();
+
+          return (
+            Number.isFinite(
+              expiresAt
+            ) &&
+            expiresAt >
+              now
+          );
+        }
+      );
+
+  if (
+    active.length === 0
+  ) {
+    return "";
+  }
+
+  return `
+    <div class="hunt-buffs">
+      <div class="hunt-buffs__label">
+        Buffs
+      </div>
+
+      <div class="hunt-icon-strip">
+        ${
+          active
+            .map(
+              (
+                buff,
+                index
+              ) => {
+                const expiresAt =
+                  new Date(
+                    buff.expires_at
+                  ).getTime();
+
+                const statName =
+                  formatHuntBuffName(
+                    buff.stat
+                  );
+
+                const emoji =
+                  resolveHuntBuffEmoji(
+                    buff
+                  );
+
+                const value =
+                  formatHuntBuffValue(
+                    buff
+                  );
+
+                const source =
+                  escapeHuntHtml(
+                    formatHuntBuffSource(
+                      buff.source
+                    )
+                  );
+
+                const buffName =
+                  escapeHuntHtml(
+                    buff.name ||
+                    buff.displayName ||
+                    statName
+                  );
+
+                return `
+                  <div
+                    class="hunt-status-icon hunt-status-icon--buff"
+                    tabindex="0"
+                    aria-label="${buffName}"
+                    onmouseenter="positionHuntStatusTooltip(this)"
+                    onfocus="positionHuntStatusTooltip(this)"
+                  >
+                    <span class="hunt-status-icon__emoji">
+                      ${emoji}
+                    </span>
+
+                    <span
+                      class="hunt-status-icon__badge hunt-buff__time"
+                      data-exp="${escapeHuntHtml(
+                        buff.expires_at
+                      )}"
+                    >
+                      ${Math.max(
+                        0,
+                        Math.ceil(
+                          (
+                            expiresAt -
+                            now
+                          ) /
+                          1000
+                        )
+                      )}
+                    </span>
+
+                    <div
+                      class="hunt-hover-tooltip"
+                      role="tooltip"
+                    >
+                      <div class="hunt-hover-tooltip__title">
+                        <span>${emoji}</span>
+                        <strong>${buffName}</strong>
+                      </div>
+
+                      <div class="hunt-hover-tooltip__description">
+                        ${escapeHuntHtml(
+                          `${value} ${statName}`
+                        )}
+                      </div>
+
+                      <div class="hunt-hover-tooltip__rows">
+                        <div class="hunt-hover-tooltip__row">
+                          <span>Remaining</span>
+                          <strong
+                            class="hunt-buff__tooltip-time"
+                            data-exp="${escapeHuntHtml(
+                              buff.expires_at
+                            )}"
+                          >
+                            ${Math.max(
+                              0,
+                              Math.ceil(
+                                (
+                                  expiresAt -
+                                  now
+                                ) /
+                                1000
+                              )
+                            )}s
+                          </strong>
+                        </div>
+
+                        <div class="hunt-hover-tooltip__row">
+                          <span>Source</span>
+                          <strong>${source}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }
+            )
+            .join("")
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderSmoothHuntBuffTimers() {
+  const now =
+    Date.now();
+
+  const badges =
+    document.querySelectorAll(
+      ".hunt-buff__time[data-exp]"
+    );
+
+  badges.forEach(
+    timer => {
+      const expiresAt =
+        new Date(
+          timer.dataset.exp
+        ).getTime();
+
+      const remainingMs =
+        Math.max(
+          0,
+          expiresAt -
+            now
+        );
+
+      timer.textContent =
+        remainingMs > 0
+          ? String(
+              Math.max(
+                1,
+                Math.ceil(
+                  remainingMs /
+                  1000
+                )
+              )
+            )
+          : "0";
+    }
+  );
+
+  const tooltipTimers =
+    document.querySelectorAll(
+      ".hunt-buff__tooltip-time[data-exp]"
+    );
+
+  tooltipTimers.forEach(
+    timer => {
+      const expiresAt =
+        new Date(
+          timer.dataset.exp
+        ).getTime();
+
+      const remainingMs =
+        Math.max(
+          0,
+          expiresAt -
+            now
+        );
+
+      timer.textContent =
+        remainingMs > 0
+          ? formatHuntSeconds(
+              remainingMs
+            )
+          : "Expired";
+    }
+  );
+}
+
+window.addEventListener(
+  "guildforge:buffs-updated",
+  () => {
+    if (
+      !window.__lastHuntEncounter
+    ) {
+      return;
+    }
+
+    renderHuntParty(
+      window.__lastHuntEncounter.players ||
+      []
+    );
+  }
+);
+
+function positionHuntStatusTooltip(
+  icon
+) {
+  if (
+    !icon
+  ) {
+    return;
+  }
+
+  const tooltip =
+    icon.querySelector(
+      ".hunt-hover-tooltip"
+    );
+
+  const modalCard =
+    document.querySelector(
+      "#huntCombatModal .hunt-combat-card"
+    );
+
+  if (
+    !tooltip ||
+    !modalCard
+  ) {
+    return;
+  }
+
+  tooltip.style.removeProperty(
+    "--hunt-tooltip-shift-x"
+  );
+
+  tooltip.classList.remove(
+    "opens-down"
+  );
+
+  /*
+   * First choose the safest vertical direction.
+   * Icons near the top of the encounter open
+   * downward instead of escaping the modal.
+   */
+  const iconRect =
+    icon.getBoundingClientRect();
+
+  const modalRect =
+    modalCard.getBoundingClientRect();
+
+  const estimatedHeight =
+    Math.max(
+      135,
+      tooltip.scrollHeight ||
+      135
+    );
+
+  const spaceAbove =
+    iconRect.top -
+    modalRect.top;
+
+  const spaceBelow =
+    modalRect.bottom -
+    iconRect.bottom;
+
+  if (
+    spaceAbove <
+      estimatedHeight + 20 &&
+    spaceBelow >
+      spaceAbove
+  ) {
+    tooltip.classList.add(
+      "opens-down"
+    );
+  }
+
+  /*
+   * Temporarily make the tooltip measurable,
+   * then shift it horizontally until the full
+   * tooltip remains within the combat card.
+   */
+  tooltip.classList.add(
+    "is-positioning"
+  );
+
+  const tooltipRect =
+    tooltip.getBoundingClientRect();
+
+  const padding =
+    12;
+
+  let shiftX =
+    0;
+
+  if (
+    tooltipRect.left <
+    modalRect.left + padding
+  ) {
+    shiftX +=
+      (
+        modalRect.left +
+        padding
+      ) -
+      tooltipRect.left;
+  }
+
+  if (
+    tooltipRect.right >
+    modalRect.right - padding
+  ) {
+    shiftX -=
+      tooltipRect.right -
+      (
+        modalRect.right -
+        padding
+      );
+  }
+
+  tooltip.style.setProperty(
+    "--hunt-tooltip-shift-x",
+    `${shiftX}px`
+  );
+
+  tooltip.classList.remove(
+    "is-positioning"
+  );
+}
+
+window.positionHuntStatusTooltip =
+  positionHuntStatusTooltip;
 
 function clampHuntPercent(
   value
@@ -181,25 +1416,66 @@ function clampHuntPercent(
 }
 
 function makeHuntATBAnchor(
-  actor
+  actor,
+  previousAnchor = null
 ) {
   if (!actor) {
     return null;
   }
 
+  const now =
+    performance.now();
+
+  const serverGauge =
+    clampHuntPercent(
+      actor.gauge
+    );
+
+  const serverReady =
+    Boolean(
+      actor.ready
+    );
+
+  let visualGauge =
+    serverGauge;
+
+  if (
+    previousAnchor &&
+    !serverReady
+  ) {
+    const previousVisual =
+      getSmoothHuntATB(
+        previousAnchor,
+        now
+      );
+
+    const previousPercent =
+      clampHuntPercent(
+        previousVisual.percent
+      );
+
+    const realReset =
+      serverGauge + 12 <
+      previousPercent;
+
+    visualGauge =
+      realReset
+        ? serverGauge
+        : Math.max(
+            serverGauge,
+            previousPercent
+          );
+  }
+
   return {
     receivedAt:
-      performance.now(),
+      now,
 
     gauge:
-      clampHuntPercent(
-        actor.gauge
-      ),
+      visualGauge,
 
     ready:
-      Boolean(
-        actor.ready
-      ),
+      serverReady,
 
     recoveryMs:
       Math.max(
@@ -317,10 +1593,6 @@ function getSmoothHuntATB(
       ) *
       progress,
 
-    /*
-     * Visual prediction only. The server
-     * still decides when abilities can fire.
-     */
     ready:
       false
   };
@@ -355,7 +1627,8 @@ function syncHuntTimingAnchors(
   if (encounter.enemy) {
     huntCombatTiming.enemy =
       makeHuntATBAnchor(
-        encounter.enemy
+        encounter.enemy,
+        huntCombatTiming.enemy
       );
   }
 
@@ -391,12 +1664,19 @@ function syncHuntTimingAnchors(
       playerId
     );
 
+    const previousTiming =
+      huntCombatTiming.players.get(
+        playerId
+      );
+
     huntCombatTiming.players.set(
       playerId,
       {
         atb:
           makeHuntATBAnchor(
-            player
+            player,
+            previousTiming?.atb ??
+            null
           ),
 
         auto:
@@ -438,11 +1718,16 @@ function renderSmoothHuntTimers() {
   const now =
     performance.now();
 
-  renderSmoothHuntEnemyCast(now);
+  renderSmoothHuntEnemyCast(
+    now
+  );
 
-  // -----------------------
-  // Boss ATB
-  // -----------------------
+  renderSmoothHuntMechanicCooldowns(
+    now
+  );
+
+  renderSmoothHuntBuffTimers();
+
   if (
     huntCombatTiming.enemy
   ) {
@@ -467,9 +1752,6 @@ function renderSmoothHuntTimers() {
     );
   }
 
-  // -----------------------
-  // Party ATB + Auto
-  // -----------------------
   for (
     const [
       playerId,
@@ -498,17 +1780,9 @@ function renderSmoothHuntTimers() {
             )}%`
       );
 
-      /*
-       * Keep this player's action status
-       * moving smoothly too.
-       */
       if (
-        Number(
-          playerId
-        ) ===
-          Number(
-            huntCombatPlayerId
-          ) &&
+        Number(playerId) ===
+          Number(huntCombatPlayerId) &&
         huntCombatState ===
           "active" &&
         !timing.atb.ready &&
@@ -605,32 +1879,49 @@ function stopSmoothHuntTimers() {
 
   hideHuntEnemyCastWarning();
 
+  huntMechanicCooldownAnchors.clear();
+
+  huntMechanicRenderSignature =
+    "";
+
+  huntPartyRenderSignature =
+    "";
+
   huntCombatTiming.players.clear();
 }
 
-/*
- * Reward chest created when a Hunt
- * is successfully completed.
- */
 let huntRewardChestId =
   null;
 
 function ensureHuntCombatModal() {
-  if (document.getElementById("huntCombatModal")) {
+  if (
+    document.getElementById(
+      "huntCombatModal"
+    )
+  ) {
     return;
   }
 
-  const root =
-    document.getElementById("hunt-combat-root");
-
-  if (!root) {
-    console.error(
-      "Missing #hunt-combat-root"
+  /*
+   * The Hunt modal must live directly under <body>.
+   *
+   * The world page uses decorative frame elements inside
+   * its own stacking context. If the Hunt modal is mounted
+   * inside #hunt-combat-root within that frame, no z-index
+   * on the modal can escape the ancestor stacking context.
+   *
+   * Mounting directly to document.body guarantees the Hunt
+   * overlay sits above all page-level decorative frames.
+   */
+  const modalHost =
+    document.createElement(
+      "div"
     );
-    return;
-  }
 
-  root.innerHTML = `
+  modalHost.id =
+    "huntCombatModalHost";
+
+  modalHost.innerHTML = `
     <div
       id="huntCombatModal"
       class="hunt-combat-modal hidden"
@@ -687,7 +1978,10 @@ function ensureHuntCombatModal() {
                 <strong id="huntEnemyCastName">
                   Incoming Attack
                 </strong>
-                <span id="huntEnemyCastTime">0.0s</span>
+
+                <span id="huntEnemyCastTime">
+                  0.0s
+                </span>
               </div>
 
               <div class="hunt-enemy-cast-warning__track">
@@ -701,6 +1995,7 @@ function ensureHuntCombatModal() {
                 <span id="huntEnemyCastTargets">
                   Prepare to react
                 </span>
+
                 <span
                   id="huntEnemyCastInterrupt"
                   class="hunt-enemy-cast-warning__interrupt"
@@ -723,7 +2018,6 @@ function ensureHuntCombatModal() {
             </div>
 
             <div class="hunt-boss-copy">
-
               <div
                 id="huntBossName"
                 class="hunt-boss-name"
@@ -743,11 +2037,9 @@ function ensureHuntCombatModal() {
                 class="hunt-boss-description"
               >
               </div>
-
             </div>
 
             <div class="hunt-boss-health">
-
               <div class="hunt-boss-health__top">
                 <span>Quarry Health</span>
 
@@ -766,30 +2058,43 @@ function ensureHuntCombatModal() {
               </div>
 
               <div class="hunt-boss-atb">
+                <div class="hunt-boss-health__top">
+                  <span>Action Timer</span>
 
-  <div class="hunt-boss-health__top">
-    <span>Action Timer</span>
+                  <span id="huntBossAtbText">
+                    0%
+                  </span>
+                </div>
 
-    <span id="huntBossAtbText">
-      0%
-    </span>
-  </div>
+                <div class="hunt-boss-health__track">
+                  <div
+                    id="huntBossAtbBar"
+                    class="hunt-boss-atb__fill"
+                  ></div>
+                </div>
+              </div>
 
-  <div class="hunt-boss-health__track">
-    <div
-      id="huntBossAtbBar"
-      class="hunt-boss-atb__fill"
-    ></div>
-  </div>
+              <div class="hunt-mechanics">
+                <div class="hunt-mechanics__heading">
+                  <span>
+                    Enemy Mechanics
+                  </span>
 
-</div>
+                  <span class="hunt-mechanics__hint">
+                    Hover for details
+                  </span>
+                </div>
 
+                <div
+                  id="huntMechanicList"
+                  class="hunt-icon-strip hunt-icon-strip--mechanics"
+                >
+                </div>
+              </div>
             </div>
-
           </section>
 
           <section class="hunt-party-panel">
-
             <div class="hunt-section-title">
               Adventuring Company
             </div>
@@ -802,11 +2107,9 @@ function ensureHuntCombatModal() {
                 Gathering party...
               </div>
             </div>
-
           </section>
 
           <section class="hunt-log-panel">
-
             <div class="hunt-section-title">
               Encounter
             </div>
@@ -819,63 +2122,57 @@ function ensureHuntCombatModal() {
                 Your party approaches the quarry.
               </div>
             </div>
-
           </section>
 
-<section class="hunt-actions-panel">
+          <section class="hunt-actions-panel">
+            <div class="hunt-action-header">
+              <div>
+                <div class="hunt-section-title">
+                  Your Actions
+                </div>
 
-  <div class="hunt-action-header">
+                <div
+                  id="huntActionStatus"
+                  class="hunt-action-status"
+                >
+                  Preparing...
+                </div>
+              </div>
+            </div>
 
-    <div>
-      <div class="hunt-section-title">
-        Your Actions
-      </div>
+            <div
+              id="huntSpellHotbar"
+              class="hunt-spell-hotbar"
+            >
+              <div class="hunt-combat-loading">
+                Loading abilities...
+              </div>
+            </div>
 
-      <div
-        id="huntActionStatus"
-        class="hunt-action-status"
-      >
-        Preparing...
-      </div>
-    </div>
+            <div
+              id="huntResultPanel"
+              class="hunt-result-panel hidden"
+            >
+            </div>
 
-  </div>
-
-  <div
-    id="huntSpellHotbar"
-    class="hunt-spell-hotbar"
-  >
-    <div class="hunt-combat-loading">
-      Loading abilities...
-    </div>
-  </div>
-
-<div
-  id="huntResultPanel"
-  class="hunt-result-panel hidden"
->
-</div>
-
-  <button
-    id="huntLeaveBtn"
-    class="hunt-action-btn secondary"
-    type="button"
-    onclick="closeHuntCombatModal()"
-  >
-    Leave View
-  </button>
-
-</section>
-
-
-
-
-
+            <button
+              id="huntLeaveBtn"
+              class="hunt-action-btn secondary"
+              type="button"
+              onclick="closeHuntCombatModal()"
+            >
+              Leave View
+            </button>
+          </section>
 
         </div>
       </section>
     </div>
   `;
+
+  document.body.appendChild(
+    modalHost
+  );
 }
 
 async function openHuntCombatModal() {
@@ -894,21 +2191,12 @@ async function openHuntCombatModal() {
 
   startSmoothHuntTimers();
 
-  /*
-   * Identify this browser's player before
-   * rendering personal ATB/hotbar state.
-   */
   if (!huntCombatPlayerId) {
     await loadHuntCombatPlayer();
   }
 
-  /*
-   * Load the player's normal six-slot
-   * combat loadout.
-   */
   await loadHuntCombatSpells();
   await loadHuntCombatPotions();
-
   await loadHuntEncounterState();
 
   connectHuntCombatSocket();
@@ -924,7 +2212,7 @@ async function openHuntCombatModal() {
 window.openHuntCombatModal =
   openHuntCombatModal;
 
-  async function loadHuntCombatPlayer() {
+async function loadHuntCombatPlayer() {
   try {
     const res =
       await fetch(
@@ -950,7 +2238,6 @@ window.openHuntCombatModal =
     );
   }
 }
-
 
 async function loadHuntCombatSpells() {
   try {
@@ -985,7 +2272,6 @@ async function loadHuntCombatSpells() {
       Array.from(
         { length: 6 },
         (_, index) => {
-
           const slotNumber =
             index + 1;
 
@@ -997,9 +2283,7 @@ async function loadHuntCombatSpells() {
             );
 
           return {
-            slot:
-              slotNumber,
-
+            slot: slotNumber,
             spell:
               entry?.spell ??
               null
@@ -1028,7 +2312,7 @@ async function loadHuntCombatSpells() {
   }
 }
 
-  async function loadHuntEncounterState() {
+async function loadHuntEncounterState() {
   try {
     const res =
       await fetch(
@@ -1081,9 +2365,8 @@ async function loadHuntCombatSpells() {
 function renderHuntEncounter(
   encounter
 ) {
-
   window.__lastHuntEncounter =
-  encounter;
+    encounter;
 
   syncHuntTimingAnchors(
     encounter
@@ -1097,7 +2380,13 @@ function renderHuntEncounter(
   const target =
     encounter.enemy || {};
 
-  syncHuntEnemyCastWarning(encounter);
+  syncHuntEnemyCastWarning(
+    encounter
+  );
+
+  syncHuntMechanicCooldowns(
+    encounter
+  );
 
   setHuntText(
     "huntBossName",
@@ -1117,26 +2406,21 @@ function renderHuntEncounter(
     target.description || ""
   );
 
-    setHuntText(
+  setHuntText(
     "huntBossHp",
     target.hp ?? 0
-    );
+  );
 
-    setHuntText(
+  setHuntText(
     "huntBossMaxHp",
     target.maxHp ?? 0
-    );
+  );
 
-    updateHuntBar(
+  updateHuntBar(
     "huntBossHpBar",
     target.hp,
     target.maxHp
-    );
-
-    /*
-     * Boss ATB is rendered continuously by the
-     * Hunt timing animation loop below.
-     */
+  );
 
   const status =
     document.getElementById(
@@ -1186,92 +2470,88 @@ function renderHuntEncounter(
   );
 
   const combatLog =
-  document.getElementById(
-    "huntCombatLog"
-  );
+    document.getElementById(
+      "huntCombatLog"
+    );
 
-if (combatLog) {
+  if (combatLog) {
+    const entries =
+      Array.isArray(
+        encounter.log
+      )
+        ? encounter.log
+        : [];
 
-  const entries =
-    Array.isArray(
-      encounter.log
-    )
-      ? encounter.log
-      : [];
+    if (
+      entries.length === 0
+    ) {
+      combatLog.innerHTML = `
+        <div>
+          Your party approaches the quarry.
+        </div>
+      `;
+    } else {
+      combatLog.innerHTML =
+        entries
+          .map(
+            entry => `
+              <div>
+                ${escapeHuntHtml(entry)}
+              </div>
+            `
+          )
+          .join("");
 
-  if (entries.length === 0) {
-
-    combatLog.innerHTML = `
-      <div>
-        Your party approaches the quarry.
-      </div>
-    `;
-
-  } else {
-
-    combatLog.innerHTML =
-      entries
-        .map(
-          entry => `
-            <div>
-              ${escapeHuntHtml(entry)}
-            </div>
-          `
-        )
-        .join("");
-
-    /*
-     * Keep newest combat events visible.
-     */
-    combatLog.scrollTop =
-      combatLog.scrollHeight;
+      combatLog.scrollTop =
+        combatLog.scrollHeight;
+    }
   }
-}
 
   syncHuntPlayerActions(
-  encounter
-);
+    encounter
+  );
 
-const encounterStatus =
-  String(
-    encounter.state ||
-    "active"
-  ).toLowerCase();
+  const encounterStatus =
+    String(
+      encounter.state ||
+      "active"
+    ).toLowerCase();
 
   huntCombatState =
-  encounterStatus;
+    encounterStatus;
 
-
-renderHuntFinalState(
-  encounter
-);
-
-
-if (
-  encounterStatus !== "active"
-) {
-  huntPendingSpellTarget =
-  null;
-
-document
-  .getElementById(
-    "huntCombatModal"
-  )
-  ?.classList.remove(
-    "selecting-ally"
+  renderHuntFinalState(
+    encounter
   );
-  leaveHuntCombatChannel();
-  stopSmoothHuntTimers();
 
-  huntCombatCasting =
-    false;
-}
+  if (
+    encounterStatus !==
+    "active"
+  ) {
+    huntPendingSpellTarget =
+      null;
+
+    document
+      .getElementById(
+        "huntCombatModal"
+      )
+      ?.classList.remove(
+        "selecting-ally"
+      );
+
+    leaveHuntCombatChannel();
+    stopSmoothHuntTimers();
+
+    huntCombatCasting =
+      false;
+  }
 }
 
 function renderHuntParty(
   players,
   targetPlayerId =
-    window.__lastHuntEncounter?.enemy?.targetPlayerId ?? null
+    window.__lastHuntEncounter?.enemy?.targetPlayerId ??
+    null
 ) {
   const list =
     document.getElementById(
@@ -1293,319 +2573,635 @@ function renderHuntParty(
     return;
   }
 
-  const highestThreat = Math.max(
-    0,
-    ...players
-      .filter(player => Number(player.hp ?? player.hpoints ?? 0) > 0)
-      .map(player => Math.max(0, Number(player.threat) || 0))
-  );
+  const partyStructureSignature =
+    JSON.stringify({
+      targetPlayerId:
+        Number(
+          targetPlayerId
+        ) ||
+        null,
+
+      selectingAlly:
+        Boolean(
+          huntPendingSpellTarget
+        ),
+
+      buffs:
+        (
+          window.__GF_ACTIVE_BUFFS__ ||
+          []
+        ).map(
+          buff => [
+            buff.stat,
+            buff.value,
+            buff.expires_at,
+            buff.source
+          ]
+        ),
+
+      players:
+        players.map(
+          player => ({
+            id:
+              Number(
+                player.playerId
+              ),
+
+            name:
+              String(
+                player.name ||
+                ""
+              ),
+
+            className:
+              String(
+                player.className ||
+                player.pclass ||
+                ""
+              ),
+
+            level:
+              Number(
+                player.level ||
+                0
+              ),
+
+            maxHp:
+              Number(
+                player.maxHp ??
+                player.maxhp ??
+                0
+              ),
+
+            maxSp:
+              Number(
+                player.maxSp ??
+                player.maxspoints ??
+                0
+              ),
+
+            alive:
+              Number(
+                player.hp ??
+                player.hpoints ??
+                0
+              ) > 0
+          })
+        )
+    });
+
+  const mustRebuildParty =
+    partyStructureSignature !==
+    huntPartyRenderSignature;
+
+  if (
+    !mustRebuildParty
+  ) {
+    updateHuntPartyDynamicState(
+      players,
+      targetPlayerId
+    );
+
+    return;
+  }
+
+  huntPartyRenderSignature =
+    partyStructureSignature;
+
+  const highestThreat =
+    Math.max(
+      0,
+      ...players
+        .filter(
+          player =>
+            Number(
+              player.hp ??
+              player.hpoints ??
+              0
+            ) > 0
+        )
+        .map(
+          player =>
+            Math.max(
+              0,
+              Number(
+                player.threat
+              ) || 0
+            )
+        )
+    );
 
   list.innerHTML =
     players
-      .map(player => {
+      .map(
+        player => {
+          const hp =
+            Number(
+              player.hp ??
+              player.hpoints ??
+              0
+            );
 
-        const hp =
-          Number(
-            player.hp ??
-            player.hpoints ??
-            0
-          );
+          const maxHp =
+            Number(
+              player.maxHp ??
+              player.maxhp ??
+              1
+            );
 
-        const maxHp =
-          Number(
-            player.maxHp ??
-            player.maxhp ??
-            1
-          );
+          const sp =
+            Number(
+              player.sp ??
+              player.spoints ??
+              0
+            );
 
-        const sp =
-          Number(
-            player.sp ??
-            player.spoints ??
-            0
-          );
+          const maxSp =
+            Number(
+              player.maxSp ??
+              player.maxspoints ??
+              1
+            );
 
-        const maxSp =
-          Number(
-            player.maxSp ??
-            player.maxspoints ??
-            1
-          );
+          const hpPct =
+            maxHp > 0
+              ? Math.max(
+                  0,
+                  Math.min(
+                    100,
+                    hp /
+                      maxHp *
+                      100
+                  )
+                )
+              : 0;
 
-        const hpPct =
-          maxHp > 0
-            ? Math.max(
-                0,
-                Math.min(
-                  100,
-                  hp / maxHp * 100
+          const spPct =
+            maxSp > 0
+              ? Math.max(
+                  0,
+                  Math.min(
+                    100,
+                    sp /
+                      maxSp *
+                      100
+                  )
+                )
+              : 0;
+
+          const gauge =
+            Math.max(
+              0,
+              Math.min(
+                100,
+                Number(
+                  player.gauge ?? 0
                 )
               )
-            : 0;
+            );
 
-        const spPct =
-          maxSp > 0
-            ? Math.max(
-                0,
-                Math.min(
-                  100,
-                  sp / maxSp * 100
-                )
+          const ready =
+            Boolean(
+              player.ready
+            );
+
+          const autoAttackMs =
+            Math.max(
+              0,
+              Number(
+                player.autoAttackMs ?? 0
               )
-            : 0;
+            );
 
-        const gauge =
-  Math.max(
-    0,
-    Math.min(
-      100,
-      Number(
-        player.gauge ?? 0
-      )
-    )
-  );
+          const autoAttackTotalMs =
+            Math.max(
+              1,
+              Number(
+                player.autoAttackTotalMs ??
+                6000
+              )
+            );
 
-const ready =
-  Boolean(
-    player.ready
-  );
+          const isSelf =
+            Number(
+              player.playerId
+            ) ===
+            Number(
+              huntCombatPlayerId
+            );
 
-const autoAttackMs =
-  Math.max(
-    0,
-    Number(
-      player.autoAttackMs ?? 0
-    )
-  );
+          const isAlive =
+            hp > 0;
 
-const autoAttackTotalMs =
-  Math.max(
-    1,
-    Number(
-      player.autoAttackTotalMs ??
-      6000
-    )
-  );
+          const threat =
+            Math.max(
+              0,
+              Math.round(
+                Number(
+                  player.threat
+                ) || 0
+              )
+            );
 
-/*
- * ATB and auto-attack widths are rendered
- * continuously by requestAnimationFrame.
- */
+          const threatPct =
+            highestThreat > 0
+              ? Math.max(
+                  0,
+                  Math.min(
+                    100,
+                    threat /
+                      highestThreat *
+                      100
+                  )
+                )
+              : 0;
 
-const isSelf =
-  Number(player.playerId) ===
-  Number(huntCombatPlayerId);
+          const isBossTarget =
+            isAlive &&
+            Number(
+              player.playerId
+            ) ===
+            Number(
+              targetPlayerId
+            );
 
-const isAlive =
-  hp > 0;
+          const selectingAlly =
+            Boolean(
+              huntPendingSpellTarget
+            );
 
-const threat = Math.max(
-  0,
-  Math.round(Number(player.threat) || 0)
-);
+          const canTarget =
+            selectingAlly &&
+            isAlive;
 
-const threatPct =
-  highestThreat > 0
-    ? Math.max(0, Math.min(100, threat / highestThreat * 100))
-    : 0;
+          const targetClass =
+            canTarget
+              ? "is-targetable"
+              : "";
 
-const isBossTarget =
-  isAlive &&
-  Number(player.playerId) === Number(targetPlayerId);
+          const clickHandler =
+            canTarget
+              ? `onclick="selectHuntAllyTarget(${Number(
+                  player.playerId
+                )})"`
+              : "";
 
-const selectingAlly =
-  Boolean(
-    huntPendingSpellTarget
-  );
+          const buffHtml =
+            isSelf
+              ? renderHuntBuffHtml(
+                  window.__GF_ACTIVE_BUFFS__ ||
+                  []
+                )
+              : "";
 
-const canTarget =
-  selectingAlly &&
-  isAlive;
+          return `
+            <div
+              class="hunt-party-member ${isSelf ? "is-self" : ""} ${isBossTarget ? "is-boss-target" : ""} ${targetClass}"
+              ${clickHandler}
+            >
+              <div class="hunt-party-member__top">
+                <div>
+                  <div class="hunt-party-member__name">
+                    ${escapeHuntHtml(
+                      player.name ||
+                      "Adventurer"
+                    )}
+                  </div>
 
-const targetClass =
-  canTarget
-    ? "is-targetable"
-    : "";
+                  <div class="hunt-party-member__meta">
+                    ${escapeHuntHtml(
+                      player.className ||
+                      player.pclass ||
+                      ""
+                    )}
 
-const clickHandler =
-  canTarget
-    ? `onclick="selectHuntAllyTarget(${Number(
-        player.playerId
-      )})"`
-    : "";
-
-        return `
-          <div
-            class="hunt-party-member ${isSelf ? "is-self" : ""} ${isBossTarget ? "is-boss-target" : ""} ${targetClass}"
-            ${clickHandler}
-          >
-
-            <div class="hunt-party-member__top">
-
-              <div>
-                <div class="hunt-party-member__name">
-                  ${escapeHuntHtml(
-                    player.name ||
-                    "Adventurer"
-                  )}
+                    ${
+                      player.level
+                        ? ` · Level ${Number(player.level)}`
+                        : ""
+                    }
+                  </div>
                 </div>
 
-                <div class="hunt-party-member__meta">
-                  ${escapeHuntHtml(
-                    player.className ||
-                    player.pclass ||
-                    ""
-                  )}
+                <div class="hunt-party-member__indicators">
+                  ${
+                    isBossTarget
+                      ? `<span class="hunt-party-threat-target">⚔ Boss Target</span>`
+                      : ""
+                  }
 
                   ${
-                    player.level
-                      ? ` · Level ${Number(player.level)}`
-                      : ""
+                    hp <= 0
+                      ? `
+                        <span
+                          id="huntPartyState-${Number(player.playerId)}"
+                          class="hunt-party-member__status"
+                        >
+                          Defeated
+                        </span>
+                      `
+                      : ready
+                        ? `
+                          <span
+                            id="huntPartyState-${Number(player.playerId)}"
+                            class="hunt-party-member__status active"
+                          >
+                            Ready
+                          </span>
+                        `
+                        : `
+                          <span
+                            id="huntPartyState-${Number(player.playerId)}"
+                            class="hunt-party-member__status"
+                          >
+                            Acting
+                          </span>
+                        `
                   }
                 </div>
               </div>
 
-            <div class="hunt-party-member__indicators">
-            ${isBossTarget
-              ? `<span class="hunt-party-threat-target">⚔ Boss Target</span>`
-              : ""
-            }
-            ${
-            hp <= 0
-                ? `
-                <span class="hunt-party-member__status">
-                    Defeated
+              <div class="hunt-party-stat hunt-party-stat--threat">
+                <span>Threat</span>
+
+                <div class="hunt-party-track">
+                  <div
+                    id="huntPartyThreatBar-${Number(player.playerId)}"
+                    class="hunt-party-fill threat ${isBossTarget ? "targeted" : ""}"
+                    style="width:${threatPct}%"
+                  ></div>
+                </div>
+
+                <span
+                  id="huntPartyThreatText-${Number(player.playerId)}"
+                >
+                  ${threat.toLocaleString()}
                 </span>
-                `
-                : ready
-                ? `
-                    <span class="hunt-party-member__status active">
-                    Ready
-                    </span>
-                `
-                : `
-                    <span class="hunt-party-member__status">
-                    Acting
-                    </span>
-                `
-            }
-            </div>
-            </div>
-
-            <div class="hunt-party-stat hunt-party-stat--threat">
-
-              <span>Threat</span>
-
-              <div class="hunt-party-track">
-                <div
-                  class="hunt-party-fill threat ${isBossTarget ? "targeted" : ""}"
-                  style="width:${threatPct}%"
-                ></div>
               </div>
 
-              <span>${threat.toLocaleString()}</span>
+              <div class="hunt-party-stat">
+                <span>HP</span>
 
-            </div>
+                <div class="hunt-party-track">
+                  <div
+                    id="huntPartyHpBar-${Number(player.playerId)}"
+                    class="hunt-party-fill hp"
+                    style="width:${hpPct}%"
+                  ></div>
+                </div>
 
-            <div class="hunt-party-stat">
-
-              <span>HP</span>
-
-              <div class="hunt-party-track">
-                <div
-                  class="hunt-party-fill hp"
-                  style="width:${hpPct}%"
-                ></div>
+                <span
+                  id="huntPartyHpText-${Number(player.playerId)}"
+                >
+                  ${hp}/${maxHp}
+                </span>
               </div>
 
-              <span>
-                ${hp}/${maxHp}
-              </span>
+              <div class="hunt-party-stat">
+                <span>SP</span>
 
-            </div>
+                <div class="hunt-party-track">
+                  <div
+                    id="huntPartySpBar-${Number(player.playerId)}"
+                    class="hunt-party-fill sp"
+                    style="width:${spPct}%"
+                  ></div>
+                </div>
 
-            <div class="hunt-party-stat">
-
-              <span>SP</span>
-
-              <div class="hunt-party-track">
-                <div
-                  class="hunt-party-fill sp"
-                  style="width:${spPct}%"
-                ></div>
+                <span
+                  id="huntPartySpText-${Number(player.playerId)}"
+                >
+                  ${sp}/${maxSp}
+                </span>
               </div>
 
-              <span>
-                ${sp}/${maxSp}
-              </span>
+              <div class="hunt-party-stat">
+                <span>ATB</span>
 
+                <div class="hunt-party-track">
+                  <div
+                    id="huntPartyAtbBar-${Number(player.playerId)}"
+                    class="hunt-party-fill atb ${ready ? "ready" : ""}"
+                    style="width:${gauge}%"
+                  ></div>
+                </div>
+
+                <span
+                  id="huntPartyAtbText-${Number(player.playerId)}"
+                >
+                  ${
+                    ready
+                      ? "READY"
+                      : `${Math.round(gauge)}%`
+                  }
+                </span>
+              </div>
+
+              <div class="hunt-party-stat">
+                <span>Auto</span>
+
+                <div class="hunt-party-track">
+                  <div
+                    id="huntPartyAutoBar-${Number(player.playerId)}"
+                    class="hunt-party-fill auto"
+                    style="width:${
+                      Math.max(
+                        0,
+                        Math.min(
+                          100,
+                          (
+                            1 -
+                            autoAttackMs /
+                              autoAttackTotalMs
+                          ) *
+                            100
+                        )
+                      )
+                    }%"
+                  ></div>
+                </div>
+
+                <span
+                  id="huntPartyAutoText-${Number(player.playerId)}"
+                >
+                  ${
+                    autoAttackMs <= 0
+                      ? "Swinging"
+                      : `${(autoAttackMs / 1000).toFixed(1)}s`
+                  }
+                </span>
+              </div>
+
+              ${buffHtml}
             </div>
-
-            <div class="hunt-party-stat">
-
-            <span>ATB</span>
-
-            <div class="hunt-party-track">
-                <div
-                id="huntPartyAtbBar-${Number(player.playerId)}"
-                class="hunt-party-fill atb ${ready ? "ready" : ""}"
-                style="width:${gauge}%"
-                ></div>
-            </div>
-
-            <span
-              id="huntPartyAtbText-${Number(player.playerId)}"
-            >
-                ${
-                ready
-                    ? "READY"
-                    : `${Math.round(gauge)}%`
-                }
-            </span>
-
-            </div>
-
-            <div class="hunt-party-stat">
-
-            <span>Auto</span>
-
-            <div class="hunt-party-track">
-                <div
-                id="huntPartyAutoBar-${Number(player.playerId)}"
-                class="hunt-party-fill auto"
-                style="width:${
-                  Math.max(
-                    0,
-                    Math.min(
-                      100,
-                      (
-                        1 -
-                        autoAttackMs /
-                          autoAttackTotalMs
-                      ) *
-                        100
-                    )
-                  )
-                }%"
-                ></div>
-            </div>
-
-            <span
-              id="huntPartyAutoText-${Number(player.playerId)}"
-            >
-                ${
-                autoAttackMs <= 0
-                    ? "Swinging"
-                    : `${(autoAttackMs / 1000).toFixed(1)}s`
-                }
-            </span>
-
-            </div>
-
-          </div>
-        `;
-      })
+          `;
+        }
+      )
       .join("");
+}
+
+function updateHuntPartyDynamicState(
+  players,
+  targetPlayerId
+) {
+  if (
+    !Array.isArray(
+      players
+    )
+  ) {
+    return;
+  }
+
+  const highestThreat =
+    Math.max(
+      0,
+      ...players
+        .filter(
+          player =>
+            Number(
+              player.hp ??
+              player.hpoints ??
+              0
+            ) > 0
+        )
+        .map(
+          player =>
+            Math.max(
+              0,
+              Number(
+                player.threat
+              ) || 0
+            )
+        )
+    );
+
+  for (
+    const player of
+    players
+  ) {
+    const playerId =
+      Number(
+        player.playerId
+      );
+
+    const hp =
+      Math.max(
+        0,
+        Number(
+          player.hp ??
+          player.hpoints ??
+          0
+        )
+      );
+
+    const maxHp =
+      Math.max(
+        1,
+        Number(
+          player.maxHp ??
+          player.maxhp ??
+          1
+        )
+      );
+
+    const sp =
+      Math.max(
+        0,
+        Number(
+          player.sp ??
+          player.spoints ??
+          0
+        )
+      );
+
+    const maxSp =
+      Math.max(
+        1,
+        Number(
+          player.maxSp ??
+          player.maxspoints ??
+          1
+        )
+      );
+
+    const threat =
+      Math.max(
+        0,
+        Math.round(
+          Number(
+            player.threat
+          ) || 0
+        )
+      );
+
+    const stateElement =
+      document.getElementById(
+        `huntPartyState-${playerId}`
+      );
+
+    if (
+      stateElement
+    ) {
+      const ready =
+        Boolean(
+          player.ready
+        );
+
+      stateElement.textContent =
+        hp <= 0
+          ? "Defeated"
+          : ready
+            ? "Ready"
+            : "Acting";
+
+      stateElement.classList.toggle(
+        "active",
+        hp > 0 &&
+        ready
+      );
+    }
+
+    const threatPct =
+      highestThreat > 0
+        ? threat /
+          highestThreat *
+          100
+        : 0;
+
+    setHuntBarPercent(
+      `huntPartyThreatBar-${playerId}`,
+      threatPct
+    );
+
+    setHuntText(
+      `huntPartyThreatText-${playerId}`,
+      threat.toLocaleString()
+    );
+
+    setHuntBarPercent(
+      `huntPartyHpBar-${playerId}`,
+      hp /
+      maxHp *
+      100
+    );
+
+    setHuntText(
+      `huntPartyHpText-${playerId}`,
+      `${hp}/${maxHp}`
+    );
+
+    setHuntBarPercent(
+      `huntPartySpBar-${playerId}`,
+      sp /
+      maxSp *
+      100
+    );
+
+    setHuntText(
+      `huntPartySpText-${playerId}`,
+      `${sp}/${maxSp}`
+    );
+  }
 }
 
 function renderHuntSpellHotbar() {
@@ -1625,141 +3221,202 @@ function renderHuntSpellHotbar() {
 
   const spellHtml =
     entries
-      .map(entry => {
+      .map(
+        entry => {
+          const slot =
+            Number(
+              entry.slot
+            );
 
-        const slot =
-          Number(
-            entry.slot
-          );
+          const spell =
+            entry.spell;
 
-        const spell =
-          entry.spell;
+          if (!spell) {
+            return `
+              <button
+                class="hunt-spell-slot empty"
+                type="button"
+                disabled
+              >
+                <span class="hunt-spell-empty">
+                  ✦
+                </span>
 
-        if (!spell) {
+                <span class="hunt-spell-key">
+                  ${slot}
+                </span>
+              </button>
+            `;
+          }
+
+          const spellId =
+            Number(
+              spell.id
+            );
+
+          const name =
+            escapeHuntHtml(
+              spell.name ||
+              "Ability"
+            );
+
+          const icon =
+            resolveHuntSpellIcon(
+              spell.icon
+            );
+
           return `
             <button
-              class="hunt-spell-slot empty"
+              id="huntSpellBtn-${spellId}"
+              class="hunt-spell-slot"
               type="button"
+              onclick="activateHuntSpell(${spellId})"
               disabled
+              title="${name}"
             >
-              <span class="hunt-spell-empty">
-                ✦
-              </span>
+              <img
+                src="${escapeHuntHtml(icon)}"
+                alt=""
+                onerror="this.src='/icons/default.webp'"
+              >
 
               <span class="hunt-spell-key">
                 ${slot}
               </span>
+
+              <div
+                id="huntSpellCooldown-${spellId}"
+                class="hunt-spell-cooldown hidden"
+              ></div>
+
+              <div class="hunt-spell-tooltip">
+                <strong>
+                  ${name}
+                </strong>
+
+                <span>
+                  ${Number(
+                    spell.manaCost ??
+                    spell.mana_cost ??
+                    0
+                  )} SP
+                </span>
+
+                ${
+                  Number(spell.cooldown) > 0
+                    ? `
+                      <span>
+                        ${Number(spell.cooldown)}s cooldown
+                      </span>
+                    `
+                    : ""
+                }
+              </div>
             </button>
           `;
         }
-
-        const spellId =
-          Number(
-            spell.id
-          );
-
-        const name =
-          escapeHuntHtml(
-            spell.name ||
-            "Ability"
-          );
-
-            const icon =
-            resolveHuntSpellIcon(
-                spell.icon
-            );
-
-        return `
-          <button
-            id="huntSpellBtn-${spellId}"
-            class="hunt-spell-slot"
-            type="button"
-            onclick="activateHuntSpell(${spellId})"
-            disabled
-            title="${name}"
-          >
-
-            <img
-              src="${escapeHuntHtml(icon)}"
-              alt=""
-              onerror="this.src='/icons/default.webp'"
-            >
-
-            <span class="hunt-spell-key">
-              ${slot}
-            </span>
-
-            <div
-              id="huntSpellCooldown-${spellId}"
-              class="hunt-spell-cooldown hidden"
-            ></div>
-
-            <div class="hunt-spell-tooltip">
-              <strong>
-                ${name}
-              </strong>
-
-              <span>
-                ${Number(
-                  spell.manaCost ??
-                  spell.mana_cost ??
-                  0
-                )} SP
-              </span>
-
-              ${
-                Number(spell.cooldown) > 0
-                  ? `
-                    <span>
-                      ${Number(spell.cooldown)}s cooldown
-                    </span>
-                  `
-                  : ""
-              }
-            </div>
-
-          </button>
-        `;
-      })
+      )
       .join("");
 
   bar.innerHTML =
-    renderHuntPotionSlot("health") +
+    renderHuntPotionSlot(
+      "health"
+    ) +
     spellHtml +
-    renderHuntPotionSlot("mana");
+    renderHuntPotionSlot(
+      "mana"
+    );
 
   updateHuntPotionCooldownDisplay();
 }
 
 function resolveHuntItemIcon(rawIcon) {
-  const raw = String(rawIcon || "").trim();
-  if (!raw) return "/icons/default.webp";
-  if (raw.startsWith("http") || raw.startsWith("/")) return raw;
-  return raw.startsWith("icons/") ? `/${raw}` : `/icons/${raw}`;
+  const raw =
+    String(
+      rawIcon || ""
+    ).trim();
+
+  if (!raw) {
+    return "/icons/default.webp";
+  }
+
+  if (
+    raw.startsWith("http") ||
+    raw.startsWith("/")
+  ) {
+    return raw;
+  }
+
+  return raw.startsWith("icons/")
+    ? `/${raw}`
+    : `/icons/${raw}`;
 }
 
 function renderHuntPotionSlot(slot) {
-  const potion = huntCombatPotions[slot];
-  const health = slot === "health";
-  const key = health ? "Q" : "E";
-  const label = health ? "Health Potion" : "Mana Potion";
-  const effectLabel = health ? "HP" : "SP";
+  const potion =
+    huntCombatPotions[slot];
+
+  const health =
+    slot === "health";
+
+  const key =
+    health
+      ? "Q"
+      : "E";
+
+  const label =
+    health
+      ? "Health Potion"
+      : "Mana Potion";
+
+  const effectLabel =
+    health
+      ? "HP"
+      : "SP";
 
   if (!potion) {
     return `
-      <button class="hunt-spell-slot hunt-potion-slot empty" type="button" disabled>
-        <span class="hunt-spell-empty">✦</span>
-        <span class="hunt-spell-key">${key}</span>
+      <button
+        class="hunt-spell-slot hunt-potion-slot empty"
+        type="button"
+        disabled
+      >
+        <span class="hunt-spell-empty">
+          ✦
+        </span>
+
+        <span class="hunt-spell-key">
+          ${key}
+        </span>
+
         <div class="hunt-spell-tooltip">
-          <strong>${label}</strong>
-          <span>No potion equipped</span>
+          <strong>
+            ${label}
+          </strong>
+
+          <span>
+            No potion equipped
+          </span>
         </div>
       </button>
     `;
   }
 
-  const amount = Math.max(0, Number(potion.effect_value) || 0);
-  const quantity = Math.max(0, Number(potion.qty) || 0);
+  const amount =
+    Math.max(
+      0,
+      Number(
+        potion.effect_value
+      ) || 0
+    );
+
+  const quantity =
+    Math.max(
+      0,
+      Number(
+        potion.qty
+      ) || 0
+    );
 
   return `
     <button
@@ -1770,17 +3427,43 @@ function renderHuntPotionSlot(slot) {
       ${huntCombatState === "active" && quantity > 0 ? "" : "disabled"}
     >
       <img
-        src="${escapeHuntHtml(resolveHuntItemIcon(potion.icon))}"
+        src="${escapeHuntHtml(
+          resolveHuntItemIcon(
+            potion.icon
+          )
+        )}"
         alt=""
         onerror="this.src='/icons/default.webp'"
       >
-      <span class="hunt-spell-key">${key}</span>
-      <span class="hunt-potion-quantity">${quantity}</span>
-      <div id="huntPotionCooldown-${slot}" class="hunt-spell-cooldown hidden"></div>
+
+      <span class="hunt-spell-key">
+        ${key}
+      </span>
+
+      <span class="hunt-potion-quantity">
+        ${quantity}
+      </span>
+
+      <div
+        id="huntPotionCooldown-${slot}"
+        class="hunt-spell-cooldown hidden"
+      ></div>
+
       <div class="hunt-spell-tooltip">
-        <strong>${escapeHuntHtml(potion.name || label)}</strong>
-        <span>Restores ${amount} ${effectLabel}</span>
-        <span>20s cooldown</span>
+        <strong>
+          ${escapeHuntHtml(
+            potion.name ||
+            label
+          )}
+        </strong>
+
+        <span>
+          Restores ${amount} ${effectLabel}
+        </span>
+
+        <span>
+          20s cooldown
+        </span>
       </div>
     </button>
   `;
@@ -1788,108 +3471,265 @@ function renderHuntPotionSlot(slot) {
 
 async function loadHuntCombatPotions() {
   try {
-    const response = await fetch("/hunts/encounter/potions", {
-      credentials: "include",
-      cache: "no-store"
-    });
-    const data = await response.json();
-    if (!response.ok || data.ok === false) {
-      throw new Error(data.error || "Unable to load potions.");
+    const response =
+      await fetch(
+        "/hunts/encounter/potions",
+        {
+          credentials: "include",
+          cache: "no-store"
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      data.ok === false
+    ) {
+      throw new Error(
+        data.error ||
+        "Unable to load potions."
+      );
     }
 
     huntCombatPotions = {
-      health: data.health || null,
-      mana: data.mana || null
+      health:
+        data.health ||
+        null,
+
+      mana:
+        data.mana ||
+        null
     };
 
-    const now = Date.now();
+    const now =
+      Date.now();
+
     huntPotionCooldownEnds.health =
-      now + Math.max(0, Number(data.cooldowns?.health) || 0);
+      now +
+      Math.max(
+        0,
+        Number(
+          data.cooldowns?.health
+        ) || 0
+      );
+
     huntPotionCooldownEnds.mana =
-      now + Math.max(0, Number(data.cooldowns?.mana) || 0);
+      now +
+      Math.max(
+        0,
+        Number(
+          data.cooldowns?.mana
+        ) || 0
+      );
 
     renderHuntSpellHotbar();
     startHuntPotionCooldownTimer();
+
   } catch (error) {
-    console.error("Failed to load Hunt potions:", error);
-    huntCombatPotions = { health: null, mana: null };
+    console.error(
+      "Failed to load Hunt potions:",
+      error
+    );
+
+    huntCombatPotions = {
+      health: null,
+      mana: null
+    };
+
     renderHuntSpellHotbar();
   }
 }
 
 function startHuntPotionCooldownTimer() {
-  if (huntPotionCooldownTimer) return;
-  huntPotionCooldownTimer = window.setInterval(
-    updateHuntPotionCooldownDisplay,
-    200
-  );
+  if (
+    huntPotionCooldownTimer
+  ) {
+    return;
+  }
+
+  huntPotionCooldownTimer =
+    window.setInterval(
+      updateHuntPotionCooldownDisplay,
+      200
+    );
 }
 
 function updateHuntPotionCooldownDisplay() {
-  const now = Date.now();
+  const now =
+    Date.now();
 
-  for (const slot of ["health", "mana"]) {
-    const button = document.getElementById(`huntPotionBtn-${slot}`);
-    const cooldown = document.getElementById(`huntPotionCooldown-${slot}`);
-    if (!button || !cooldown) continue;
+  for (
+    const slot of
+    ["health", "mana"]
+  ) {
+    const button =
+      document.getElementById(
+        `huntPotionBtn-${slot}`
+      );
 
-    const remainingMs = Math.max(0, huntPotionCooldownEnds[slot] - now);
-    const coolingDown = remainingMs > 0;
-    button.classList.toggle("is-cooldown", coolingDown);
+    const cooldown =
+      document.getElementById(
+        `huntPotionCooldown-${slot}`
+      );
+
+    if (
+      !button ||
+      !cooldown
+    ) {
+      continue;
+    }
+
+    const remainingMs =
+      Math.max(
+        0,
+        huntPotionCooldownEnds[slot] -
+        now
+      );
+
+    const coolingDown =
+      remainingMs > 0;
+
+    button.classList.toggle(
+      "is-cooldown",
+      coolingDown
+    );
+
     button.disabled =
       coolingDown ||
-      huntCombatState !== "active" ||
+      huntCombatState !==
+        "active" ||
       !huntCombatPotions[slot];
 
-    cooldown.classList.toggle("hidden", !coolingDown);
-    cooldown.textContent = coolingDown
-      ? String(Math.ceil(remainingMs / 1000))
-      : "";
+    cooldown.classList.toggle(
+      "hidden",
+      !coolingDown
+    );
+
+    cooldown.textContent =
+      coolingDown
+        ? String(
+            Math.ceil(
+              remainingMs /
+              1000
+            )
+          )
+        : "";
   }
 }
 
 async function useHuntCombatPotion(slot) {
-  if (slot !== "health" && slot !== "mana") return;
-  if (huntCombatState !== "active") return;
-  if (Date.now() < huntPotionCooldownEnds[slot]) return;
+  if (
+    slot !== "health" &&
+    slot !== "mana"
+  ) {
+    return;
+  }
 
-  huntPotionCooldownEnds[slot] = Date.now() + 20_000;
+  if (
+    huntCombatState !==
+    "active"
+  ) {
+    return;
+  }
+
+  if (
+    Date.now() <
+    huntPotionCooldownEnds[slot]
+  ) {
+    return;
+  }
+
+  huntPotionCooldownEnds[slot] =
+    Date.now() +
+    20_000;
+
   updateHuntPotionCooldownDisplay();
 
   try {
-    const response = await fetch("/hunts/encounter/potions/use", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slot })
-    });
-    const data = await response.json();
+    const response =
+      await fetch(
+        "/hunts/encounter/potions/use",
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+          body:
+            JSON.stringify({
+              slot
+            })
+        }
+      );
 
-    if (!response.ok || data.ok === false) {
-      const remainingMs = Math.max(0, Number(data.remainingMs) || 0);
-      huntPotionCooldownEnds[slot] = remainingMs > 0
-        ? Date.now() + remainingMs
-        : 0;
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      data.ok === false
+    ) {
+      const remainingMs =
+        Math.max(
+          0,
+          Number(
+            data.remainingMs
+          ) || 0
+        );
+
+      huntPotionCooldownEnds[slot] =
+        remainingMs > 0
+          ? Date.now() +
+            remainingMs
+          : 0;
+
       updateHuntPotionCooldownDisplay();
+
       throw new Error(
-        data.error === "cooldown"
+        data.error ===
+          "cooldown"
           ? "That potion is still on cooldown."
-          : data.error || "Unable to use potion."
+          : data.error ||
+            "Unable to use potion."
       );
     }
 
     huntPotionCooldownEnds[slot] =
-      Date.now() + Math.max(0, Number(data.cooldownMs) || 20_000);
+      Date.now() +
+      Math.max(
+        0,
+        Number(
+          data.cooldownMs
+        ) || 20_000
+      );
 
-    if (data.snapshot) renderHuntEncounter(data.snapshot);
+    if (data.snapshot) {
+      renderHuntEncounter(
+        data.snapshot
+      );
+    }
+
     await loadHuntCombatPotions();
+
   } catch (error) {
-    console.error("Hunt potion use failed:", error);
-    setHuntText("huntActionStatus", error.message || "Unable to use potion.");
+    console.error(
+      "Hunt potion use failed:",
+      error
+    );
+
+    setHuntText(
+      "huntActionStatus",
+      error.message ||
+      "Unable to use potion."
+    );
   }
 }
 
-window.useHuntCombatPotion = useHuntCombatPotion;
+window.useHuntCombatPotion =
+  useHuntCombatPotion;
 
 function resolveHuntSpellIcon(
   rawIcon
@@ -1905,8 +3745,12 @@ function resolveHuntSpellIcon(
   }
 
   if (
-    raw.startsWith("http://") ||
-    raw.startsWith("https://")
+    raw.startsWith(
+      "http://"
+    ) ||
+    raw.startsWith(
+      "https://"
+    )
   ) {
     return raw;
   }
@@ -1951,8 +3795,12 @@ function syncHuntPlayerActions(
   const player =
     encounter.players.find(
       member =>
-        Number(member.playerId) ===
-        Number(huntCombatPlayerId)
+        Number(
+          member.playerId
+        ) ===
+        Number(
+          huntCombatPlayerId
+        )
     );
 
   if (!player) {
@@ -1963,7 +3811,8 @@ function syncHuntPlayerActions(
     String(
       encounter.state ||
       ""
-    ) === "active";
+    ) ===
+    "active";
 
   const ready =
     Boolean(
@@ -1987,27 +3836,25 @@ function syncHuntPlayerActions(
     );
 
   if (status) {
+    if (!encounterActive) {
+      if (
+        encounter.state ===
+        "victory"
+      ) {
+        status.textContent =
+          "Hunt complete";
 
-  if (!encounterActive) {
+      } else if (
+        encounter.state ===
+        "defeat"
+      ) {
+        status.textContent =
+          "Your company was defeated";
 
-    if (
-      encounter.state ===
-      "victory"
-    ) {
-      status.textContent =
-        "Hunt complete";
-
-    } else if (
-      encounter.state ===
-      "defeat"
-    ) {
-      status.textContent =
-        "Your company was defeated";
-
-    } else {
-      status.textContent =
-        "Encounter ended";
-    }
+      } else {
+        status.textContent =
+          "Encounter ended";
+      }
 
     } else if (!alive) {
       status.textContent =
@@ -2088,7 +3935,8 @@ function syncHuntPlayerActions(
     const enoughSP =
       Number(
         player.sp ?? 0
-      ) >= manaCost;
+      ) >=
+      manaCost;
 
     if (button) {
       button.disabled =
@@ -2115,9 +3963,7 @@ function syncHuntPlayerActions(
     }
 
     if (cooldownEl) {
-
       if (onCooldown) {
-
         cooldownEl.textContent =
           String(
             Math.max(
@@ -2134,7 +3980,6 @@ function syncHuntPlayerActions(
         );
 
       } else {
-
         cooldownEl.textContent =
           "";
 
@@ -2169,12 +4014,9 @@ function renderHuntFinalState(
     return;
   }
 
-
-  /*
-   * Encounter is still running.
-   */
-  if (state === "active") {
-
+  if (
+    state === "active"
+  ) {
     panel.classList.add(
       "hidden"
     );
@@ -2189,12 +4031,9 @@ function renderHuntFinalState(
     return;
   }
 
-
-  /*
-   * VICTORY
-   */
-  if (state === "victory") {
-
+  if (
+    state === "victory"
+  ) {
     const rewards =
       Array.isArray(
         encounter.rewards
@@ -2213,13 +4052,6 @@ function renderHuntFinalState(
           )
       );
 
-    /*
-    * Preserve this player's reward chest.
-    *
-    * We wait until the Hunt result screen is
-    * closed before showing the normal loot
-    * chest modal.
-    */
     huntRewardChestId =
       myReward?.chestId
         ? Number(
@@ -2231,7 +4063,6 @@ function renderHuntFinalState(
       myReward
         ? `
           <div class="hunt-result-rewards">
-
             <div class="hunt-result-reward">
               <span class="hunt-result-reward__icon">
                 ✨
@@ -2251,7 +4082,6 @@ function renderHuntFinalState(
               </div>
             </div>
 
-
             <div class="hunt-result-reward">
               <span class="hunt-result-reward__icon">
                 🪙
@@ -2270,7 +4100,6 @@ function renderHuntFinalState(
                 </span>
               </div>
             </div>
-
           </div>
         `
         : `
@@ -2279,10 +4108,8 @@ function renderHuntFinalState(
           </div>
         `;
 
-
     panel.innerHTML = `
       <div class="hunt-result-header">
-
         <div class="hunt-result-emblem">
           ⚔
         </div>
@@ -2306,7 +4133,6 @@ function renderHuntFinalState(
             has fallen.
           </div>
         </div>
-
       </div>
 
       ${rewardHtml}
@@ -2324,15 +4150,11 @@ function renderHuntFinalState(
     return;
   }
 
-
-  /*
-   * DEFEAT
-   */
-  if (state === "defeat") {
-
+  if (
+    state === "defeat"
+  ) {
     panel.innerHTML = `
       <div class="hunt-result-header hunt-result-header--defeat">
-
         <div class="hunt-result-emblem">
           ☠
         </div>
@@ -2356,7 +4178,6 @@ function renderHuntFinalState(
             proved too dangerous.
           </div>
         </div>
-
       </div>
     `;
 
@@ -2409,11 +4230,6 @@ function activateHuntSpell(
       .trim()
       .toLowerCase();
 
-
-  // ===================================================
-  // ENEMY TARGET
-  // ===================================================
-
   if (
     targetType === "enemy"
   ) {
@@ -2427,11 +4243,6 @@ function activateHuntSpell(
     return;
   }
 
-
-  // ===================================================
-  // SELF TARGET
-  // ===================================================
-
   if (
     targetType === "self"
   ) {
@@ -2444,11 +4255,6 @@ function activateHuntSpell(
 
     return;
   }
-
-
-  // ===================================================
-  // FRIENDLY TARGET
-  // ===================================================
 
   if (
     targetType === "ally"
@@ -2480,10 +4286,6 @@ function activateHuntSpell(
       `Select a party member to cast ${spell.name}`
     );
 
-    /*
-     * Re-render so party members immediately
-     * receive their selectable state.
-     */
     if (
       window.__lastHuntEncounter
     ) {
@@ -2496,15 +4298,6 @@ function activateHuntSpell(
     return;
   }
 
-
-  // ===================================================
-  // PARTY-WIDE SPELL
-  // ===================================================
-
-  /*
-   * We'll give all_allies true multi-target behavior
-   * later. No manual target selection is necessary.
-   */
   if (
     targetType === "all_allies"
   ) {
@@ -2518,10 +4311,6 @@ function activateHuntSpell(
     return;
   }
 
-
-  /*
-   * Safe fallback for any future target type.
-   */
   cancelHuntTargetSelection();
 
   castHuntCombatSpell(
@@ -2532,7 +4321,6 @@ function activateHuntSpell(
 
 window.activateHuntSpell =
   activateHuntSpell;
-
 
 function selectHuntAllyTarget(
   targetPlayerId
@@ -2571,7 +4359,6 @@ function selectHuntAllyTarget(
 window.selectHuntAllyTarget =
   selectHuntAllyTarget;
 
-
 function cancelHuntTargetSelection() {
   huntPendingSpellTarget =
     null;
@@ -2598,7 +4385,6 @@ function cancelHuntTargetSelection() {
 window.cancelHuntTargetSelection =
   cancelHuntTargetSelection;
 
-
 async function castHuntCombatSpell(
   spellId,
   targetPlayerId = null
@@ -2610,10 +4396,10 @@ async function castHuntCombatSpell(
     return;
   }
 
-  huntCombatCasting = true;
+  huntCombatCasting =
+    true;
 
   try {
-
     const res =
       await fetch(
         "/hunts/encounter/spells/cast",
@@ -2646,19 +4432,10 @@ async function castHuntCombatSpell(
     const data =
       await res.json();
 
-    /*
-     * A stale poll may make the browser
-     * think ATB is ready a fraction longer
-     * than the server does.
-     *
-     * Don't throw intrusive alerts for
-     * normal combat timing failures.
-     */
     if (
       !res.ok ||
       !data.ok
     ) {
-
       const error =
         String(
           data.error ||
@@ -2677,11 +4454,9 @@ async function castHuntCombatSpell(
         );
       }
 
-      /*
-       * Render returned authoritative
-       * snapshot if one exists.
-       */
-      if (data.snapshot) {
+      if (
+        data.snapshot
+      ) {
         renderHuntEncounter(
           data.snapshot
         );
@@ -2690,17 +4465,15 @@ async function castHuntCombatSpell(
       return;
     }
 
-    /*
-     * The Hunt server accepted the cast.
-     * Resolve the spell from the already-loaded six-slot
-     * hotbar and emit the same global cast event used by
-     * normal world combat.
-     */
     const castSpellEntry =
       huntCombatSpells.find(
         entry =>
-          Number(entry.spell?.id) ===
-          Number(spellId)
+          Number(
+            entry.spell?.id
+          ) ===
+          Number(
+            spellId
+          )
       );
 
     const castSpellData =
@@ -2716,7 +4489,9 @@ async function castHuntCombatSpell(
       );
     }
 
-    if (data.snapshot) {
+    if (
+      data.snapshot
+    ) {
       renderHuntEncounter(
         data.snapshot
       );
@@ -2729,7 +4504,6 @@ async function castHuntCombatSpell(
     );
 
   } finally {
-
     huntCombatCasting =
       false;
   }
@@ -2739,7 +4513,9 @@ window.castHuntCombatSpell =
   castHuntCombatSpell;
 
 function getSharedHuntSocket() {
-  if (window.GFSocket) {
+  if (
+    window.GFSocket
+  ) {
     return window.GFSocket;
   }
 
@@ -2788,9 +4564,9 @@ function connectHuntCombatSocket() {
         Number(
           snapshot.encounterId
         ) !==
-          Number(
-            activeHuntEncounterId
-          )
+        Number(
+          activeHuntEncounterId
+        )
       ) {
         return;
       }
@@ -2844,18 +4620,11 @@ function leaveHuntCombatChannel() {
 }
 
 async function closeHuntCombatModal() {
-
   leaveHuntCombatChannel();
   stopSmoothHuntTimers();
 
-
-  /*
-   * Preserve the reward chest before
-   * clearing Hunt-specific browser state.
-   */
   const rewardChestId =
     huntRewardChestId;
-
 
   const modal =
     document.getElementById(
@@ -2866,10 +4635,6 @@ async function closeHuntCombatModal() {
     "hidden"
   );
 
-
-  /*
-   * Clear Hunt combat state.
-   */
   activeHuntEncounterId =
     null;
 
@@ -2881,123 +4646,70 @@ async function closeHuntCombatModal() {
 
   huntRewardChestId =
     null;
-  
+
   huntPendingSpellTarget =
     null;
 
-
-  /*
-   * Refresh world state so completed Hunt
-   * clues and the quarry disappear.
-   */
   if (
     typeof refreshWorld ===
     "function"
   ) {
     try {
-
       await refreshWorld();
-
     } catch (err) {
-
       console.warn(
         "World refresh after Hunt failed:",
         err
       );
-
     }
   }
 
-
-  /*
-   * Refresh party quick-view state.
-   */
   if (
     typeof loadWorldPartyStatus ===
     "function"
   ) {
     try {
-
       await loadWorldPartyStatus();
-
     } catch (err) {
-
       console.warn(
         "Party refresh after Hunt failed:",
         err
       );
-
     }
   }
 
-
-  /*
-   * Refresh player EXP, gold, level,
-   * HP/SP, etc.
-   */
   if (
     typeof loadStatPanel ===
     "function"
   ) {
     try {
-
       await loadStatPanel();
-
     } catch (err) {
-
       console.warn(
         "Stat panel refresh after Hunt failed:",
         err
       );
-
     }
   }
 
-
-  /*
-   * -------------------------------------------------
-   * HUNT REWARD CHEST
-   * -------------------------------------------------
-   *
-   * Hunt rewards use the exact same chest
-   * system as normal Guildforge loot.
-   *
-   * We intentionally show it only after the
-   * Hunt modal closes so the two overlays do
-   * not compete with one another.
-   */
   if (
     rewardChestId &&
     window.LootChestModal
   ) {
-
     try {
-
-      /*
-       * Mark it as the player's pending chest
-       * first so the normal pending indicator
-       * remains correct.
-       */
       window.LootChestModal.setPending(
         rewardChestId
       );
 
-
-      /*
-       * Then immediately display the sealed
-       * reward chest.
-       */
       window.LootChestModal.show(
         rewardChestId
       );
 
     } catch (err) {
-
       console.warn(
         "Unable to show Hunt reward chest:",
         err
       );
-
     }
   }
 }
@@ -3005,12 +4717,14 @@ async function closeHuntCombatModal() {
 window.closeHuntCombatModal =
   closeHuntCombatModal;
 
-  function setHuntText(
+function setHuntText(
   id,
   value
 ) {
   const el =
-    document.getElementById(id);
+    document.getElementById(
+      id
+    );
 
   if (!el) return;
 
@@ -3020,14 +4734,15 @@ window.closeHuntCombatModal =
       : String(value);
 }
 
-
 function updateHuntBar(
   id,
   current,
   max
 ) {
   const bar =
-    document.getElementById(id);
+    document.getElementById(
+      id
+    );
 
   if (!bar) return;
 
@@ -3061,7 +4776,6 @@ function updateHuntBar(
 document.addEventListener(
   "keydown",
   event => {
-
     const modal =
       document.getElementById(
         "huntCombatModal"
@@ -3098,21 +4812,36 @@ document.addEventListener(
       return;
     }
 
-    const pressedKey = String(event.key || "").toLowerCase();
-    if (pressedKey === "q" || pressedKey === "e") {
+    const pressedKey =
+      String(
+        event.key ||
+        ""
+      ).toLowerCase();
+
+    if (
+      pressedKey === "q" ||
+      pressedKey === "e"
+    ) {
       event.preventDefault();
-      useHuntCombatPotion(pressedKey === "q" ? "health" : "mana");
+
+      useHuntCombatPotion(
+        pressedKey === "q"
+          ? "health"
+          : "mana"
+      );
+
       return;
     }
 
-    // existing 1-6 handling...
     const slot =
       Number(
         event.key
       );
 
     if (
-      !Number.isInteger(slot) ||
+      !Number.isInteger(
+        slot
+      ) ||
       slot < 1 ||
       slot > 6
     ) {
@@ -3122,7 +4851,9 @@ document.addEventListener(
     const entry =
       huntCombatSpells.find(
         item =>
-          Number(item.slot) ===
+          Number(
+            item.slot
+          ) ===
           slot
       );
 
@@ -3153,7 +4884,6 @@ document.addEventListener(
     );
   }
 );
-
 
 function escapeHuntHtml(value) {
   return String(value ?? "")

@@ -312,34 +312,101 @@ export async function startHuntReadyCheck(
       }
     }
 
-    /* Freeze only accepted Hunt participants currently standing
-       on the target tile. Late arrivals cannot enter this roster. */
-    const [rosterRows]: any =
-      await connection.query(
-        `
-          SELECT
-            hp.player_id,
-            pl.name
+/* =========================================
+   LOAD COMPLETE FROZEN HUNT ROSTER
 
-          FROM hunt_participants hp
+   The ready check always represents every
+   player who accepted this Hunt.
 
-          JOIN players pl
-            ON pl.id = hp.player_id
+   We intentionally do NOT filter by location
+   here. Location is validated separately so
+   missing players cannot silently disappear
+   from the ready-check roster.
+========================================= */
 
-          WHERE hp.party_hunt_id = ?
-            AND pl.map_x = ?
-            AND pl.map_y = ?
+const [rosterRows]: any =
+  await connection.query(
+    `
+      SELECT
+        hp.player_id,
+        pl.name,
+        pl.map_x,
+        pl.map_y
 
-          ORDER BY hp.player_id ASC
+      FROM hunt_participants hp
 
-          FOR UPDATE
-        `,
-        [partyHuntId, targetMapX, targetMapY]
-      );
+      JOIN players pl
+        ON pl.id = hp.player_id
 
-    if (!rosterRows.some((row: any) => Number(row.player_id) === playerId)) {
-      throw new Error("You are not eligible for this Hunt ready check.");
-    }
+      WHERE hp.party_hunt_id = ?
+
+      ORDER BY hp.player_id ASC
+
+      FOR UPDATE
+    `,
+    [
+      partyHuntId
+    ]
+  );
+
+
+if (!rosterRows.length) {
+  throw new Error(
+    "This Hunt has no participating players."
+  );
+}
+
+
+/* =========================================
+   VERIFY INITIATOR IS A PARTICIPANT
+========================================= */
+
+if (
+  !rosterRows.some(
+    (row: any) =>
+      Number(row.player_id) ===
+      playerId
+  )
+) {
+  throw new Error(
+    "You are not eligible for this Hunt ready check."
+  );
+}
+
+
+/* =========================================
+   REQUIRE COMPLETE PARTY AT TARGET
+
+   Every frozen Hunt participant must be
+   standing on the Hunt target tile before
+   the ready check can begin.
+========================================= */
+
+const missingPlayers =
+  rosterRows.filter(
+    (row: any) =>
+      Number(row.map_x) !==
+        targetMapX ||
+      Number(row.map_y) !==
+        targetMapY
+  );
+
+
+if (missingPlayers.length) {
+
+  const missingNames =
+    missingPlayers
+      .map(
+        (row: any) =>
+          String(row.name)
+      )
+      .join(", ");
+
+
+  throw new Error(
+    `All Hunt participants must reach the target before confronting it. Waiting for: ${missingNames}.`
+  );
+}
 
     const [insertResult]: any =
       await connection.query(

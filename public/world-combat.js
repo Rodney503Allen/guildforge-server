@@ -1685,6 +1685,208 @@ async function useHotbarPotion(slot) {
   }
 }
 
+
+// =======================================
+// COMBAT HOTKEYS
+//
+// 1-6 = Spell slots
+// Q   = Health potion
+// E   = Mana potion
+// =======================================
+
+document.addEventListener(
+  "keydown",
+  event => {
+    const modal =
+      document.getElementById(
+        "combatModal"
+      );
+
+    /*
+     * Hotkeys only function while the
+     * normal combat modal is actually open.
+     */
+    if (
+      !modal ||
+      modal.classList.contains(
+        "hidden"
+      )
+    ) {
+      return;
+    }
+
+    /*
+     * Combat has ended. Do not allow
+     * any additional actions.
+     */
+    if (combatOver) {
+      return;
+    }
+
+    /*
+     * Holding a key down should not spam
+     * multiple requests.
+     */
+    if (event.repeat) {
+      return;
+    }
+
+    /*
+     * Do not steal keyboard input if we ever
+     * have a text field inside the combat modal.
+     */
+    const target =
+      event.target;
+
+    if (
+      target instanceof
+        HTMLInputElement ||
+      target instanceof
+        HTMLTextAreaElement ||
+      target instanceof
+        HTMLSelectElement ||
+      target?.isContentEditable
+    ) {
+      return;
+    }
+
+    const key =
+      String(
+        event.key || ""
+      ).toLowerCase();
+
+
+    // =====================================
+    // POTIONS
+    //
+    // Q = Health
+    // E = Mana
+    // =====================================
+
+    if (
+      key === "q" ||
+      key === "e"
+    ) {
+      event.preventDefault();
+
+      const slot =
+        key === "q"
+          ? "health"
+          : "mana";
+
+      const button =
+        document.getElementById(
+          slot === "health"
+            ? "hpPotionBtn"
+            : "spPotionBtn"
+        );
+
+      /*
+       * Match clicking behavior.
+       *
+       * Disabled means:
+       * - no potion equipped
+       * - combat UI disabled
+       * - otherwise unavailable
+       */
+      if (
+        !button ||
+        button.disabled
+      ) {
+        return;
+      }
+
+      if (
+        isPotionOnCooldown(
+          slot
+        )
+      ) {
+        return;
+      }
+
+      useHotbarPotion(
+        slot
+      );
+
+      return;
+    }
+
+
+    // =====================================
+    // SPELLS
+    //
+    // 1-6 = Hotbar slots
+    // =====================================
+
+    const slot =
+      Number(
+        event.key
+      );
+
+    if (
+      !Number.isInteger(
+        slot
+      ) ||
+      slot < 1 ||
+      slot > 6
+    ) {
+      return;
+    }
+
+    /*
+     * combatHotbarSpells is kept in actual
+     * hotbar order by loadHotbarSpells().
+     *
+     * Array index 0 = slot 1
+     * Array index 1 = slot 2
+     * etc.
+     */
+    const spell =
+      combatHotbarSpells[
+        slot - 1
+      ];
+
+    if (!spell) {
+      return;
+    }
+
+    const spellId =
+      Number(
+        spell.id
+      );
+
+    if (
+      !Number.isInteger(
+        spellId
+      ) ||
+      spellId <= 0
+    ) {
+      return;
+    }
+
+    /*
+     * Respect the same cooldown state
+     * as clicking the spell.
+     */
+    if (
+      spellCooldowns[
+        spellId
+      ] &&
+      Date.now() <
+        spellCooldowns[
+          spellId
+        ]
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    castSpell(
+      spellId
+    );
+  }
+);
 /* ===============================
    COMBAT LOG HELPERS
 ================================ */

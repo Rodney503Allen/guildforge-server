@@ -63,14 +63,6 @@ loadGuildforgeStylesheetOnce(
 // =======================
 // GLOBAL AUDIO BOOTSTRAP
 // =======================
-//
-// statpanel.js is already present on authenticated Guildforge pages,
-// so it can bootstrap the shared audio manager too.
-//
-// Pages can use:
-//   window.GFAudio.playMusic("valewynn");
-//   window.GFAudio.playAmbience("forest");
-//   window.GFAudio.playSfx("coin");
 
 async function ensureGuildforgeAudio() {
   if (
@@ -125,10 +117,6 @@ window.GFSpellEventsReady = loadGuildforgeScriptOnce(
 // =======================
 // GLOBAL SOCKET BOOTSTRAP
 // =======================
-//
-// statpanel.js is already loaded on authenticated
-// Guildforge pages, so it can bootstrap the shared
-// Socket.IO client for the rest of the frontend.
 
 async function ensureGuildforgeSocket() {
   if (
@@ -181,6 +169,7 @@ window.GFSocketReady = ensureGuildforgeSocket()
 // =======================
 // GLOBAL BANNER LOADER
 // =======================
+
 if (!window.GFBanners && !window.__gfBannerScriptLoading) {
   window.__gfBannerScriptLoading = true;
 
@@ -198,13 +187,6 @@ let lastAudioLocation = null;
 // =======================
 // REGION MUSIC SYNC
 // =======================
-//
-// Player location is the single source of truth for overworld music.
-// The audio manager automatically converts names such as:
-//   "Coastal Lowlands" -> /music/coastallowlands.ogg
-//
-// The last location is cached so routine player:state patches such as
-// HP, SP, gold, buffs, etc. do not repeatedly request the same track.
 
 async function syncPlayerLocationAudio(location) {
   const normalizedLocation =
@@ -232,7 +214,6 @@ async function syncPlayerLocationAudio(location) {
     return;
   }
 
-  // Only mark the location as handled once the audio manager exists.
   lastAudioLocation = normalizedLocation;
 
   await audio.playRegionMusic(
@@ -243,10 +224,41 @@ async function syncPlayerLocationAudio(location) {
 function setText(id, val) {
   const el = document.getElementById(id);
   if (!el) return;
+
   el.innerText =
     (val !== undefined && val !== null)
       ? val
       : "";
+}
+
+// =======================
+// SHARED BUFF STATE
+// =======================
+//
+// The stat panel already receives authoritative
+// player buff state. Expose that same state to
+// combat interfaces so they do not need their
+// own buff polling/database path.
+
+function publishGuildforgeBuffState(buffs) {
+  const activeBuffs =
+    Array.isArray(buffs)
+      ? buffs
+      : [];
+
+  window.__GF_ACTIVE_BUFFS__ =
+    activeBuffs;
+
+  window.dispatchEvent(
+    new CustomEvent(
+      "guildforge:buffs-updated",
+      {
+        detail: {
+          buffs: activeBuffs
+        }
+      }
+    )
+  );
 }
 
 function renderStatPanelPlayer(p) {
@@ -266,7 +278,6 @@ function renderStatPanelPlayer(p) {
         err
       );
 
-      // Allow a later player-state render to retry.
       if (
         String(player.location || "").trim() ===
         lastAudioLocation
@@ -812,6 +823,15 @@ function loadHUD() {
 }
 
 function renderBuffs(buffs) {
+  const activeBuffs =
+    Array.isArray(buffs)
+      ? buffs
+      : [];
+
+  publishGuildforgeBuffState(
+    activeBuffs
+  );
+
   const tooltip =
     document.getElementById(
       "buff-tooltip"
@@ -821,14 +841,14 @@ function renderBuffs(buffs) {
 
   tooltip.innerHTML = "";
 
-  if (!buffs.length) {
+  if (!activeBuffs.length) {
     tooltip.innerHTML =
       `<div class="buff-row">No active buffs</div>`;
 
     return;
   }
 
-  buffs.forEach(buff => {
+  activeBuffs.forEach(buff => {
     const row =
       document.createElement("div");
 
@@ -851,6 +871,9 @@ function updateBuffTimers() {
     document.querySelectorAll(
       ".buff-timer"
     );
+
+  let buffStateChanged =
+    false;
 
   timers.forEach(t => {
     const exp =
@@ -888,6 +911,9 @@ function updateBuffTimers() {
         const nowMs =
           Date.now();
 
+        const previousLength =
+          statPanelPlayer.buffs.length;
+
         statPanelPlayer.buffs =
           statPanelPlayer.buffs
             .filter(buff => {
@@ -903,6 +929,14 @@ function updateBuffTimers() {
                 expiresAt > nowMs
               );
             });
+
+        if (
+          statPanelPlayer.buffs.length !==
+          previousLength
+        ) {
+          buffStateChanged =
+            true;
+        }
       }
 
       const tooltip =
@@ -940,6 +974,18 @@ function updateBuffTimers() {
           )}`;
     }
   });
+
+  if (
+    buffStateChanged &&
+    statPanelPlayer &&
+    Array.isArray(
+      statPanelPlayer.buffs
+    )
+  ) {
+    publishGuildforgeBuffState(
+      statPanelPlayer.buffs
+    );
+  }
 }
 
 setInterval(
