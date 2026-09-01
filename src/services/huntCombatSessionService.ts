@@ -17,6 +17,8 @@ import {
   reduceCombatSpellCooldowns,
 } from "./combat";
 import { mitigateIncomingPlayerDamage } from "./playerDamageMitigationService";
+import { useEquippedCombatPotion } from "./combatPotionService";
+import type { CombatPotionSlot } from "./potionCooldownService";
 
 import { processDuePlayerHots } from "./playerHotService";
 
@@ -2664,6 +2666,46 @@ async function completeHuntCombatDefeat(session: HuntCombatSession) {
   if (session.log.length > 60) {
     session.log = session.log.slice(-60);
   }
+}
+
+export async function useHuntCombatPotion(
+  session: HuntCombatSession,
+  playerId: number,
+  slot: CombatPotionSlot,
+) {
+  return withHuntCombatLock(session.encounterId, async () => {
+    const player = session.players.get(Number(playerId));
+
+    if (session.state !== "active" || !player || player.hp <= 0) {
+      return {
+        ok: false,
+        error: "You cannot use a potion right now.",
+        snapshot: buildHuntCombatSnapshot(session),
+      };
+    }
+
+    const result = await useEquippedCombatPotion(playerId, slot);
+    if (!result.ok) {
+      return {
+        ...result,
+        snapshot: buildHuntCombatSnapshot(session),
+      };
+    }
+
+    player.hp = Math.max(0, Number(result.playerHP) || 0);
+    player.sp = Math.max(0, Number(result.playerSP) || 0);
+    player.stats.hpoints = player.hp;
+    player.stats.spoints = player.sp;
+
+    session.updatedAt = Date.now();
+    if (result.log) session.log.push(result.log);
+    if (session.log.length > 60) session.log = session.log.slice(-60);
+
+    return {
+      ...result,
+      snapshot: buildHuntCombatSnapshot(session),
+    };
+  });
 }
 
 function createHuntEnemyMechanicAdapter(

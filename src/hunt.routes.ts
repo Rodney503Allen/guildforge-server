@@ -23,8 +23,10 @@ import {
 import {
   ensureHuntCombatSessionForPlayer,
   buildHuntCombatSnapshot,
-  castHuntSpell
+  castHuntSpell,
+  useHuntCombatPotion
 } from "./services/huntCombatSessionService";
+import { getEquippedCombatPotions } from "./services/combatPotionService";
 
 
 
@@ -477,6 +479,59 @@ router.post(
         });
     }
   }
+);
+
+router.get(
+  "/hunts/encounter/potions",
+  requireLogin,
+  async (req: any, res) => {
+    try {
+      const playerId = Number(req.session.playerId);
+      const potions = await getEquippedCombatPotions(playerId);
+      return res.json({ ok: true, ...potions });
+    } catch (err: any) {
+      console.error("GET Hunt potions failed:", err);
+      return res.status(500).json({
+        ok: false,
+        error: err.message || "Unable to load equipped potions.",
+      });
+    }
+  },
+);
+
+router.post(
+  "/hunts/encounter/potions/use",
+  requireLogin,
+  async (req: any, res) => {
+    try {
+      const playerId = Number(req.session.playerId);
+      const slot = String(req.body?.slot || "");
+
+      if (slot !== "health" && slot !== "mana") {
+        return res.status(400).json({ ok: false, error: "Invalid potion slot." });
+      }
+
+      const session = await ensureHuntCombatSessionForPlayer(playerId);
+      if (!session) {
+        return res.status(400).json({ ok: false, error: "No active Hunt encounter." });
+      }
+
+      const result = await useHuntCombatPotion(session, playerId, slot);
+      if (result.snapshot) publishHuntCombatSnapshot(result.snapshot);
+
+      if (!result.ok) {
+        return res.status(400).json(result);
+      }
+
+      return res.json(result);
+    } catch (err: any) {
+      console.error("POST Hunt potion use failed:", err);
+      return res.status(500).json({
+        ok: false,
+        error: err.message || "Unable to use potion.",
+      });
+    }
+  },
 );
 
 /* =========================================================

@@ -1151,7 +1151,7 @@
   display:grid;
 
   grid-template-columns:
-    repeat(6, 64px);
+    repeat(8, 64px);
 
   justify-content:center;
 
@@ -1726,6 +1726,27 @@
   #huntLeaveBtn{
     width:100%;
   }
+}
+
+.hunt-potion-slot{
+  border-color:rgba(201,184,154,.38);
+}
+
+.hunt-potion-quantity{
+  position:absolute;
+  right:5px;
+  bottom:5px;
+  z-index:6;
+  min-width:18px;
+  padding:2px 5px;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:999px;
+  background:rgba(0,0,0,.82);
+  color:#fff;
+  font-size:10px;
+  font-weight:900;
+  line-height:1.2;
+  text-align:center;
 }
 
 .hunt-party-member__indicators{

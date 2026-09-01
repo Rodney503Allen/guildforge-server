@@ -6,6 +6,9 @@ let activeHuntEncounterId = null;
 let huntCombatPlayerId = null;
 let huntCombatSpells = [];
 let huntCombatCasting = false;
+let huntCombatPotions = { health: null, mana: null };
+let huntPotionCooldownEnds = { health: 0, mana: 0 };
+let huntPotionCooldownTimer = null;
 
 let huntPendingSpellTarget = null;
 
@@ -904,6 +907,7 @@ async function openHuntCombatModal() {
    * combat loadout.
    */
   await loadHuntCombatSpells();
+  await loadHuntCombatPotions();
 
   await loadHuntEncounterState();
 
@@ -1619,7 +1623,7 @@ function renderHuntSpellHotbar() {
       ? huntCombatSpells
       : [];
 
-  bar.innerHTML =
+  const spellHtml =
     entries
       .map(entry => {
 
@@ -1718,7 +1722,174 @@ function renderHuntSpellHotbar() {
         `;
       })
       .join("");
+
+  bar.innerHTML =
+    renderHuntPotionSlot("health") +
+    spellHtml +
+    renderHuntPotionSlot("mana");
+
+  updateHuntPotionCooldownDisplay();
 }
+
+function resolveHuntItemIcon(rawIcon) {
+  const raw = String(rawIcon || "").trim();
+  if (!raw) return "/icons/default.webp";
+  if (raw.startsWith("http") || raw.startsWith("/")) return raw;
+  return raw.startsWith("icons/") ? `/${raw}` : `/icons/${raw}`;
+}
+
+function renderHuntPotionSlot(slot) {
+  const potion = huntCombatPotions[slot];
+  const health = slot === "health";
+  const key = health ? "Q" : "E";
+  const label = health ? "Health Potion" : "Mana Potion";
+  const effectLabel = health ? "HP" : "SP";
+
+  if (!potion) {
+    return `
+      <button class="hunt-spell-slot hunt-potion-slot empty" type="button" disabled>
+        <span class="hunt-spell-empty">✦</span>
+        <span class="hunt-spell-key">${key}</span>
+        <div class="hunt-spell-tooltip">
+          <strong>${label}</strong>
+          <span>No potion equipped</span>
+        </div>
+      </button>
+    `;
+  }
+
+  const amount = Math.max(0, Number(potion.effect_value) || 0);
+  const quantity = Math.max(0, Number(potion.qty) || 0);
+
+  return `
+    <button
+      id="huntPotionBtn-${slot}"
+      class="hunt-spell-slot hunt-potion-slot"
+      type="button"
+      onclick="useHuntCombatPotion('${slot}')"
+      ${huntCombatState === "active" && quantity > 0 ? "" : "disabled"}
+    >
+      <img
+        src="${escapeHuntHtml(resolveHuntItemIcon(potion.icon))}"
+        alt=""
+        onerror="this.src='/icons/default.webp'"
+      >
+      <span class="hunt-spell-key">${key}</span>
+      <span class="hunt-potion-quantity">${quantity}</span>
+      <div id="huntPotionCooldown-${slot}" class="hunt-spell-cooldown hidden"></div>
+      <div class="hunt-spell-tooltip">
+        <strong>${escapeHuntHtml(potion.name || label)}</strong>
+        <span>Restores ${amount} ${effectLabel}</span>
+        <span>20s cooldown</span>
+      </div>
+    </button>
+  `;
+}
+
+async function loadHuntCombatPotions() {
+  try {
+    const response = await fetch("/hunts/encounter/potions", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || "Unable to load potions.");
+    }
+
+    huntCombatPotions = {
+      health: data.health || null,
+      mana: data.mana || null
+    };
+
+    const now = Date.now();
+    huntPotionCooldownEnds.health =
+      now + Math.max(0, Number(data.cooldowns?.health) || 0);
+    huntPotionCooldownEnds.mana =
+      now + Math.max(0, Number(data.cooldowns?.mana) || 0);
+
+    renderHuntSpellHotbar();
+    startHuntPotionCooldownTimer();
+  } catch (error) {
+    console.error("Failed to load Hunt potions:", error);
+    huntCombatPotions = { health: null, mana: null };
+    renderHuntSpellHotbar();
+  }
+}
+
+function startHuntPotionCooldownTimer() {
+  if (huntPotionCooldownTimer) return;
+  huntPotionCooldownTimer = window.setInterval(
+    updateHuntPotionCooldownDisplay,
+    200
+  );
+}
+
+function updateHuntPotionCooldownDisplay() {
+  const now = Date.now();
+
+  for (const slot of ["health", "mana"]) {
+    const button = document.getElementById(`huntPotionBtn-${slot}`);
+    const cooldown = document.getElementById(`huntPotionCooldown-${slot}`);
+    if (!button || !cooldown) continue;
+
+    const remainingMs = Math.max(0, huntPotionCooldownEnds[slot] - now);
+    const coolingDown = remainingMs > 0;
+    button.classList.toggle("is-cooldown", coolingDown);
+    button.disabled =
+      coolingDown ||
+      huntCombatState !== "active" ||
+      !huntCombatPotions[slot];
+
+    cooldown.classList.toggle("hidden", !coolingDown);
+    cooldown.textContent = coolingDown
+      ? String(Math.ceil(remainingMs / 1000))
+      : "";
+  }
+}
+
+async function useHuntCombatPotion(slot) {
+  if (slot !== "health" && slot !== "mana") return;
+  if (huntCombatState !== "active") return;
+  if (Date.now() < huntPotionCooldownEnds[slot]) return;
+
+  huntPotionCooldownEnds[slot] = Date.now() + 20_000;
+  updateHuntPotionCooldownDisplay();
+
+  try {
+    const response = await fetch("/hunts/encounter/potions/use", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slot })
+    });
+    const data = await response.json();
+
+    if (!response.ok || data.ok === false) {
+      const remainingMs = Math.max(0, Number(data.remainingMs) || 0);
+      huntPotionCooldownEnds[slot] = remainingMs > 0
+        ? Date.now() + remainingMs
+        : 0;
+      updateHuntPotionCooldownDisplay();
+      throw new Error(
+        data.error === "cooldown"
+          ? "That potion is still on cooldown."
+          : data.error || "Unable to use potion."
+      );
+    }
+
+    huntPotionCooldownEnds[slot] =
+      Date.now() + Math.max(0, Number(data.cooldownMs) || 20_000);
+
+    if (data.snapshot) renderHuntEncounter(data.snapshot);
+    await loadHuntCombatPotions();
+  } catch (error) {
+    console.error("Hunt potion use failed:", error);
+    setHuntText("huntActionStatus", error.message || "Unable to use potion.");
+  }
+}
+
+window.useHuntCombatPotion = useHuntCombatPotion;
 
 function resolveHuntSpellIcon(
   rawIcon
@@ -2924,6 +3095,13 @@ document.addEventListener(
     if (
       event.repeat
     ) {
+      return;
+    }
+
+    const pressedKey = String(event.key || "").toLowerCase();
+    if (pressedKey === "q" || pressedKey === "e") {
+      event.preventDefault();
+      useHuntCombatPotion(pressedKey === "q" ? "health" : "mana");
       return;
     }
 

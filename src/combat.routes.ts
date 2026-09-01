@@ -15,21 +15,14 @@ import {
 } from "./services/combatSessionService";
 import { getEquippedSpells } from "./services/spellLoadoutService";
 import { emitPlayerStatePatch } from "./socketServer";
+import {
+  getPotionCooldownRemainingMs,
+  startPotionCooldown
+} from "./services/potionCooldownService";
 
 const router = Router();
 
 // ✅ POTION GLOBAL COOLDOWN (server authoritative)
-const potionCooldowns = new Map<number, { health: number; mana: number }>();
-const POTION_GCD_MS = 20000; // 20 seconds
-
-function getPotionCd(pid: number) {
-  const cur = potionCooldowns.get(pid);
-  if (cur) return cur;
-  const fresh = { health: 0, mana: 0 };
-  potionCooldowns.set(pid, fresh);
-  return fresh;
-}
-
 async function useInventoryItemInCombat(
   pid: number,
   invId: number,
@@ -77,19 +70,17 @@ if (String(row.type) === "potion") {
   }
 
   const now = Date.now();
-  const cd = getPotionCd(pid);
-  const nextAllowed = cd[potionSlot] || 0;
+  const remainingMs = getPotionCooldownRemainingMs(pid, potionSlot, now);
 
-  if (now < nextAllowed) {
+  if (remainingMs > 0) {
     return {
       error: "cooldown",
       status: 429,
-      remainingMs: nextAllowed - now
+      remainingMs
     };
   }
 
-  cd[potionSlot] = now + POTION_GCD_MS;
-  potionCooldowns.set(pid, cd); // (not strictly necessary, but explicit)
+  startPotionCooldown(pid, potionSlot, now);
 }
   // Use final/computed stats so max values match the game UI
   const player = await getFinalPlayerStats(pid);
