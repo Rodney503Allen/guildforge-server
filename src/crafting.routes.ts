@@ -1,9 +1,16 @@
-//src/crafting.routes.ts
+// src/crafting.routes.ts
 import express from "express";
 import { db } from "./db";
 import { addItemWithConn } from "./services/inventoryService";
 import { hasInventorySpace } from "./services/inventoryCapacityService";
 import { grantProfessionExperience } from "./services/professionExperienceService";
+import { rollCraftingQuality, type CraftingQualityRoll } from "./services/craftingQualityService";
+import { rollCraftedEquipmentAffixes } from "./services/craftingAffixService";
+import {
+  getAvailableCraftingCatalysts,
+  validateAndConsumeCraftingCatalyst,
+  type AppliedCraftingCatalyst
+} from "./services/craftingCatalystService";
 
 const router = express.Router();
 
@@ -11,7 +18,7 @@ function requireLogin(req: any, res: any, next: any) {
   if (!req.session || !req.session.playerId) return res.redirect("/login.html");
   next();
 }
- 
+
 function esc(input: any) {
   return String(input ?? "")
     .replace(/&/g, "&amp;")
@@ -19,6 +26,10 @@ function esc(input: any) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function safeJson(value: any) {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
 router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => {
@@ -42,12 +53,23 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
       cr.output_id,
       cr.output_qty,
       cr.required_level,
+      cr.quality_difficulty,
       cr.gold_cost,
+      cr.profession_exp,
       cr.craft_time_ms,
+      cr.display_order,
       COALESCE(pp.level, 1) AS professionLevel,
 
       COALESCE(outItem.name, outBase.name) AS outputName,
       COALESCE(outItem.icon, outBase.icon) AS outputIcon,
+      COALESCE(outItem.description, outBase.description) AS outputDescription,
+
+      outBase.slot AS outputSlot,
+      outBase.item_type AS outputItemType,
+      outBase.armor_weight AS outputArmorWeight,
+      outBase.weapon_class AS outputWeaponClass,
+      outBase.base_attack AS outputBaseAttack,
+      outBase.base_defense AS outputBaseDefense,
 
       ing.id AS ingredientItemId,
       ing.name AS ingredientName,
@@ -60,7 +82,7 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
 
     LEFT JOIN player_professions pp
       ON pp.player_id = ?
-    AND pp.profession_id = prof.id
+     AND pp.profession_id = prof.id
 
     LEFT JOIN items outItem
       ON cr.output_type = 'item'
@@ -103,13 +125,24 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
       recipes.set(id, {
         recipeId: id,
         stationName: row.station_name,
+        outputType: row.output_type,
+        outputId: Number(row.output_id),
         outputName: row.outputName,
         outputIcon: row.outputIcon,
+        outputDescription: row.outputDescription || "",
         outputQty: Number(row.output_qty || 1),
         goldCost: Number(row.gold_cost || 0),
+        professionExp: Number(row.profession_exp || 0),
         craftTimeMs: Number(row.craft_time_ms || 1600),
         requiredLevel: Number(row.required_level || 1),
+        qualityDifficulty: Number(row.quality_difficulty || 0),
         professionLevel: Number(row.professionLevel || 1),
+        slot: row.outputSlot || null,
+        itemType: row.outputItemType || null,
+        armorWeight: row.outputArmorWeight || null,
+        weaponClass: row.outputWeaponClass || null,
+        baseAttack: Number(row.outputBaseAttack || 0),
+        baseDefense: Number(row.outputBaseDefense || 0),
         ingredients: []
       });
     }
@@ -122,50 +155,67 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
     });
   }
 
-  const recipeList = Array.from(recipes.values());
-  const stationName = recipeList[0].stationName;
-
-  const recipeCards = recipeList.map((r: any) => {
+  const recipeList = Array.from(recipes.values()).map((r: any) => {
     const hasMaterials = r.ingredients.every((i: any) => i.owned >= i.needed);
-    const canCraft =
-      r.professionLevel >= r.requiredLevel &&
-      hasMaterials &&
-      Number(player.gold || 0) >= r.goldCost;
+    const unlocked = r.professionLevel >= r.requiredLevel;
+    const canAffordGold = Number(player.gold || 0) >= r.goldCost;
 
-    const ingredientHtml = r.ingredients.map((i: any) => `
-      <span
-        class="${i.owned >= i.needed ? "status good" : "status locked"}"
-        data-ingredient-id="${Number(i.itemId)}"
-      >
-        ${esc(i.name)}: ${i.owned}/${i.needed}
-      </span>
-    `).join("");
+    return {
+      ...r,
+      unlocked,
+      hasMaterials,
+      canAffordGold,
+      canCraft: unlocked && hasMaterials && canAffordGold
+    };
+  });
+
+  const stationName = recipeList[0].stationName;
+  const professionLevel = Number(recipeList[0].professionLevel || 1);
+  const unlockedCount = recipeList.filter((r: any) => r.unlocked).length;
+  const craftableCount = recipeList.filter((r: any) => r.canCraft).length;
+  const lockedCount = recipeList.length - unlockedCount;
+
+  const catalystData = await getAvailableCraftingCatalysts({
+    conn: db,
+    playerId: pid,
+    professionKey: profession,
+    professionLevel
+  });
+
+  const sortedRecipes = [...recipeList].sort((a: any, b: any) => {
+    if (a.unlocked !== b.unlocked) return a.unlocked ? -1 : 1;
+    if (a.canCraft !== b.canCraft) return a.canCraft ? -1 : 1;
+    if (a.requiredLevel !== b.requiredLevel) return a.requiredLevel - b.requiredLevel;
+    return a.recipeId - b.recipeId;
+  });
+
+  const recipeRows = sortedRecipes.map((r: any) => {
+    const state = !r.unlocked ? "locked" : r.canCraft ? "ready" : "missing";
+    const stateLabel = !r.unlocked
+      ? `Lv ${r.requiredLevel}`
+      : r.canCraft
+        ? "Ready"
+        : "Missing";
 
     return `
-      <article class="supplier-item" data-recipe-id="${r.recipeId}">
-        <div class="supplier-icon">
-          <img src="${esc(r.outputIcon || "/icons/items/default.png")}" onerror="this.style.display='none'">
-        </div>
+      <button
+        class="craft-recipe-row ${r.unlocked ? "" : "is-locked"}"
+        type="button"
+        data-recipe-id="${r.recipeId}"
+        data-state="${state}"
+        ${r.unlocked ? "" : 'data-locked="true" hidden'}
+      >
+        <span class="craft-recipe-icon">
+          <img src="${esc(r.outputIcon || "/icons/items/default.png")}" alt="" onerror="this.style.display='none'">
+        </span>
 
-        <div class="supplier-main">
-          <h3>${esc(r.outputName)}</h3>
-          <p>Creates ${r.outputQty}× ${esc(r.outputName)}</p>
-          <div class="supplier-meta">
-            ${ingredientHtml}
-            <span>Cost: ${r.goldCost}g</span>
-          </div>
-        </div>
+        <span class="craft-recipe-copy">
+          <strong>${esc(r.outputName)}</strong>
+          <small>Profession Lv ${r.requiredLevel}</small>
+        </span>
 
-        <div class="supplier-action">
-          ${
-            r.professionLevel < r.requiredLevel
-              ? `<span class="status locked">Requires Lv ${r.requiredLevel}</span>`
-              : canCraft
-                ? `<button class="btn primary" type="button" onclick="startCrafting(${r.recipeId})">Craft</button>`
-                : `<span class="status locked">Missing Materials</span>`
-          }
-        </div>
-      </article>
+        <span class="craft-recipe-state ${state}">${esc(stateLabel)}</span>
+      </button>
     `;
   }).join("");
 
@@ -178,21 +228,21 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
   const icon = stationIcons[profession] || "⚒️";
 
   const stationSounds: Record<string, { work: string; done: string }> = {
-  smithing: {
-    work: "/sounds/crafting/smelting.ogg",
-    done: "/sounds/crafting/smelting-done.ogg"
-  },
-  carpentry: {
-    work: "/sounds/crafting/milling.ogg",
-    done: "/sounds/crafting/milling-done.ogg"
-  },
-  alchemy: {
-    work: "/sounds/crafting/distilling.ogg",
-    done: "/sounds/crafting/distilling-done.ogg"
-  }
-};
+    smithing: {
+      work: "/sounds/crafting/smelting.ogg",
+      done: "/sounds/crafting/smelting-done.ogg"
+    },
+    carpentry: {
+      work: "/sounds/crafting/milling.ogg",
+      done: "/sounds/crafting/milling-done.ogg"
+    },
+    alchemy: {
+      work: "/sounds/crafting/distilling.ogg",
+      done: "/sounds/crafting/distilling-done.ogg"
+    }
+  };
 
-const sounds = stationSounds[profession] ?? stationSounds.smithing;
+  const sounds = stationSounds[profession] ?? stationSounds.smithing;
 
   res.send(`<!doctype html>
 <html lang="en">
@@ -203,6 +253,7 @@ const sounds = stationSounds[profession] ?? stationSounds.smithing;
   <title>Guildforge | ${esc(stationName)}</title>
   <link rel="stylesheet" href="/statpanel.css">
   <link rel="stylesheet" href="/workshop.css">
+  <link rel="stylesheet" href="/crafting.css">
   <link rel="stylesheet" href="/ui/toast.css">
   <script defer src="/statpanel.js"></script>
 </head>
@@ -211,20 +262,25 @@ const sounds = stationSounds[profession] ?? stationSounds.smithing;
   <div id="statpanel-root"></div>
 
   <main class="workshop-page">
-    <section class="workshop-shell">
+    <section class="workshop-shell frame-host">
+      <span class="frame-border main" aria-hidden="true"></span>
+
       <header class="workshop-hero">
         <div class="hero-title">
           <div class="hero-icon">${icon}</div>
           <div>
             <h1>${esc(stationName)}</h1>
-            <p>Craft useful equipment and consumables from refined materials.</p>
+            <p>${esc(profession)} Lv ${professionLevel} • Select a recipe to review materials and craft.</p>
           </div>
         </div>
 
         <div class="hero-actions">
-          <span class="pill">Gold: <strong>${Number(player.gold || 0)}g</strong></span>
+          <span class="pill">Level: <strong>${professionLevel}</strong></span>
+          <span class="pill">Gold: <strong id="craftGold">${Number(player.gold || 0)}g</strong></span>
           <a class="btn danger" href="/workshop">Back to Workshop</a>
         </div>
+
+        <span class="hero-divider-center" aria-hidden="true"></span>
       </header>
 
       <div class="station-tabs">
@@ -232,21 +288,99 @@ const sounds = stationSounds[profession] ?? stationSounds.smithing;
         <a class="station-tab active" href="/workshop/crafting/${esc(profession)}">⚒️ Crafting</a>
       </div>
 
-      <section class="card service-card wide">
-        <div class="cardHeader">
-          <div class="cardTitle">
-            <h2>Available Crafting Recipes</h2>
-            <p>Select a recipe to craft an item.</p>
-          </div>
-          <span class="badge good">Available</span>
-        </div>
+      <div class="crafting-layout">
+        <section class="card crafting-list-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
 
-        <div class="cardBody">
-          <div class="supplier-list">
-            ${recipeCards}
+          <div class="cardHeader">
+            <div class="cardTitle">
+              <h2>Recipes</h2>
+              <p><span id="visibleRecipeCount">${unlockedCount}</span> unlocked • ${craftableCount} ready</p>
+            </div>
+
+            <button
+              id="toggleLockedRecipes"
+              class="craft-lock-toggle"
+              type="button"
+              aria-pressed="false"
+              ${lockedCount ? "" : "hidden"}
+            >
+              Show Locked (${lockedCount})
+            </button>
           </div>
-        </div>
-      </section>
+
+          <div class="cardBody crafting-list-body">
+            <div class="craft-recipe-list" id="craftRecipeList">
+              ${recipeRows || `<div class="empty">No recipes are available.</div>`}
+            </div>
+          </div>
+        </section>
+
+        <aside class="card crafting-detail-card frame-host">
+          <span class="frame-border panel" aria-hidden="true"></span>
+
+          <div class="cardHeader compact">
+            <div class="cardTitle">
+              <h2>Recipe Details</h2>
+              <p id="detailAvailability">Select a recipe.</p>
+            </div>
+          </div>
+
+          <div class="cardBody">
+            <div class="craft-detail-hero">
+              <div class="craft-detail-icon">
+                <img id="detailIcon" src="/icons/items/default.png" alt="">
+              </div>
+
+              <div class="craft-detail-heading">
+                <span id="detailKicker" class="craft-detail-kicker">Recipe</span>
+                <h2 id="detailName">Select a Recipe</h2>
+                <p id="detailDescription">Choose a recipe from the list to review its requirements.</p>
+              </div>
+            </div>
+
+            <div class="craft-detail-stats" id="detailStats"></div>
+
+            <section class="craft-material-panel">
+              <div class="craft-section-heading">
+                <h3>Materials</h3>
+                <span id="detailCost"></span>
+              </div>
+              <div id="detailIngredients" class="craft-material-list"></div>
+            </section>
+
+            <section id="craftCatalystPanel" class="craft-catalyst-panel" hidden>
+              <div class="craft-section-heading">
+                <div>
+                  <h3>Optional Catalyst</h3>
+                  <p>Consume one catalyst to influence this equipment craft.</p>
+                </div>
+                <span id="catalystHint">Optional</span>
+              </div>
+
+              <div class="craft-catalyst-control">
+                <select id="craftCatalystSelect" class="craft-catalyst-select">
+                  <option value="">No Catalyst</option>
+                </select>
+                <div id="craftCatalystDescription" class="craft-catalyst-description">
+                  Craft normally without consuming a catalyst.
+                </div>
+              </div>
+            </section>
+
+            <div class="craft-detail-footer">
+              <div class="craft-detail-reward">
+                <span>Crafting XP</span>
+                <strong id="detailXp">+0 XP</strong>
+              </div>
+
+              <button id="detailCraftButton" class="btn primary craft-main-button" type="button" disabled>
+                Select Recipe
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
     </section>
   </main>
 
@@ -255,7 +389,6 @@ const sounds = stationSounds[profession] ?? stationSounds.smithing;
       <div class="gathering-modal__icon">${icon}</div>
       <div class="gathering-modal__title">Crafting...</div>
       <div class="gathering-modal__sub">Working materials</div>
-
       <div class="gathering-progress">
         <div id="craftingProgressFill" class="gathering-progress__fill"></div>
       </div>
@@ -264,175 +397,459 @@ const sounds = stationSounds[profession] ?? stationSounds.smithing;
 
   <script src="/ui/toast.js"></script>
 
-  <audio
-  id="workAudio"
-  preload="auto"
-  src="${sounds.work}">
-</audio>
+  <audio id="workAudio" preload="auto" src="${sounds.work}"></audio>
+  <audio id="doneAudio" preload="auto" src="${sounds.done}"></audio>
+  <audio id="professionLevelAudio" preload="auto" src="/sounds/profession-level.ogg"></audio>
 
-<audio
-  id="doneAudio"
-  preload="auto"
-  src="${sounds.done}">
-</audio>
+  <script>
+    const recipeData = ${safeJson(sortedRecipes)};
+    const catalystData = ${safeJson(catalystData)};
+    let currentGold = ${Number(player.gold || 0)};
+    let selectedRecipeId = null;
+    let showLockedRecipes = false;
 
-<audio
-  id="professionLevelAudio"
-  preload="auto"
-  src="/sounds/profession-level.ogg">
-</audio>
+    const listEl = document.getElementById("craftRecipeList");
+    const detailIcon = document.getElementById("detailIcon");
+    const detailName = document.getElementById("detailName");
+    const detailDescription = document.getElementById("detailDescription");
+    const detailKicker = document.getElementById("detailKicker");
+    const detailStats = document.getElementById("detailStats");
+    const detailIngredients = document.getElementById("detailIngredients");
+    const detailCost = document.getElementById("detailCost");
+    const detailXp = document.getElementById("detailXp");
+    const detailAvailability = document.getElementById("detailAvailability");
+    const detailCraftButton = document.getElementById("detailCraftButton");
+    const lockedToggle = document.getElementById("toggleLockedRecipes");
+    const catalystPanel = document.getElementById("craftCatalystPanel");
+    const catalystSelect = document.getElementById("craftCatalystSelect");
+    const catalystDescription = document.getElementById("craftCatalystDescription");
+    const catalystHint = document.getElementById("catalystHint");
 
-<script>
-async function startCrafting(recipeId) {
-  const modal = document.getElementById("craftingModal");
-  const fill = document.getElementById("craftingProgressFill");
-  const workSound = document.getElementById("workAudio");
-  const doneSound = document.getElementById("doneAudio");
-  const card = document.querySelector('[data-recipe-id="' + recipeId + '"]');
-
-  const durationMs = 1600;
-
-  if (modal && fill) {
-    modal.classList.remove("hidden");
-    fill.style.transition = "none";
-    fill.style.width = "0%";
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        fill.style.transition = "width " + durationMs + "ms linear";
-        fill.style.width = "100%";
-      });
-    });
-  }
-
-  if (workSound) {
-    workSound.volume = 0.6;
-    workSound.currentTime = 0;
-    workSound.play().catch(() => {});
-  }
-
-  await new Promise(resolve => setTimeout(resolve, durationMs));
-
-  try {
-    const res = await fetch("/workshop/craft/" + recipeId, {
-      method: "POST",
-      credentials: "include"
-    });
-
-    const data = await res.json();
-
-    console.log("Crafting response:", data);
-
-    if (workSound) {
-      workSound.pause();
-      workSound.currentTime = 0;
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
 
-    if (modal) modal.classList.add("hidden");
-
-    if (!res.ok || !data.success) {
-      const errorMessages = {
-        inventory_full: "Your inventory is full.",
-        missing_materials: "You are missing required materials.",
-        not_enough_gold: "You do not have enough gold.",
-        recipe_not_found: "That recipe no longer exists.",
-        profession_level_too_low: "Your profession level is too low.",
-        profession_not_found: "Profession not found."
-      };
-
-      GFToast.show(
-        "Crafting Failed",
-        errorMessages[data.error] || "Unable to craft item.",
-        {
-          type: "error",
-          durationMs: 2600
-        }
-      );
-
-      return;
+    function getRecipe(recipeId) {
+      return recipeData.find(r => Number(r.recipeId) === Number(recipeId));
     }
 
-    if (doneSound) {
-      doneSound.volume = 0.7;
-      doneSound.currentTime = 0;
-      doneSound.play().catch(() => {});
+    function refreshComputedState(recipe) {
+      recipe.unlocked = Number(recipe.professionLevel) >= Number(recipe.requiredLevel);
+      recipe.hasMaterials = recipe.ingredients.every(i => Number(i.owned) >= Number(i.needed));
+      recipe.canAffordGold = currentGold >= Number(recipe.goldCost || 0);
+      recipe.canCraft = recipe.unlocked && recipe.hasMaterials && recipe.canAffordGold;
     }
 
-    GFToast.show(
-      "Crafting Complete",
-      "Created " + data.outputQty + "× " + data.outputName + ". +" + data.professionExp + " XP.",
-      { type: "success", durationMs: 2600 }
-    );
-
-    if (data.professionResult?.leveledUp) {
-  const levelSound = document.getElementById("professionLevelAudio");
-
-  if (levelSound) {
-    levelSound.volume = 0.8;
-    levelSound.currentTime = 0;
-    levelSound.play().catch(() => {});
-  }
-
-  GFToast.show(
-    data.professionResult.professionName + " Level Up!",
-    "Reached level " + data.professionResult.newLevel + ".",
-    {
-      type: "success",
-      durationMs: 3600
+    function getRecipeState(recipe) {
+      if (!recipe.unlocked) return "locked";
+      if (recipe.canCraft) return "ready";
+      return "missing";
     }
-  );
-}
 
-    if (card && Array.isArray(data.ingredients)) {
-      let canCraftAgain = true;
+    function renderStats(recipe) {
+      const stats = [
+        ["Required Level", recipe.requiredLevel],
+        ["Craft Time", (Number(recipe.craftTimeMs || 0) / 1000).toFixed(1) + "s"]
+      ];
 
-      for (const ingredient of data.ingredients) {
-        const el = card.querySelector(
-          '[data-ingredient-id="' + ingredient.itemId + '"]'
+      if (recipe.outputType === "item_base") {
+        if (recipe.slot) stats.push(["Slot", String(recipe.slot)]);
+        if (recipe.weaponClass) stats.push(["Weapon", String(recipe.weaponClass)]);
+        if (recipe.armorWeight) stats.push(["Armor", String(recipe.armorWeight)]);
+        if (Number(recipe.baseAttack) > 0) stats.push(["Base Attack", recipe.baseAttack]);
+        if (Number(recipe.baseDefense) > 0) stats.push(["Base Defense", recipe.baseDefense]);
+      }
+
+      if (Number(recipe.qualityDifficulty || 0) > 0) {
+        stats.push(["Quality Difficulty", recipe.qualityDifficulty]);
+      }
+
+      return stats.map(([label, value]) =>
+        '<div class="craft-stat-box">' +
+          '<span>' + escapeHtml(label) + '</span>' +
+          '<strong>' + escapeHtml(value) + '</strong>' +
+        '</div>'
+      ).join("");
+    }
+
+    function getCatalyst(itemId) {
+      return catalystData.find(c => Number(c.itemId) === Number(itemId));
+    }
+
+    function catalystEffectText(catalyst) {
+      if (!catalyst) return "Craft normally without consuming a catalyst.";
+
+      if (String(catalyst.effectKey) === "quality_weight_bonus") {
+        return "+" + Number(catalyst.effectValue || 0) +
+          "% weight to all unlocked non-Base crafting quality tiers.";
+      }
+
+      return catalyst.description || "Applies a special crafting effect.";
+    }
+
+    function refreshCatalystOptions(recipe) {
+      if (!catalystPanel || !catalystSelect) return;
+
+      const supportsCatalyst = recipe && recipe.outputType === "item_base";
+      catalystPanel.hidden = !supportsCatalyst;
+
+      if (!supportsCatalyst) {
+        catalystSelect.value = "";
+        return;
+      }
+
+      const previousValue = catalystSelect.value;
+      catalystSelect.innerHTML = '<option value="">No Catalyst</option>';
+
+      for (const catalyst of catalystData) {
+        const option = document.createElement("option");
+        option.value = String(catalyst.itemId);
+        option.disabled = Number(catalyst.ownedQty || 0) <= 0;
+        option.textContent = catalyst.name +
+          " (Owned: " + Number(catalyst.ownedQty || 0) + ")" +
+          (option.disabled ? " — None Available" : "");
+        catalystSelect.appendChild(option);
+      }
+
+      const stillValid = previousValue &&
+        catalystData.some(c =>
+          String(c.itemId) === previousValue && Number(c.ownedQty || 0) > 0
         );
 
-        if (!el) continue;
+      catalystSelect.value = stillValid ? previousValue : "";
+      refreshCatalystDescription();
+    }
 
-        el.textContent =
-          ingredient.name + ": " + ingredient.remainingQty + "/" + ingredient.neededQty;
+    function refreshCatalystDescription() {
+      if (!catalystSelect || !catalystDescription) return;
 
-        el.className =
-          ingredient.remainingQty >= ingredient.neededQty
-            ? "status good"
-            : "status locked";
+      const catalyst = catalystSelect.value
+        ? getCatalyst(Number(catalystSelect.value))
+        : null;
 
-        if (ingredient.remainingQty < ingredient.neededQty) {
-          canCraftAgain = false;
-        }
-      }
+      catalystDescription.textContent = catalystEffectText(catalyst);
 
-      const actionEl = card.querySelector(".supplier-action");
-
-      if (!canCraftAgain && actionEl) {
-        actionEl.innerHTML = '<span class="status locked">Missing Materials</span>';
+      if (catalystHint) {
+        catalystHint.textContent = catalyst
+          ? "Uses 1× " + catalyst.name
+          : "Optional";
       }
     }
 
-  } catch (err) {
-    console.error("Crafting failed", err);
+    catalystSelect?.addEventListener("change", refreshCatalystDescription);
 
-    if (modal) modal.classList.add("hidden");
+    function selectRecipe(recipeId) {
+      const recipe = getRecipe(recipeId);
+      if (!recipe) return;
 
-    GFToast.show("Crafting Failed", "Something went wrong.", {
-      type: "error",
-      durationMs: 2600
+      selectedRecipeId = Number(recipe.recipeId);
+      refreshComputedState(recipe);
+
+      document.querySelectorAll(".craft-recipe-row").forEach(row => {
+        row.classList.toggle(
+          "is-selected",
+          Number(row.dataset.recipeId) === selectedRecipeId
+        );
+      });
+
+      detailIcon.src = recipe.outputIcon || "/icons/items/default.png";
+      detailName.textContent = recipe.outputName || "Recipe";
+      detailDescription.textContent =
+        recipe.outputDescription || "Craft this item from refined materials.";
+      detailKicker.textContent =
+        recipe.outputType === "item_base" ? "Equipment Recipe" : "Crafting Recipe";
+      detailStats.innerHTML = renderStats(recipe);
+      refreshCatalystOptions(recipe);
+
+      detailIngredients.innerHTML = recipe.ingredients.map(i => {
+        const enough = Number(i.owned) >= Number(i.needed);
+
+        return (
+          '<div class="craft-material-row ' + (enough ? "has-material" : "missing-material") + '">' +
+            '<span>' + escapeHtml(i.name) + '</span>' +
+            '<strong>' + Number(i.owned) + '/' + Number(i.needed) + '</strong>' +
+          '</div>'
+        );
+      }).join("");
+
+      detailCost.textContent = Number(recipe.goldCost || 0) > 0
+        ? Number(recipe.goldCost) + "g"
+        : "No gold cost";
+
+      detailXp.textContent = "+" + Number(recipe.professionExp || 0) + " XP";
+
+      if (!recipe.unlocked) {
+        detailAvailability.textContent =
+          "Locked • Requires profession level " + recipe.requiredLevel;
+        detailCraftButton.disabled = true;
+        detailCraftButton.textContent = "Locked";
+      } else if (!recipe.hasMaterials) {
+        detailAvailability.textContent = "Unlocked • Missing materials";
+        detailCraftButton.disabled = true;
+        detailCraftButton.textContent = "Missing Materials";
+      } else if (!recipe.canAffordGold) {
+        detailAvailability.textContent = "Unlocked • Not enough gold";
+        detailCraftButton.disabled = true;
+        detailCraftButton.textContent = "Need " + recipe.goldCost + "g";
+      } else {
+        detailAvailability.textContent = "Ready to craft";
+        detailCraftButton.disabled = false;
+        detailCraftButton.textContent = "Craft " + recipe.outputName;
+      }
+
+      detailCraftButton.dataset.recipeId = String(recipe.recipeId);
+    }
+
+    function refreshRecipeRows() {
+      let visible = 0;
+
+      recipeData.forEach(recipe => {
+        refreshComputedState(recipe);
+
+        const row = document.querySelector(
+          '.craft-recipe-row[data-recipe-id="' + recipe.recipeId + '"]'
+        );
+
+        if (!row) return;
+
+        const locked = !recipe.unlocked;
+        row.hidden = locked && !showLockedRecipes;
+
+        if (!row.hidden) visible++;
+
+        const state = getRecipeState(recipe);
+        row.dataset.state = state;
+        row.classList.toggle("is-locked", locked);
+
+        const stateEl = row.querySelector(".craft-recipe-state");
+        if (stateEl) {
+          stateEl.className = "craft-recipe-state " + state;
+          stateEl.textContent = locked
+            ? "Lv " + recipe.requiredLevel
+            : recipe.canCraft
+              ? "Ready"
+              : "Missing";
+        }
+      });
+
+      const visibleCount = document.getElementById("visibleRecipeCount");
+      if (visibleCount) visibleCount.textContent = String(visible);
+
+      if (selectedRecipeId) selectRecipe(selectedRecipeId);
+    }
+
+    listEl?.addEventListener("click", event => {
+      const row = event.target.closest(".craft-recipe-row");
+      if (!row) return;
+      selectRecipe(Number(row.dataset.recipeId));
     });
-  }
-}
-</script>
+
+    lockedToggle?.addEventListener("click", () => {
+      showLockedRecipes = !showLockedRecipes;
+      lockedToggle.setAttribute("aria-pressed", showLockedRecipes ? "true" : "false");
+      lockedToggle.textContent = showLockedRecipes
+        ? "Hide Locked"
+        : "Show Locked (${lockedCount})";
+      refreshRecipeRows();
+    });
+
+    detailCraftButton?.addEventListener("click", () => {
+      const recipeId = Number(detailCraftButton.dataset.recipeId);
+      if (Number.isFinite(recipeId)) startCrafting(recipeId);
+    });
+
+    async function startCrafting(recipeId) {
+      const recipe = getRecipe(recipeId);
+      if (!recipe) return;
+
+      refreshComputedState(recipe);
+      if (!recipe.canCraft) {
+        selectRecipe(recipeId);
+        return;
+      }
+
+      const modal = document.getElementById("craftingModal");
+      const fill = document.getElementById("craftingProgressFill");
+      const workSound = document.getElementById("workAudio");
+      const doneSound = document.getElementById("doneAudio");
+      const durationMs = Number(recipe.craftTimeMs || 1600);
+
+      detailCraftButton.disabled = true;
+      detailCraftButton.textContent = "Crafting...";
+
+      if (modal && fill) {
+        modal.classList.remove("hidden");
+        fill.style.transition = "none";
+        fill.style.width = "0%";
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            fill.style.transition = "width " + durationMs + "ms linear";
+            fill.style.width = "100%";
+          });
+        });
+      }
+
+      if (workSound) {
+        workSound.volume = 0.6;
+        workSound.currentTime = 0;
+        workSound.play().catch(() => {});
+      }
+
+      await new Promise(resolve => setTimeout(resolve, durationMs));
+
+      try {
+        const catalystItemId =
+          recipe.outputType === "item_base" && catalystSelect?.value
+            ? Number(catalystSelect.value)
+            : null;
+
+        const response = await fetch("/workshop/craft/" + recipeId, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ catalystItemId })
+        });
+
+        const data = await response.json();
+
+        if (workSound) {
+          workSound.pause();
+          workSound.currentTime = 0;
+        }
+
+        if (modal) modal.classList.add("hidden");
+
+        if (!response.ok || !data.success) {
+          const errorMessages = {
+            inventory_full: "Your inventory is full.",
+            missing_materials: "You are missing required materials.",
+            not_enough_gold: "You do not have enough gold.",
+            recipe_not_found: "That recipe no longer exists.",
+            profession_level_too_low: "Your profession level is too low.",
+            profession_not_found: "Profession not found.",
+            invalid_catalyst: "That catalyst cannot be used for this craft.",
+            missing_catalyst: "You no longer have that catalyst.",
+            catalyst_not_supported: "Catalysts can only be used on equipment crafts."
+          };
+
+          GFToast.show(
+            "Crafting Failed",
+            errorMessages[data.error] || "Unable to craft item.",
+            { type: "error", durationMs: 2600 }
+          );
+
+          selectRecipe(recipeId);
+          return;
+        }
+
+        if (doneSound) {
+          doneSound.volume = 0.7;
+          doneSound.currentTime = 0;
+          doneSound.play().catch(() => {});
+        }
+
+        const qualityLabel = data.craftingQuality?.quality
+          ? String(data.craftingQuality.quality)
+              .replace(/_/g, " ")
+              .replace(/\b\w/g, c => c.toUpperCase())
+          : null;
+
+        const catalystSuffix = data.catalyst?.name
+          ? " Catalyst: " + data.catalyst.name + "."
+          : "";
+
+        GFToast.show(
+          qualityLabel ? qualityLabel + " Craft!" : "Crafting Complete",
+          qualityLabel
+            ? "Created a " + qualityLabel + " " + data.outputName + ". +" + data.professionExp + " XP." + catalystSuffix
+            : "Created " + data.outputQty + "× " + data.outputName + ". +" + data.professionExp + " XP." + catalystSuffix,
+          { type: "success", durationMs: qualityLabel ? 3200 : 2600 }
+        );
+
+        if (Number(recipe.goldCost || 0) > 0) {
+          currentGold = Math.max(0, currentGold - Number(recipe.goldCost || 0));
+          const goldEl = document.getElementById("craftGold");
+          if (goldEl) goldEl.textContent = currentGold + "g";
+        }
+
+        if (Array.isArray(data.ingredients)) {
+          for (const updated of data.ingredients) {
+            recipeData.forEach(candidate => {
+              candidate.ingredients.forEach(ingredient => {
+                if (Number(ingredient.itemId) === Number(updated.itemId)) {
+                  ingredient.owned = Number(updated.remainingQty || 0);
+                }
+              });
+            });
+          }
+        }
+
+        if (data.catalyst?.itemId) {
+          const catalyst = getCatalyst(Number(data.catalyst.itemId));
+          if (catalyst) {
+            catalyst.ownedQty = Number(data.catalyst.remainingQty || 0);
+          }
+        }
+
+        if (data.professionResult?.leveledUp) {
+          const levelSound = document.getElementById("professionLevelAudio");
+
+          if (levelSound) {
+            levelSound.volume = 0.8;
+            levelSound.currentTime = 0;
+            levelSound.play().catch(() => {});
+          }
+
+          GFToast.show(
+            data.professionResult.professionName + " Level Up!",
+            "Reached level " + data.professionResult.newLevel + ".",
+            { type: "success", durationMs: 3600 }
+          );
+
+          recipeData.forEach(candidate => {
+            candidate.professionLevel = Number(data.professionResult.newLevel);
+          });
+        }
+
+        refreshRecipeRows();
+      } catch (error) {
+        console.error("Crafting failed", error);
+
+        if (workSound) {
+          workSound.pause();
+          workSound.currentTime = 0;
+        }
+
+        if (modal) modal.classList.add("hidden");
+
+        GFToast.show("Crafting Failed", "Something went wrong.", {
+          type: "error",
+          durationMs: 2600
+        });
+
+        selectRecipe(recipeId);
+      }
+    }
+
+    refreshRecipeRows();
+
+    const firstVisibleRecipe = recipeData.find(r => r.unlocked) || recipeData[0];
+    if (firstVisibleRecipe) selectRecipe(firstVisibleRecipe.recipeId);
+  </script>
 </body>
 </html>`);
 });
 
-
 router.post("/craft/:recipeId", requireLogin, async (req: any, res: any) => {
   const pid = req.session.playerId as number;
   const recipeId = Number(req.params.recipeId);
+  const requestedCatalystItemId = Number(req.body?.catalystItemId || 0);
 
   if (!Number.isFinite(recipeId)) {
     return res.status(400).json({ error: "invalid_recipe" });
@@ -480,7 +897,8 @@ const [[professionRow]]: any = await db.query(
   `
   SELECT
     p.id,
-    COALESCE(pp.level, 1) AS professionLevel
+    COALESCE(pp.level, 1) AS professionLevel,
+    COALESCE(pp.is_specialized, 0) AS isSpecialized
   FROM professions p
   LEFT JOIN player_professions pp
     ON pp.profession_id = p.id
@@ -533,6 +951,38 @@ try {
       return res.status(400).json({ error: "not_enough_gold" });
     }
 
+    let craftingQuality: CraftingQualityRoll | null = null;
+    let appliedCatalyst: AppliedCraftingCatalyst | null = null;
+
+    if (requestedCatalystItemId > 0 && recipe.output_type !== "item_base") {
+      await conn.rollback();
+      return res.status(400).json({ error: "catalyst_not_supported" });
+    }
+
+    if (requestedCatalystItemId > 0) {
+      try {
+        appliedCatalyst = await validateAndConsumeCraftingCatalyst({
+          conn,
+          playerId: pid,
+          catalystItemId: requestedCatalystItemId,
+          professionKey: String(recipe.profession_key),
+          professionLevel: Number(professionRow.professionLevel || 1)
+        });
+      } catch (error: any) {
+        await conn.rollback();
+
+        if (String(error?.message) === "MISSING_CATALYST") {
+          return res.status(400).json({ error: "missing_catalyst" });
+        }
+
+        if (String(error?.message) === "INVALID_CATALYST") {
+          return res.status(400).json({ error: "invalid_catalyst" });
+        }
+
+        throw error;
+      }
+    }
+
     if (recipe.output_type === "item") {
       await addItemWithConn(
         conn,
@@ -540,24 +990,34 @@ try {
         Number(recipe.output_id),
         Number(recipe.output_qty || 1)
       );
-} else if (recipe.output_type === "item_base") {
-  const playerItemId = await createPlayerItemFromBase(
-    conn,
-    pid,
-    Number(recipe.output_id),
-    recipeId
-  );
+    } else if (recipe.output_type === "item_base") {
+      craftingQuality = await rollCraftingQuality({
+        conn,
+        professionLevel: Number(professionRow.professionLevel || 1),
+        isSpecialized: Number(professionRow.isSpecialized || 0) === 1,
+        recipeRequiredLevel: Number(recipe.required_level || 1),
+        qualityDifficulty: Number(recipe.quality_difficulty || 0),
+        qualityWeightBonuses: appliedCatalyst?.qualityWeightBonuses || {}
+      });
 
-  await conn.query(
-    `
-    INSERT INTO inventory
-      (player_id, player_item_id, item_id, quantity, equipped)
-    VALUES
-      (?, ?, NULL, 1, 0)
-    `,
-    [pid, playerItemId]
-  );
-}
+      const playerItemId = await createPlayerItemFromBase(
+        conn,
+        pid,
+        Number(recipe.output_id),
+        recipeId,
+        craftingQuality
+      );
+
+      await conn.query(
+        `
+        INSERT INTO inventory
+          (player_id, player_item_id, item_id, quantity, equipped)
+        VALUES
+          (?, ?, NULL, 1, 0)
+        `,
+        [pid, playerItemId]
+      );
+    }
 
     const professionResult = await grantProfessionExperience(
       conn,
@@ -590,12 +1050,46 @@ try {
   [pid, recipeId]
 );
 
+    let catalystRemainingQty: number | null = null;
+
+    if (appliedCatalyst) {
+      const [[catalystInventory]]: any = await conn.query(
+        `
+        SELECT COALESCE(SUM(quantity), 0) AS quantity
+        FROM inventory
+        WHERE player_id = ?
+          AND item_id = ?
+          AND equipped = 0
+        `,
+        [pid, appliedCatalyst.itemId]
+      );
+
+      catalystRemainingQty = Number(catalystInventory?.quantity || 0);
+    }
+
     return res.json({
   success: true,
   outputName: recipe.outputName,
   outputQty: Number(recipe.output_qty || 1),
   professionExp: Number(recipe.profession_exp || 0),
   professionResult,
+  craftingQuality: craftingQuality
+    ? {
+        quality: craftingQuality.craftQuality,
+        rarity: craftingQuality.rarity,
+        chancePercent: craftingQuality.chancePercent,
+        pool: craftingQuality.pool
+      }
+    : null,
+  catalyst: appliedCatalyst
+    ? {
+        itemId: appliedCatalyst.itemId,
+        name: appliedCatalyst.name,
+        effectKey: appliedCatalyst.effectKey,
+        effectValue: appliedCatalyst.effectValue,
+        remainingQty: catalystRemainingQty
+      }
+    : null,
   ingredients: remainingRows.map((r: any) => ({
     itemId: Number(r.itemId),
     name: String(r.name),
@@ -664,7 +1158,8 @@ async function createPlayerItemFromBase(
   conn: any,
   playerId: number,
   baseId: number,
-  recipeId?: number
+  recipeId: number | undefined,
+  qualityRoll: CraftingQualityRoll
 ) {
   const [[base]]: any = await conn.query(
     `
@@ -679,6 +1174,28 @@ async function createPlayerItemFromBase(
 
   if (!base) throw new Error("ITEM_BASE_NOT_FOUND");
 
+  const itemLevel = Number(base.required_level || 1);
+
+  const affixes = await rollCraftedEquipmentAffixes({
+    conn,
+    baseItemId: baseId,
+    itemLevel,
+    rarity: qualityRoll.rarity
+  });
+
+  const qualityLabels: Record<string, string> = {
+    base: "",
+    crafted: "Crafted",
+    forged: "Forged",
+    tempered: "Tempered",
+    masterworked: "Masterworked"
+  };
+
+  const qualityLabel = qualityLabels[qualityRoll.craftQuality] || "";
+  const generatedName = qualityLabel
+    ? `${qualityLabel} ${base.name}`
+    : base.name;
+
   const [result]: any = await conn.query(
     `
     INSERT INTO player_items
@@ -688,6 +1205,7 @@ async function createPlayerItemFromBase(
         name,
         item_level,
         rarity,
+        craft_quality,
         is_equipped,
         is_claimed,
         roll_json,
@@ -695,13 +1213,16 @@ async function createPlayerItemFromBase(
         source_id
       )
     VALUES
-      (?, ?, ?, ?, 'base', 0, 1, NULL, 'crafting', ?)
+      (?, ?, ?, ?, ?, ?, 0, 1, ?, 'crafting', ?)
     `,
     [
       playerId,
       baseId,
-      base.name,
-      Number(base.required_level || base.item_level || 1),
+      generatedName,
+      itemLevel,
+      qualityRoll.rarity,
+      qualityRoll.craftQuality,
+      affixes.length ? JSON.stringify(affixes) : null,
       recipeId ?? null
     ]
   );

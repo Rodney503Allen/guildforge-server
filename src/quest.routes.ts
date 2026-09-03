@@ -30,6 +30,11 @@ router.post("/quests/:questId/accept", async (req, res) => {
     if (String(err?.code) === "ER_DUP_ENTRY") {
       return res.status(400).json({ error: "Quest already accepted" });
     }
+    const msg = String(err?.message || "");
+    if (msg === "QUEST_LEVEL_TOO_LOW") return res.status(400).json({ error: "quest_level_too_low" });
+    if (msg === "QUEST_PREREQUISITE_NOT_MET") return res.status(400).json({ error: "quest_prerequisite_not_met" });
+    if (msg === "BOUNTY_EXPIRED") return res.status(400).json({ error: "bounty_expired" });
+    if (msg === "QUEST_NOT_FOUND") return res.status(404).json({ error: "quest_not_found" });
     console.error("🔥 /quests/:questId/accept ERROR:", err);
     res.status(500).json({ error: "server_error" });
   }
@@ -83,6 +88,10 @@ router.get("/quests/tracked", async (req, res) => {
         q.title,
         q.description,
         o.type AS objectiveType,
+        o.objective_text,
+        o.step_order,
+        o.is_optional,
+        o.is_hidden,
         o.required_count,
         o.region_name,
         o.target_item_id,
@@ -110,8 +119,19 @@ router.get("/quests/tracked", async (req, res) => {
 
       WHERE ptq.player_id=?
         AND pq.status IN ('active','accepted','in_progress','completed')
+        AND (
+          pq.status <> 'active'
+          OR o.step_order <= COALESCE((
+            SELECT MIN(o2.step_order)
+            FROM player_quest_objectives pqo2
+            JOIN quest_objectives o2 ON o2.id = pqo2.objective_id
+            WHERE pqo2.player_quest_id = pq.id
+              AND pqo2.is_complete = 0
+              AND COALESCE(o2.is_optional, 0) = 0
+          ), o.step_order)
+        )
 
-      ORDER BY ptq.created_at ASC, pq.id ASC, o.id ASC
+      ORDER BY ptq.created_at ASC, pq.id ASC, o.step_order ASC, o.id ASC
       `,
       [pid]
     );
@@ -145,6 +165,10 @@ router.get("/quests/turnins/:locationId", async (req, res) => {
         q.description,
 
         o.type AS objectiveType,
+        o.objective_text,
+        o.step_order,
+        o.is_optional,
+        o.is_hidden,
         o.required_count,
         pqo.progress_count,
         pqo.is_complete,
@@ -171,7 +195,18 @@ router.get("/quests/turnins/:locationId", async (req, res) => {
         AND pq.status IN ('active','accepted','in_progress','completed')
 
         AND q.turn_in_location_id = ?
-      ORDER BY pq.id DESC, o.id ASC
+        AND (
+          pq.status <> 'active'
+          OR o.step_order <= COALESCE((
+            SELECT MIN(o2.step_order)
+            FROM player_quest_objectives pqo2
+            JOIN quest_objectives o2 ON o2.id = pqo2.objective_id
+            WHERE pqo2.player_quest_id = pq.id
+              AND pqo2.is_complete = 0
+              AND COALESCE(o2.is_optional, 0) = 0
+          ), o.step_order)
+        )
+      ORDER BY pq.id DESC, o.step_order ASC, o.id ASC
       `,
       [pid, locationId]
     );

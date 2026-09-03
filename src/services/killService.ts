@@ -3,7 +3,7 @@ import { db } from "../db";
 import { grantExperience } from "./experienceService";
 import { rollCreatureLoot } from "./lootService";
 import { createChestFromDrops } from "./chestService";
-import { applyKillProgress } from "./questService";
+import { advanceQuestObjectives } from "./questService";
 import { generateLootForCreature } from "./lootGenerator";
 import { recordCreatureKill } from "./bestiaryService";
 import { advanceHuntObjective } from "../huntService";
@@ -177,7 +177,12 @@ const goldGained = Math.max(
     affixLootMult
   );
 
-  const killProg = await applyKillProgress(playerId, creatureId, regionName);
+  const killProg = await advanceQuestObjectives(playerId, {
+    type: "CREATURE_KILLED",
+    creatureId,
+    regionName,
+    amount: 1
+  });
   const completedQuests = await hydrateCompletedQuests(
     playerId,
     killProg?.completedPlayerQuestIds ?? []

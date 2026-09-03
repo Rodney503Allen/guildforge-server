@@ -2,7 +2,7 @@
 import express from "express";
 import { db } from "./db";
 import { trySpawnEnemy } from "./services/spawnService";
-import { applyInteractProgress, applyEnterAreaProgress } from "./services/questService";
+import { applyInteractProgress, applyEnterAreaProgress, applyLocationProgress } from "./services/questService";
 import { maybeSpawnResourceNodeForPlayer } from "./services/gatheringSpawnService";
 import { advanceHuntObjective } from "./huntService";
 import { publishHuntReadyCheck } from "./huntSocket";
@@ -1538,6 +1538,16 @@ const enterAreaResult =
     pid,
     tile.region_id ?? null
   );
+
+const locationResult =
+  await applyLocationProgress(
+    pid,
+    newX,
+    newY,
+    String(tile.region_name || "Unknown Region"),
+    null
+  );
+
 let huntProgress = null;
 
 try {
@@ -1761,7 +1771,8 @@ const nearbyHuntClues =
     },
 
     questProgress: {
-      enterArea: enterAreaResult
+      enterArea: enterAreaResult,
+      location: locationResult
     },
 
     huntProgress,

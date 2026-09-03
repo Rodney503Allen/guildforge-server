@@ -30,6 +30,13 @@ function showErrorToast(message, title = "Action Failed") {
   });
 }
 
+function showSuccessToast(message, title = "Avatar Updated") {
+  window.GFToast.show(title, message, {
+    type: "success",
+    durationMs: TOAST_VISIBLE_MS
+  });
+}
+
 let draggedId = null;
 
 document.addEventListener("dragstart", e => {
@@ -62,6 +69,7 @@ async function unequipItem(id) {
 
   location.reload();
 }
+
 async function equipPotion(inventoryId, slot) {
   const res = await fetch("/character/equip-potion", {
     method: "POST",
@@ -84,10 +92,10 @@ async function unequipPotion(slot) {
 
   const data = await res.json();
 
-if (data.error) {
-  showErrorToast(data.error, "Inventory Full");
-  return;
-}
+  if (data.error) {
+    showErrorToast(data.error, "Inventory Full");
+    return;
+  }
 
   location.reload();
 }
@@ -167,19 +175,18 @@ function dropUnequip() {
   if (draggedId) unequipItem(draggedId);
 }
 
-
-  const searchEl = document.getElementById("invSearch");
-  if (searchEl) {
-    searchEl.addEventListener("input", () => {
-      const q = searchEl.value.trim().toLowerCase();
-      document.querySelectorAll(".inv-item").forEach(el => {
-        const name = (el.getAttribute("data-search") || "");
-        el.style.display = (!q || name.includes(q)) ? "" : "none";
-      });
+const searchEl = document.getElementById("invSearch");
+if (searchEl) {
+  searchEl.addEventListener("input", () => {
+    const q = searchEl.value.trim().toLowerCase();
+    document.querySelectorAll(".inv-item").forEach(el => {
+      const name = (el.getAttribute("data-search") || "");
+      el.style.display = (!q || name.includes(q)) ? "" : "none";
     });
-  }
+  });
+}
 
-  // =========================
+// =========================
 // COMBAT SKILL LOADOUT
 // =========================
 
@@ -209,13 +216,6 @@ function resolveSkillIcon(icon) {
     return raw;
   }
 
-  /*
-   * Database path:
-   * /knight/shield_bash.webp
-   *
-   * Public file path:
-   * /icons/spells/knight/shield_bash.webp
-   */
   return `/icons/spells/${raw.replace(/^\/+/, "")}`;
 }
 
@@ -268,6 +268,245 @@ async function readJsonResponse(response) {
 
   return data;
 }
+
+// =========================
+// AVATAR COLLECTION
+// =========================
+
+let avatarCollection = [];
+let avatarSelectorLoaded = false;
+let avatarEquipBusy = false;
+
+function resolveAvatarImage(imageUrl) {
+  const raw = String(imageUrl || "").trim();
+
+  if (!raw) {
+    return "/images/avatars/default_adventurer.webp";
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("/")) {
+    return raw;
+  }
+
+  return `/${raw}`;
+}
+
+async function openAvatarSelector() {
+  const modal = document.getElementById("avatarSelectorModal");
+  if (!modal) return;
+
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("avatar-selector-open");
+
+  if (!avatarSelectorLoaded) {
+    await loadAvatarCollection();
+  }
+}
+
+function closeAvatarSelector() {
+  const modal = document.getElementById("avatarSelectorModal");
+  if (!modal) return;
+
+  modal.classList.remove("open");
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("avatar-selector-open");
+}
+
+async function loadAvatarCollection() {
+  const grid = document.getElementById("avatarCollectionGrid");
+  if (!grid) return;
+
+  grid.innerHTML = `
+    <div class="avatars-loading">
+      Loading avatars...
+    </div>
+  `;
+
+  try {
+    const response = await fetch("/character/avatars");
+    const data = await readJsonResponse(response);
+
+    avatarCollection = Array.isArray(data.avatars)
+      ? data.avatars
+      : [];
+
+    avatarSelectorLoaded = true;
+    renderAvatarCollection();
+  } catch (err) {
+    console.error("Could not load avatars:", err);
+
+    grid.innerHTML = `
+      <div class="avatars-empty">
+        Could not load your avatar collection.
+      </div>
+    `;
+
+    showErrorToast(
+      err?.message || "Could not load avatars."
+    );
+  }
+}
+
+function renderAvatarCollection() {
+  const grid = document.getElementById("avatarCollectionGrid");
+  if (!grid) return;
+
+  if (!avatarCollection.length) {
+    grid.innerHTML = `
+      <div class="avatars-empty">
+        No avatars are currently available.
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = avatarCollection
+    .map(avatar => {
+      const unlocked = Boolean(avatar.unlocked);
+      const equipped = Boolean(avatar.equipped);
+      const image = resolveAvatarImage(avatar.image_url);
+      const rarity = String(avatar.rarity || "common").toLowerCase();
+      const source = avatar.source || "Unlock requirement unknown.";
+
+      return `
+        <button
+          type="button"
+          class="
+            avatar-card
+            rarity-${escapeSkillHtml(rarity)}
+            ${unlocked ? "unlocked" : "locked"}
+            ${equipped ? "equipped" : ""}
+          "
+          data-avatar-id="${Number(avatar.id)}"
+          ${unlocked && !equipped ? "" : "disabled"}
+          ${unlocked ? `onclick="equipAvatar(${Number(avatar.id)})"` : ""}
+        >
+          <div class="avatar-card-image-wrap">
+            <img
+              class="avatar-card-image"
+              src="${escapeSkillHtml(image)}"
+              alt="${escapeSkillHtml(avatar.name)}"
+              loading="lazy"
+              onerror="
+                this.onerror = null;
+                this.src = '/images/avatars/default_adventurer.webp';
+              "
+            >
+
+            ${
+              !unlocked
+                ? `
+                  <div class="avatar-lock-overlay">
+                    <span class="avatar-lock-icon">🔒</span>
+                  </div>
+                `
+                : ""
+            }
+
+            ${
+              equipped
+                ? `
+                  <div class="avatar-equipped-badge">
+                    Equipped
+                  </div>
+                `
+                : ""
+            }
+          </div>
+
+          <div class="avatar-card-info">
+            <div class="avatar-card-name">
+              ${escapeSkillHtml(avatar.name)}
+            </div>
+
+            <div class="avatar-card-rarity">
+              ${escapeSkillHtml(rarity)}
+            </div>
+
+            <div class="avatar-card-source">
+              ${
+                unlocked
+                  ? (
+                      avatar.description
+                        ? escapeSkillHtml(avatar.description)
+                        : "Unlocked"
+                    )
+                  : escapeSkillHtml(source)
+              }
+            </div>
+          </div>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+async function equipAvatar(avatarId) {
+  if (avatarEquipBusy) return;
+
+  const avatar = avatarCollection.find(
+    entry => Number(entry.id) === Number(avatarId)
+  );
+
+  if (!avatar || !avatar.unlocked) {
+    return;
+  }
+
+  avatarEquipBusy = true;
+
+  try {
+    const response = await fetch("/character/avatar/equip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ avatarId })
+    });
+
+    const data = await readJsonResponse(response);
+
+    avatarCollection.forEach(entry => {
+      entry.equipped = Number(entry.id) === Number(avatarId);
+    });
+
+    const currentImage = document.getElementById("characterAvatarImage");
+    const currentName = document.getElementById("characterAvatarName");
+
+    if (currentImage) {
+      currentImage.src = resolveAvatarImage(data.avatar.image_url);
+      currentImage.alt = data.avatar.name || "Player avatar";
+    }
+
+    if (currentName) {
+      currentName.textContent = data.avatar.name;
+    }
+
+    renderAvatarCollection();
+
+    showSuccessToast(
+      `${data.avatar.name} is now equipped.`
+    );
+  } catch (err) {
+    console.error("Could not equip avatar:", err);
+
+    showErrorToast(
+      err?.message || "Could not equip that avatar."
+    );
+  } finally {
+    avatarEquipBusy = false;
+  }
+}
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    closeAvatarSelector();
+  }
+});
 
 async function loadSkillSelectionUI() {
   const learnedGrid = document.getElementById(

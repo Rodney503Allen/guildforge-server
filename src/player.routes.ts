@@ -15,56 +15,90 @@ router.get("/me", async (req, res) => {
     const p = await getFinalPlayerStats(pid);
     if (!p) return res.json(null);
 
-res.json({
-  id: p.id,
-  name: p.name,
-  pclass: p.pclass, // legacy fallback
-  class_id: p.class_id,
-  class_name: p.class_name,
-  class_slug: p.class_slug,
-  archetype: p.archetype,
-  level: p.level,
-  exper: p.exper,
-  xpNeeded: getExpForLevel(p.level),
-  location: p.location,
+    const [[equippedAvatar]]: any = await db.query(
+      `
+      SELECT
+        a.id,
+        a.name,
+        a.image_url,
+        a.rarity
+      FROM players p
 
-  attack: p.attack,
-  defense: p.defense,
-  agility: p.agility,
-  vitality: p.vitality,
-  intellect: p.intellect,
-  crit: p.crit,
+      LEFT JOIN avatars a
+        ON a.id = p.equipped_avatar_id
+        AND a.is_active = 1
 
-  hpoints: p.hpoints,
-  maxhp: p.maxhp,
-  spoints: p.spoints,
-  maxspoints: p.maxspoints,
+      WHERE p.id = ?
 
-  spellPower: p.spellPower,
-  dodgeChance: p.dodgeChance,
+      LIMIT 1
+      `,
+      [pid]
+    );
 
-  gold: p.gold,
-  stat_points: p.stat_points,
+    res.json({
+      id: p.id,
+      name: p.name,
+      pclass: p.pclass,
+      class_id: p.class_id,
+      class_name: p.class_name,
+      class_slug: p.class_slug,
+      archetype: p.archetype,
+      level: p.level,
+      exper: p.exper,
+      xpNeeded: getExpForLevel(p.level),
+      location: p.location,
 
-  guild_name: p.guild_name,
-  guild_rank: p.guild_rank,
-  portrait_url: p.portrait_url,
-  guild_banner: p.guild_banner,
+      attack: p.attack,
+      defense: p.defense,
+      agility: p.agility,
+      vitality: p.vitality,
+      intellect: p.intellect,
+      crit: p.crit,
 
-  // OPTIONAL: buffs for UI only
-  buffs: (await getActiveBuffs(pid)).map(b => ({
-    stat: b.stat,
-    value: b.value,
-    expires_at: b.expires_at
-  }))
-});
+      hpoints: p.hpoints,
+      maxhp: p.maxhp,
+      spoints: p.spoints,
+      maxspoints: p.maxspoints,
 
+      spellPower: p.spellPower,
+      dodgeChance: p.dodgeChance,
 
+      gold: p.gold,
+      stat_points: p.stat_points,
+
+      guild_name: p.guild_name,
+      guild_rank: p.guild_rank,
+
+      equipped_avatar_id:
+        equippedAvatar?.id != null
+          ? Number(equippedAvatar.id)
+          : null,
+
+      avatar_name:
+        equippedAvatar?.name || null,
+
+      avatar_url:
+        equippedAvatar?.image_url || null,
+
+      avatar_rarity:
+        equippedAvatar?.rarity || null,
+
+      // Compatibility for UI that still expects portrait_url.
+      portrait_url:
+        equippedAvatar?.image_url || null,
+
+      guild_banner: p.guild_banner,
+
+      buffs: (await getActiveBuffs(pid)).map(b => ({
+        stat: b.stat,
+        value: b.value,
+        expires_at: b.expires_at
+      }))
+    });
   } catch (err) {
     console.error("ME ROUTE ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
-  
 });
 
 // =======================
@@ -100,8 +134,6 @@ router.get("/api/classes", async (_req, res) => {
   }
 });
 
-
-
 // =======================
 // PLAYER HP
 // =======================
@@ -124,14 +156,10 @@ router.get("/api/player/hp", async (req, res) => {
   }
 });
 
-
-
-
 // =======================
 // PROFILE PAGE (OPTIONAL FUTURE)
 // =======================
 router.get("/profile", async (req, res) => {
-
   const pid = req.session.playerId;
   if (!pid) return res.redirect("/login.html");
 
@@ -158,8 +186,6 @@ router.get("/profile", async (req, res) => {
     <p>Gold: ${player.gold}</p>
     <a href="/">Back</a>
   `);
-
 });
-
 
 export default router;

@@ -142,11 +142,7 @@ router.get("/api/potions/equipped", requireLogin, async (req, res) => {
   const sp = await loadPotion(cols?.spInv ?? null, "sp");
 
   res.json({ hp, sp });
-
 });
-
-
-
 
 // =======================
 // EQUIPPED TOOL API
@@ -201,9 +197,141 @@ const renderToolSlot = (label: string, tool: any, slot: string) => `
   </div>
 `;
 
+// =======================
+// AVATAR API
+// =======================
+router.get("/character/avatars", requireLogin, async (req, res) => {
+  try {
+    const pid = Number(req.session.playerId);
 
+    const [avatars]: any = await db.query(
+      `
+      SELECT
+        a.id,
+        a.name,
+        a.image_url,
+        a.rarity,
+        a.source,
+        a.description,
+        a.display_order,
 
+        CASE
+          WHEN pa.avatar_id IS NOT NULL THEN 1
+          ELSE 0
+        END AS unlocked,
 
+        CASE
+          WHEN p.equipped_avatar_id = a.id THEN 1
+          ELSE 0
+        END AS equipped
+
+      FROM avatars a
+
+      JOIN players p
+        ON p.id = ?
+
+      LEFT JOIN player_avatars pa
+        ON pa.avatar_id = a.id
+        AND pa.player_id = p.id
+
+      WHERE a.is_active = 1
+
+      ORDER BY
+        a.display_order ASC,
+        a.id ASC
+      `,
+      [pid]
+    );
+
+    res.json({
+      avatars: (avatars || []).map((avatar: any) => ({
+        id: Number(avatar.id),
+        name: avatar.name,
+        image_url: avatar.image_url,
+        rarity: avatar.rarity || "common",
+        source: avatar.source || "",
+        description: avatar.description || "",
+        unlocked: Number(avatar.unlocked) === 1,
+        equipped: Number(avatar.equipped) === 1
+      }))
+    });
+  } catch (err) {
+    console.error("LOAD AVATARS FAILED:", err);
+
+    res.status(500).json({
+      error: "Could not load avatars."
+    });
+  }
+});
+
+router.post("/character/avatar/equip", requireLogin, async (req, res) => {
+  try {
+    const pid = Number(req.session.playerId);
+    const avatarId = Number(req.body.avatarId);
+
+    if (!Number.isInteger(avatarId) || avatarId <= 0) {
+      return res.status(400).json({
+        error: "Invalid avatar."
+      });
+    }
+
+    const [[avatar]]: any = await db.query(
+      `
+      SELECT
+        a.id,
+        a.name,
+        a.image_url,
+        a.rarity,
+        a.source,
+        a.description
+      FROM player_avatars pa
+
+      JOIN avatars a
+        ON a.id = pa.avatar_id
+
+      WHERE pa.player_id = ?
+        AND pa.avatar_id = ?
+        AND a.is_active = 1
+
+      LIMIT 1
+      `,
+      [pid, avatarId]
+    );
+
+    if (!avatar) {
+      return res.status(403).json({
+        error: "You have not unlocked that avatar."
+      });
+    }
+
+    await db.query(
+      `
+      UPDATE players
+      SET equipped_avatar_id = ?
+      WHERE id = ?
+      `,
+      [avatarId, pid]
+    );
+
+    res.json({
+      success: true,
+      avatar: {
+        id: Number(avatar.id),
+        name: avatar.name,
+        image_url: avatar.image_url,
+        rarity: avatar.rarity || "common",
+        source: avatar.source || "",
+        description: avatar.description || ""
+      }
+    });
+  } catch (err) {
+    console.error("EQUIP AVATAR FAILED:", err);
+
+    res.status(500).json({
+      error: "Could not equip that avatar."
+    });
+  }
+});
 
 // =======================
 // CHARACTER PAGE
@@ -225,6 +353,36 @@ router.get("/character", requireLogin, async (req, res) => {
 
   const p = await getFinalPlayerStats(pid);
   if (!p) return res.redirect("/login.html");
+
+  const [[equippedAvatar]]: any = await db.query(
+    `
+    SELECT
+      a.id,
+      a.name,
+      a.image_url,
+      a.rarity,
+      a.source,
+      a.description
+    FROM players p
+
+    LEFT JOIN avatars a
+      ON a.id = p.equipped_avatar_id
+      AND a.is_active = 1
+
+    WHERE p.id = ?
+
+    LIMIT 1
+    `,
+    [pid]
+  );
+
+  const equippedAvatarUrl =
+    equippedAvatar?.image_url
+      ? resolveIcon(equippedAvatar.image_url)
+      : "/images/avatars/default_adventurer.webp";
+
+  const equippedAvatarName =
+    equippedAvatar?.name || "Adventurer";
 
   const expToNext = p.level * 50 + p.level * p.level * 50;
   const expPercent = Math.min(100, Math.floor((p.exper / expToNext) * 100));
@@ -287,7 +445,6 @@ router.get("/character", requireLogin, async (req, res) => {
       inv.player_item_id,
       inv.equipped,
 
-      -- static item path
       i.id AS static_item_id,
       i.name AS static_name,
       i.slot AS static_slot,
@@ -301,7 +458,6 @@ router.get("/character", requireLogin, async (req, res) => {
       i.intellect AS static_intellect,
       i.crit AS static_crit,
 
-      -- rolled item path
       pi.id AS rolled_player_item_id,
       pi.name AS rolled_name,
       pi.item_level AS rolled_item_level,
@@ -445,7 +601,6 @@ router.get("/character", requireLogin, async (req, res) => {
       inv.quantity,
       inv.equipped,
 
-      -- static item path
       i.id AS static_item_id,
       i.name AS static_name,
       i.slot AS static_slot,
@@ -464,7 +619,6 @@ router.get("/character", requireLogin, async (req, res) => {
       i.intellect AS static_intellect,
       i.crit AS static_crit,
 
-      -- rolled item path
       pi.id AS rolled_player_item_id,
       pi.name AS rolled_name,
       pi.item_level AS rolled_item_level,
@@ -518,8 +672,8 @@ router.get("/character", requireLogin, async (req, res) => {
 
       item_level: isRolled ? Number(g.rolled_item_level || 0) : null,
       item_type: isRolled
-      ? g.base_item_type
-      : g.static_item_type,
+        ? g.base_item_type
+        : g.static_item_type,
       armor_weight: isRolled ? g.base_armor_weight : null,
       base_attack: isRolled ? (Number(g.base_attack) || 0) : (Number(g.static_attack) || 0),
       base_defense: isRolled ? (Number(g.base_defense) || 0) : (Number(g.static_defense) || 0),
@@ -544,6 +698,7 @@ router.get("/character", requireLogin, async (req, res) => {
       is_rolled: isRolled
     };
   });
+
   const [[toolCols]]: any = await db.query(
     `
     SELECT
@@ -559,6 +714,7 @@ router.get("/character", requireLogin, async (req, res) => {
   const miningTool = await loadTool(pid, toolCols?.miningInv ?? null, "mining_tool");
   const herbalismTool = await loadTool(pid, toolCols?.herbalismInv ?? null, "herbalism_tool");
   const woodcuttingTool = await loadTool(pid, toolCols?.woodcuttingInv ?? null, "woodcutting_tool");
+
   const renderEquipSlot = (slotName: string, alt: string) => {
     const item = equipped[slotName];
     if (!item) {
@@ -580,9 +736,10 @@ router.get("/character", requireLogin, async (req, res) => {
       </div>
     `;
   };
-const inventoryUsed = await getUsedInventorySlots(pid);
-const inventoryCapacity = await getInventoryCapacity(pid);
-const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
+
+  const inventoryUsed = await getUsedInventorySlots(pid);
+  const inventoryCapacity = await getInventoryCapacity(pid);
+
   res.send(`
 <!DOCTYPE html>
 <html>
@@ -597,7 +754,7 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
   <script src="/ui/toast.js"></script>
   <script defer src="/ui/itemTooltip.js"></script>
   <script defer src="/statpanel.js"></script>
-  <script defer src="/character.js?v=5"></script>
+  <script defer src="/character.js?v=6"></script>
 </head>
 
 <body>
@@ -639,6 +796,40 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
           <span class="frame-border panel" aria-hidden="true"></span>
 
           <h2>${p.name}</h2>
+
+          <div class="character-avatar-section">
+            <div class="character-avatar-frame">
+              <img
+                id="characterAvatarImage"
+                class="character-avatar-image"
+                src="${equippedAvatarUrl}"
+                alt="${escapeHtml(equippedAvatarName)}"
+                onerror="
+                  this.onerror = null;
+                  this.src = '/images/avatars/default_adventurer.webp';
+                "
+              >
+
+              <div class="character-avatar-shade"></div>
+            </div>
+
+            <div class="character-avatar-meta">
+              <div
+                id="characterAvatarName"
+                class="character-avatar-name"
+              >
+                ${escapeHtml(equippedAvatarName)}
+              </div>
+
+              <button
+                type="button"
+                class="change-avatar-btn"
+                onclick="openAvatarSelector()"
+              >
+                Choose Avatar
+              </button>
+            </div>
+          </div>
 
           <div class="character-summary">
             <div class="summary-row">
@@ -1013,6 +1204,59 @@ const inventoryFree = Math.max(0, inventoryCapacity - inventoryUsed);
       </section>
     </section>
   </main>
+
+  <div
+    id="avatarSelectorModal"
+    class="avatar-selector-modal"
+    aria-hidden="true"
+  >
+    <div
+      class="avatar-selector-backdrop"
+      onclick="closeAvatarSelector()"
+    ></div>
+
+    <section
+      class="avatar-selector-window frame-host"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="avatarSelectorTitle"
+    >
+      <span
+        class="frame-border main"
+        aria-hidden="true"
+      ></span>
+
+      <header class="avatar-selector-header">
+        <div>
+          <h2 id="avatarSelectorTitle">
+            Avatar Collection
+          </h2>
+
+          <p>
+            Choose from the avatars you have unlocked.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          class="avatar-selector-close"
+          onclick="closeAvatarSelector()"
+          aria-label="Close avatar selector"
+        >
+          ×
+        </button>
+      </header>
+
+      <div
+        id="avatarCollectionGrid"
+        class="avatar-collection-grid"
+      >
+        <div class="avatars-loading">
+          Loading avatars...
+        </div>
+      </div>
+    </section>
+  </div>
 </body></html>
 `);
 });
@@ -1277,7 +1521,6 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
       return res.json({ error: "Potion doesn't match that slot" });
     }
 
-    // Return old potion in this slot to backpack
     if (oldInventoryId && oldInventoryId !== inventoryId) {
       await conn.query(
         `
@@ -1290,7 +1533,6 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
       );
     }
 
-    // Remove new potion from backpack
     await conn.query(
       `
       UPDATE inventory
@@ -1301,7 +1543,6 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
       [inventoryId, pid]
     );
 
-    // Save potion slot on player
     await conn.query(
       `UPDATE players SET ${col} = ? WHERE id = ?`,
       [inventoryId, pid]
@@ -1378,7 +1619,6 @@ router.post("/character/unequip-potion", requireLogin, async (req, res) => {
     res.json({ error: "Failed to unequip potion" });
   }
 });
-
 
 // =======================
 // EQUIP TOOLS
