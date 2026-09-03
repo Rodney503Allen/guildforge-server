@@ -337,7 +337,7 @@ router.get("/world", async (req, res) => {
   // Load player
   const [[player]]: any = await db.query(
     `
-    SELECT map_x, map_y, level, steps_since_encounter, location
+    SELECT id, map_x, map_y, level, steps_since_encounter, location
     FROM players
     WHERE id=?
     LIMIT 1
@@ -1143,13 +1143,6 @@ res.send(`
   <script src="/ui/itemTooltip.js"></script>
   <script src="/lootChest.js"></script>
 
-  <script>
-    window.__RESOURCE_NODES__ =
-      ${JSON.stringify(resourceNodes)};
-
-    window.__HUNT_TARGETS__ =
-      ${JSON.stringify(huntTargets)};
-  </script>
 <script>
   window.__PLAYER_ID__ =
     ${Number(player.id)};
@@ -1517,21 +1510,24 @@ const spawnedResourceNode =
     pid
   );
 
-const resourceNodes =
-  await getResourceNodesInRange(
+const [
+  resourceNodes,
+  huntTargets
+] = await Promise.all([
+  getResourceNodesInRange(
     pid,
     newX,
     newY,
     3
-  );
+  ),
 
-const huntTargets =
-  await getHuntTargetsInRange(
+  getHuntTargetsInRange(
     Number(pid),
     newX,
     newY,
     3
-  );
+  )
+]);
 
 const enterAreaResult =
   await applyEnterAreaProgress(
@@ -1607,28 +1603,44 @@ await db.query(
   let nearestDungeon: any = null;
 
   try {
-    const [towns]: any = await db.query(`
-      SELECT x, y, region_name
-      FROM world_map
-      WHERE terrain = 'town'
-    `);
+    const [[best]]: any = await db.query(
+      `
+        SELECT
+          x,
+          y,
+          region_name,
+          (ABS(x - ?) + ABS(y - ?)) AS distance
+        FROM world_map
+        WHERE terrain = 'town'
+        ORDER BY distance ASC
+        LIMIT 1
+      `,
+      [
+        newX,
+        newY
+      ]
+    );
 
-    const dist = (tx: number, ty: number) => Math.abs(tx - newX) + Math.abs(ty - newY);
-
-    if (Array.isArray(towns) && towns.length) {
-      let best = towns[0];
-      let bestD = dist(best.x, best.y);
-
-      for (const t of towns) {
-        const d = dist(t.x, t.y);
-        if (d < bestD) { best = t; bestD = d; }
-      }
+    if (best) {
+      const bestD =
+        Number(best.distance ?? 0);
 
       nearestHaven = {
-        name: best.region_name || "Town",
-        level: zoneLevel ?? 1,
-        distance: bestD,
-        arrow: dirArrow(best.x - newX, best.y - newY)
+        name:
+          best.region_name ||
+          "Town",
+
+        level:
+          zoneLevel ?? 1,
+
+        distance:
+          bestD,
+
+        arrow:
+          dirArrow(
+            Number(best.x) - newX,
+            Number(best.y) - newY
+          )
       };
     }
   } catch (e) {
