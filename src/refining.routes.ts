@@ -150,23 +150,66 @@ router.post("/refine/:recipeId", requireLogin, async (req: any, res: any) => {
     conn.release();
   }
 
+  const [[updatedPlayer]]: any = await db.query(
+    `
+      SELECT gold
+      FROM players
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [pid]
+  );
+
+  const inputIds = [
+    Number(recipe.input_item_id),
+    ...(recipe.input_item_id_2 && Number(recipe.input_qty_2 || 0) > 0
+      ? [Number(recipe.input_item_id_2)]
+      : [])
+  ];
+
+  const [inventoryRows]: any = await db.query(
+    `
+      SELECT
+        item_id,
+        COALESCE(SUM(quantity), 0) AS quantity
+      FROM inventory
+      WHERE player_id = ?
+        AND equipped = 0
+        AND item_id IN (?)
+      GROUP BY item_id
+    `,
+    [pid, inputIds]
+  );
+
+  const ownedByItem = new Map<number, number>();
+
+  for (const row of inventoryRows || []) {
+    ownedByItem.set(
+      Number(row.item_id),
+      Number(row.quantity || 0)
+    );
+  }
+
   return res.json({
     success: true,
     outputName: recipe.outputName,
     outputQty: Number(recipe.output_qty || 1),
     professionExp: Number(recipe.profession_exp || 0),
     professionResult,
+    gold: Number(updatedPlayer?.gold || 0),
     inputs: [
       {
         itemId: Number(recipe.input_item_id),
         name: recipe.inputName,
-        quantity: Number(recipe.input_qty || 1)
+        quantity: Number(recipe.input_qty || 1),
+        owned: ownedByItem.get(Number(recipe.input_item_id)) || 0
       },
       ...(recipe.input_item_id_2 && Number(recipe.input_qty_2 || 0) > 0
         ? [{
             itemId: Number(recipe.input_item_id_2),
             name: recipe.inputName2,
-            quantity: Number(recipe.input_qty_2 || 0)
+            quantity: Number(recipe.input_qty_2 || 0),
+            owned: ownedByItem.get(Number(recipe.input_item_id_2)) || 0
           }]
         : [])
     ]
@@ -256,11 +299,20 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
       : `${needed1}x ${esc(r.inputName)} → ${Number(r.output_qty || 1)}x ${esc(r.outputName)}`;
 
     const ownedText = hasSecondInput
-      ? `<span>${esc(r.inputName)}: ${owned1}/${needed1}</span><span>${esc(r.inputName2)}: ${owned2}/${needed2}</span>`
-      : `<span>${esc(r.inputName)}: ${owned1}/${needed1}</span>`;
+      ? `<span data-owned-item-id="${Number(r.input_item_id)}">${esc(r.inputName)}: <strong class="owned-count">${owned1}</strong>/${needed1}</span><span data-owned-item-id="${Number(r.input_item_id_2)}">${esc(r.inputName2)}: <strong class="owned-count">${owned2}</strong>/${needed2}</span>`
+      : `<span data-owned-item-id="${Number(r.input_item_id)}">${esc(r.inputName)}: <strong class="owned-count">${owned1}</strong>/${needed1}</span>`;
 
     return `
-      <article class="supplier-item" data-recipe-id="${Number(r.recipeId)}">
+      <article
+        class="supplier-item"
+        data-recipe-id="${Number(r.recipeId)}"
+        data-input-item-id="${Number(r.input_item_id)}"
+        data-input-item-id-2="${r.input_item_id_2 ? Number(r.input_item_id_2) : ""}"
+        data-needed="${needed1}"
+        data-needed-2="${needed2}"
+        data-gold-cost="${Number(r.gold_cost || 0)}"
+        data-required-level="${requiredLevel}"
+      >
         <div class="supplier-icon">
           <img src="${esc(r.outputIcon || "/icons/items/default.png")}" onerror="this.style.display='none'">
         </div>
@@ -337,7 +389,7 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
           </div>
         </div>
         <div class="hero-actions">
-          <span class="pill">Gold: <strong>${Number(player.gold || 0)}g</strong></span>
+          <span class="pill">Gold: <strong id="refiningGold">${Number(player.gold || 0)}g</strong></span>
           <a class="btn danger" href="/workshop">Back to Workshop</a>
         </div>
       </header>
@@ -377,7 +429,210 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
   <audio id="professionLevelAudio" preload="auto" src="/sounds/profession-level.ogg"></audio>
 
   <script>
+  let refiningBusy = false;
+
+  function updateRefiningUI(data) {
+    const gold =
+      Number(data.gold || 0);
+
+    const goldEl =
+      document.getElementById("refiningGold");
+
+    if (goldEl) {
+      goldEl.textContent =
+        gold + "g";
+    }
+
+    const ownedByItem =
+      new Map();
+
+    for (const input of data.inputs || []) {
+      ownedByItem.set(
+        Number(input.itemId),
+        Number(input.owned || 0)
+      );
+    }
+
+    document
+      .querySelectorAll(".supplier-item")
+      .forEach(card => {
+        const input1Id =
+          Number(
+            card.dataset.inputItemId ||
+            0
+          );
+
+        const input2Id =
+          Number(
+            card.dataset.inputItemId2 ||
+            0
+          );
+
+        const needed1 =
+          Number(
+            card.dataset.needed ||
+            1
+          );
+
+        const needed2 =
+          Number(
+            card.dataset.needed2 ||
+            0
+          );
+
+        const goldCost =
+          Number(
+            card.dataset.goldCost ||
+            0
+          );
+
+        const requiredLevel =
+          Number(
+            card.dataset.requiredLevel ||
+            1
+          );
+
+        const professionLevel =
+          Number(
+            data.professionResult?.newLevel ||
+            data.professionResult?.level ||
+            1
+          );
+
+        /*
+         * Only counts returned by this refine are known to have
+         * changed. Leave unrelated material counts untouched.
+         */
+        for (
+          const materialEl of
+          card.querySelectorAll(
+            "[data-owned-item-id]"
+          )
+        ) {
+          const itemId =
+            Number(
+              materialEl.dataset.ownedItemId ||
+              0
+            );
+
+          if (!ownedByItem.has(itemId)) {
+            continue;
+          }
+
+          const countEl =
+            materialEl.querySelector(
+              ".owned-count"
+            );
+
+          if (countEl) {
+            countEl.textContent =
+              String(
+                ownedByItem.get(itemId)
+              );
+          }
+        }
+
+        const readOwned =
+          (itemId) => {
+            if (!itemId) {
+              return 0;
+            }
+
+            const materialEl =
+              card.querySelector(
+                '[data-owned-item-id="' +
+                itemId +
+                '"]'
+              );
+
+            const countEl =
+              materialEl?.querySelector(
+                ".owned-count"
+              );
+
+            return Number(
+              countEl?.textContent ||
+              0
+            );
+          };
+
+        const owned1 =
+          readOwned(input1Id);
+
+        const owned2 =
+          input2Id
+            ? readOwned(input2Id)
+            : 0;
+
+        const hasMaterials =
+          owned1 >= needed1 &&
+          (
+            !input2Id ||
+            owned2 >= needed2
+          );
+
+        const actionEl =
+          card.querySelector(
+            ".supplier-action"
+          );
+
+        if (!actionEl) {
+          return;
+        }
+
+        if (
+          professionLevel <
+          requiredLevel
+        ) {
+          actionEl.innerHTML =
+            '<span class="status locked">' +
+            'Requires Lv ' +
+            requiredLevel +
+            '</span>';
+
+          return;
+        }
+
+        if (gold < goldCost) {
+          actionEl.innerHTML =
+            '<span class="status locked">' +
+            'Not Enough Gold' +
+            '</span>';
+
+          return;
+        }
+
+        if (!hasMaterials) {
+          actionEl.innerHTML =
+            '<span class="status locked">' +
+            'Missing Materials' +
+            '</span>';
+
+          return;
+        }
+
+        const recipeId =
+          Number(
+            card.dataset.recipeId ||
+            0
+          );
+
+        actionEl.innerHTML =
+          '<button ' +
+          'class="btn primary" ' +
+          'type="button" ' +
+          'onclick="startRefining(' +
+          recipeId +
+          ')">' +
+          'Refine' +
+          '</button>';
+      });
+  }
+
   async function startRefining(recipeId) {
+    if (refiningBusy) return;
+    refiningBusy = true;
+
     const modal = document.getElementById("refiningModal");
     const fill = document.getElementById("refiningProgressFill");
     const workSound = document.getElementById("workAudio");
@@ -425,6 +680,7 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
           data.error || "Unable to refine materials.",
           { type: "error", durationMs: 2600 }
         );
+        refiningBusy = false;
         return;
       }
 
@@ -455,9 +711,8 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
         );
       }
 
-      setTimeout(() => {
-        window.location.reload();
-      }, 700);
+      updateRefiningUI(data);
+      refiningBusy = false;
     } catch (err) {
       console.error("Refining failed", err);
 
@@ -473,6 +728,8 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
         "Something went wrong.",
         { type: "error", durationMs: 2600 }
       );
+
+      refiningBusy = false;
     }
   }
   </script>
