@@ -215,10 +215,11 @@ router.get("/character/avatars", requireLogin, async (req, res) => {
         a.description,
         a.display_order,
 
-        CASE
-          WHEN pa.avatar_id IS NOT NULL THEN 1
-          ELSE 0
-        END AS unlocked,
+      CASE
+        WHEN a.source = 'Default' THEN 1
+        WHEN pa.avatar_id IS NOT NULL THEN 1
+        ELSE 0
+      END AS unlocked
 
         CASE
           WHEN p.equipped_avatar_id = a.id THEN 1
@@ -284,14 +285,18 @@ router.post("/character/avatar/equip", requireLogin, async (req, res) => {
         a.rarity,
         a.source,
         a.description
-      FROM player_avatars pa
+      FROM avatars a
 
-      JOIN avatars a
-        ON a.id = pa.avatar_id
+      LEFT JOIN player_avatars pa 
+        ON pa.avatar_id = a.id
+        AND pa.player_id = ?
 
-      WHERE pa.player_id = ?
-        AND pa.avatar_id = ?
+      WHERE a.id = ?
         AND a.is_active = 1
+        AND (
+          a.source = 'Default'
+          OR pa.avatar_id IS NOT NULL
+        )
 
       LIMIT 1
       `,
