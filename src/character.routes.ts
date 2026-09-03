@@ -204,45 +204,45 @@ router.get("/character/avatars", requireLogin, async (req, res) => {
   try {
     const pid = Number(req.session.playerId);
 
-    const [avatars]: any = await db.query(
-      `
-      SELECT
-        a.id,
-        a.name,
-        a.image_url,
-        a.rarity,
-        a.source,
-        a.description,
-        a.display_order,
+const [avatars]: any = await db.query(
+  `
+  SELECT
+    a.id,
+    a.name,
+    a.image_url,
+    a.rarity,
+    a.source,
+    a.description,
+    a.display_order,
 
-      CASE
-        WHEN a.source = 'Default' THEN 1
-        WHEN pa.avatar_id IS NOT NULL THEN 1
-        ELSE 0
-      END AS unlocked
+    CASE
+      WHEN a.source = 'Default' THEN 1
+      WHEN pa.avatar_id IS NOT NULL THEN 1
+      ELSE 0
+    END AS unlocked,
 
-        CASE
-          WHEN p.equipped_avatar_id = a.id THEN 1
-          ELSE 0
-        END AS equipped
+    CASE
+      WHEN p.equipped_avatar_id = a.id THEN 1
+      ELSE 0
+    END AS equipped
 
-      FROM avatars a
+  FROM avatars a
 
-      JOIN players p
-        ON p.id = ?
+  JOIN players p
+    ON p.id = ?
 
-      LEFT JOIN player_avatars pa
-        ON pa.avatar_id = a.id
-        AND pa.player_id = p.id
+  LEFT JOIN player_avatars pa
+    ON pa.avatar_id = a.id
+    AND pa.player_id = p.id
 
-      WHERE a.is_active = 1
+  WHERE a.is_active = 1
 
-      ORDER BY
-        a.display_order ASC,
-        a.id ASC
-      `,
-      [pid]
-    );
+  ORDER BY
+    a.display_order ASC,
+    a.id ASC
+  `,
+  [pid]
+);
 
     res.json({
       avatars: (avatars || []).map((avatar: any) => ({
