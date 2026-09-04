@@ -11,6 +11,8 @@ import { registerPlayerSocket } from "./playerSocket";
 import { registerPartySocket } from "./partySocket";
 import { registerHuntSocket } from "./huntSocket";
 import { registerCombatSocket } from "./combatSocket";
+import { registerDungeonSocket } from "./dungeonSocket";
+
 import {
   onPlayerStatePatch,
   onPlayerLevelUp,
@@ -118,6 +120,7 @@ export function initializeSocketServer(
     registerPartySocket(io!, socket);
     registerHuntSocket(io!, socket);
     registerCombatSocket(io!, socket);
+    registerDungeonSocket(io!, socket);
 
     socket.on("disconnect", reason => {
       console.log(

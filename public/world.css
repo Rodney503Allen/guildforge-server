@@ -3583,3 +3583,241 @@ body::before{
 
   letter-spacing:.8px;
 }
+/* Dungeon Ready Check */
+
+.dungeon-ready-modal{
+  position:fixed;
+  inset:0;
+  z-index:100003;
+  display:grid;
+  place-items:center;
+  padding:20px;
+}
+
+.dungeon-ready-modal.hidden{
+  display:none !important;
+}
+
+.dungeon-ready-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(2,4,7,.84);
+  backdrop-filter:blur(3px);
+}
+
+.dungeon-ready-card{
+  position:relative;
+  z-index:1;
+  width:min(520px,calc(100vw - 28px));
+  padding:22px;
+  background:
+    radial-gradient(420px 180px at 50% 0%,rgba(115,153,184,.10),transparent 72%),
+    linear-gradient(180deg,rgba(18,23,30,.98),rgba(7,10,14,.99));
+  box-shadow:0 28px 70px rgba(0,0,0,.72);
+}
+
+.dungeon-ready-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+  margin-bottom:16px;
+}
+
+.dungeon-ready-kicker{
+  color:#9cb8ca;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:1.7px;
+  text-transform:uppercase;
+}
+
+.dungeon-ready-header h2{
+  margin:3px 0 0;
+  color:#ead9b5;
+  font-family:Cinzel,Georgia,serif;
+  font-size:20px;
+}
+
+.dungeon-ready-countdown{
+  min-width:58px;
+  padding:7px 9px;
+  border:1px solid rgba(200,163,75,.28);
+  background:rgba(0,0,0,.30);
+  color:#e8cb79;
+  font-size:16px;
+  font-weight:900;
+  text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+
+.dungeon-ready-status{
+  margin:0 0 12px;
+  color:rgba(215,219,226,.74);
+  font-size:10px;
+}
+
+.dungeon-ready-participants{
+  display:grid;
+  gap:7px;
+}
+
+.dungeon-ready-player{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:10px 12px;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(0,0,0,.20);
+}
+
+.dungeon-ready-player.is-ready{
+  border-color:rgba(102,188,128,.32);
+  background:linear-gradient(90deg,rgba(60,135,83,.10),rgba(0,0,0,.18));
+}
+
+.dungeon-ready-player strong{
+  display:block;
+  color:#ece0c7;
+  font-size:11px;
+}
+
+.dungeon-ready-player span{
+  display:block;
+  margin-top:2px;
+  color:rgba(215,219,226,.48);
+  font-size:8px;
+}
+
+.dungeon-ready-player__state{
+  color:rgba(215,219,226,.52);
+  font-size:9px;
+  font-weight:900;
+  text-transform:uppercase;
+}
+
+.dungeon-ready-player.is-ready .dungeon-ready-player__state{
+  color:#8fd39f;
+}
+
+.dungeon-ready-error{
+  margin-top:12px;
+  padding:8px 10px;
+  border:1px solid rgba(210,73,59,.34);
+  background:rgba(110,24,18,.18);
+  color:#ef9b8e;
+  font-size:9px;
+}
+
+.dungeon-ready-footer{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:16px;
+  padding-top:14px;
+  border-top:1px solid rgba(255,255,255,.07);
+}
+/* =========================================================
+   DUNGEON WORLD TILE
+========================================================= */
+
+.dungeon{
+  background:
+    url("/images/map_tiles/dungeon.webp")
+    center / cover;
+}
+
+.dungeon-tile-marker{
+  display:none !important;
+}
+
+/* =========================================================
+   DUNGEON LOCATION TITLE
+========================================================= */
+
+#world-title.world-title--dungeon{
+  position:relative;
+
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+
+  gap:12px;
+
+  color:#d8c8ee;
+
+  font-family:
+    Cinzel,
+    Georgia,
+    serif;
+
+  font-size:22px;
+  font-weight:900;
+
+  letter-spacing:2px;
+
+  text-transform:uppercase;
+
+  text-shadow:
+    0 2px 2px rgba(0,0,0,.95),
+    0 0 8px rgba(124,82,165,.35),
+    0 0 18px rgba(89,54,128,.22);
+
+  filter:
+    drop-shadow(
+      0 4px 8px
+      rgba(0,0,0,.55)
+    );
+}
+
+
+/* Decorative dungeon markers */
+#world-title.world-title--dungeon::before,
+#world-title.world-title--dungeon::after{
+  content:"◆";
+
+  color:#8e69ad;
+
+  font-size:9px;
+
+  text-shadow:
+    0 0 8px
+    rgba(145,92,185,.55);
+}
+
+
+/* Subtle underline / magical accent */
+#world-title.world-title--dungeon{
+  padding-bottom:7px;
+}
+
+#world-title.world-title--dungeon::after{
+  /*
+   * Keep the right rune as the pseudo-element.
+   * The underline comes from the background instead.
+   */
+}
+
+#world-title.world-title--dungeon{
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(128,88,161,.12),
+      transparent
+    )
+    bottom / 100% 1px
+    no-repeat;
+}
+
+
+/* Hovering isn't necessary mechanically, but adds polish */
+#world-title.world-title--dungeon:hover{
+  color:#eadcff;
+
+  text-shadow:
+    0 2px 2px rgba(0,0,0,.95),
+    0 0 10px rgba(145,92,185,.50),
+    0 0 24px rgba(89,54,128,.30);
+}

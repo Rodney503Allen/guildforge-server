@@ -10,6 +10,27 @@ let moveLock = false;
 
 let currentResourceNode = null;
 
+let dungeonReadyCheck = null;
+let dungeonReadySelfId = null;
+let dungeonReadyPollTimer = null;
+let dungeonReadyCountdownTimer = null;
+let dungeonReadyBusy = false;
+let dungeonReadyTransitioning = false;
+
+let dungeonSocket = null;
+let dungeonSocketBound = false;
+
+/*
+ * Once a ready check resolves, never allow an older pending snapshot
+ * for that same check to render again. This protects against an
+ * in-flight REST poll finishing after the websocket completion event.
+ */
+const resolvedDungeonReadyCheckIds =
+  new Set();
+
+let dungeonReadyFetchGeneration =
+  0;
+
 // =======================
 // INIT
 // =======================
@@ -17,6 +38,12 @@ document.addEventListener("DOMContentLoaded", initWorldPage);
 
 async function initWorldPage() {
   bindLoreModal();
+
+  /*
+   * Bind Dungeon websocket before checking REST state so incoming
+   * party ready checks can appear as soon as possible.
+   */
+  void connectDungeonSocket();
 
   try {
     const res = await fetch("/combat/state", {
@@ -27,6 +54,16 @@ async function initWorldPage() {
     if (data?.inCombat && data?.enemy) {
       openCombatModal(data.enemy);
       return;
+    }
+
+    const restoredDungeonReady =
+      await fetchDungeonReadyCheck();
+
+    if (
+      restoredDungeonReady?.status ===
+      "pending"
+    ) {
+      startDungeonReadyPolling();
     }
 
     const dungeonResponse =
@@ -226,10 +263,24 @@ function isInCombat() {
       )
     );
 
+  const dungeonReadyModal =
+    document.getElementById(
+      "dungeonReadyModal"
+    );
+
+  const dungeonReadyActive =
+    Boolean(
+      dungeonReadyModal &&
+      !dungeonReadyModal.classList.contains(
+        "hidden"
+      )
+    );
+
   return (
     normalCombatActive ||
     huntCombatActive ||
-    dungeonActive
+    dungeonActive ||
+    dungeonReadyActive
   );
 }
 
@@ -381,23 +432,170 @@ async function loadRegionName() {
 
 // Accepts either a /world/current-region response or a regionData block from /world/move
 function renderRegionHeader(data) {
-  const title = document.getElementById("world-title");
-  if (!title || !data) return;
+  const title =
+    document.getElementById(
+      "world-title"
+    );
 
-  const min = Number(data.level_min ?? 1);
-  const max = Number(data.level_max ?? min);
-  const band = (min === max) ? `Lv ${min}` : `Lv ${min}–${max}`;
-  const name = data.region_name ?? "Unknown Region";
+  if (!title || !data) {
+    return;
+  }
 
-  title.textContent = `${name} (${band})`;
-
-  title.classList.remove("zone-easy", "zone-even", "zone-hard");
-  const diff = String(data.difficulty || "even").toLowerCase();
-  title.classList.add(
-    diff === "easy" ? "zone-easy"
-    : diff === "hard" ? "zone-hard"
-    : "zone-even"
+  /*
+   * Normal regions/towns must NEVER retain
+   * Dungeon-specific title styling.
+   */
+  title.classList.remove(
+    "world-title--dungeon"
   );
+
+  const min =
+    Number(
+      data.level_min ?? 1
+    );
+
+  const max =
+    Number(
+      data.level_max ?? min
+    );
+
+  const band =
+    min === max
+      ? `Lv ${min}`
+      : `Lv ${min}–${max}`;
+
+  const name =
+    data.region_name ??
+    "Unknown Region";
+
+  title.textContent =
+    `${name} (${band})`;
+
+  title.classList.remove(
+    "zone-easy",
+    "zone-even",
+    "zone-hard"
+  );
+
+  const diff =
+    String(
+      data.difficulty ||
+      "even"
+    ).toLowerCase();
+
+  title.classList.add(
+    diff === "easy"
+      ? "zone-easy"
+      : diff === "hard"
+        ? "zone-hard"
+        : "zone-even"
+  );
+}
+
+
+async function renderDungeonWorldHeaderIfNeeded(
+  terrain
+) {
+  if (
+    String(
+      terrain ||
+      ""
+    ).toLowerCase() !==
+    "dungeon"
+  ) {
+    return false;
+  }
+
+  try {
+    const response =
+      await fetch(
+        "/world/current-dungeon",
+        {
+          credentials:
+            "include",
+          cache:
+            "no-store"
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      data.ok === false ||
+      !data.dungeon?.name
+    ) {
+      return false;
+    }
+
+    const dungeon =
+      data.dungeon;
+
+    const title =
+      document.getElementById(
+        "world-title"
+      );
+
+    if (!title) {
+      return true;
+    }
+
+    title.classList.add(
+  "world-title--dungeon"
+);
+
+    const minLevel =
+      Math.max(
+        1,
+        Number(
+          dungeon.min_level ??
+          1
+        ) || 1
+      );
+
+    const maxLevel =
+      dungeon.max_level ==
+        null
+        ? null
+        : Math.max(
+            minLevel,
+            Number(
+              dungeon.max_level
+            ) ||
+            minLevel
+          );
+
+    const levelBand =
+      maxLevel == null
+        ? `Lv ${minLevel}+`
+        : minLevel ===
+          maxLevel
+          ? `Lv ${minLevel}`
+          : `Lv ${minLevel}–${maxLevel}`;
+
+    title.textContent =
+      `${dungeon.name} (${levelBand})`;
+
+    title.classList.remove(
+      "zone-easy",
+      "zone-even",
+      "zone-hard"
+    );
+
+    title.classList.add(
+      "zone-even"
+    );
+
+    return true;
+  } catch (error) {
+    console.warn(
+      "Unable to render Dungeon world header:",
+      error
+    );
+
+    return false;
+  }
 }
 
 // =======================
@@ -721,33 +919,12 @@ function renderWorldFromData({
         </div>
       ` : "";
 
+      /*
+       * Dungeon entrances use the terrain artwork itself:
+       * /images/map_tiles/dungeon.webp
+       */
       const dungeonHtml =
-        String(
-          t.terrain ||
-          ""
-        ).toLowerCase() ===
-        "dungeon"
-          ? `
-            <div
-              class="dungeon-tile-marker"
-              title="Dungeon Entrance"
-              aria-label="Dungeon entrance"
-            >
-              <span
-                class="dungeon-tile-marker__symbol"
-                aria-hidden="true"
-              >
-                ⚡
-              </span>
-
-              <span
-                class="dungeon-tile-marker__badge"
-              >
-                DUNGEON
-              </span>
-            </div>
-          `
-          : "";
+        "";
 
       html.push(`
         <div
@@ -799,6 +976,15 @@ function renderWorldFromData({
         : "none";
   }
 
+  if (
+    currentTerrain ===
+    "dungeon"
+  ) {
+    void renderDungeonWorldHeaderIfNeeded(
+      currentTerrain
+    );
+  }
+
   const coords = document.querySelector(".coords");
   if (coords) {
     coords.textContent = `Position: (${player.map_x}, ${player.map_y})`;
@@ -829,6 +1015,906 @@ function enterTown() {
 let enteringDungeon =
   false;
 
+
+async function connectDungeonSocket() {
+  if (
+    dungeonSocketBound &&
+    dungeonSocket
+  ) {
+    return dungeonSocket;
+  }
+
+  try {
+    let socket =
+      window.GFSocket;
+
+    if (
+      !socket &&
+      window.GFSocketReady
+    ) {
+      socket =
+        await window.GFSocketReady;
+    }
+
+    if (
+      !socket ||
+      typeof socket.on !==
+        "function"
+    ) {
+      console.warn(
+        "Dungeon websocket is unavailable."
+      );
+
+      return null;
+    }
+
+    dungeonSocket =
+      socket;
+
+    if (
+      !dungeonSocketBound
+    ) {
+      dungeonSocketBound =
+        true;
+
+      /*
+       * Every ready-check mutation is pushed here immediately.
+       * This is what makes the modal appear for party members
+       * without them clicking Enter Dungeon themselves.
+       */
+      socket.on(
+        "dungeon:ready-check",
+        async (
+          payload
+        ) => {
+          const check =
+            payload?.readyCheck;
+
+          if (
+            !check
+          ) {
+            return;
+          }
+
+          const incomingReadyCheckId =
+            Number(
+              check.id
+            );
+
+          if (
+            resolvedDungeonReadyCheckIds.has(
+              incomingReadyCheckId
+            )
+          ) {
+            return;
+          }
+
+          const me =
+            (
+              check.players ??
+              []
+            ).find(
+              player =>
+                Number(
+                  player.playerId
+                ) ===
+                Number(
+                  window.__PLAYER_ID__ ??
+                  dungeonReadySelfId
+                )
+            );
+
+          /*
+           * Ignore malformed broadcasts not containing this player.
+           * The server already targets frozen roster members directly,
+           * but this protects us from stale party-room subscriptions.
+           */
+          const sameVisibleCheck =
+            Number(
+              dungeonReadyCheck?.id
+            ) ===
+            Number(
+              check.id
+            );
+
+          if (
+            !me &&
+            !sameVisibleCheck
+          ) {
+            return;
+          }
+
+          if (
+            me
+          ) {
+            dungeonReadySelfId =
+              Number(
+                me.playerId
+              );
+          }
+
+          /*
+           * A completed ready check must NEVER be rendered again.
+           * Rendering first would remove .hidden and put the ready
+           * modal back over the newly-opened Dungeon modal.
+           */
+          if (
+            check.status ===
+            "completed"
+          ) {
+            const resolvedId =
+              Number(
+                check.id
+              );
+
+            if (
+              Number.isInteger(
+                resolvedId
+              ) &&
+              resolvedId > 0
+            ) {
+              resolvedDungeonReadyCheckIds.add(
+                resolvedId
+              );
+            }
+
+            dungeonReadyFetchGeneration++;
+
+            document
+              .getElementById(
+                "dungeonReadyModal"
+              )
+              ?.remove();
+
+            await transitionDungeonReadyCheck(
+              check
+            );
+
+            return;
+          }
+
+          renderDungeonReadyCheck(
+            check
+          );
+
+          if (
+            check.status ===
+              "cancelled" ||
+            check.status ===
+              "expired"
+          ) {
+            setTimeout(
+              closeDungeonReadyModal,
+              900
+            );
+          }
+        }
+      );
+
+      socket.on(
+        "dungeon:ready-check-resolved",
+        async (
+          payload
+        ) => {
+          const check =
+            payload?.readyCheck;
+
+          if (
+            !check
+          ) {
+            return;
+          }
+
+          /*
+           * This event is emitted directly to every frozen ready-check
+           * participant's private player socket room. Do not gate it on
+           * dungeonReadySelfId: a non-initiating player may receive this
+           * before their fallback REST poll ever learns their own ID.
+           */
+          if (
+            check.status ===
+            "completed"
+          ) {
+            const resolvedId =
+              Number(
+                check.id
+              );
+
+            if (
+              Number.isInteger(
+                resolvedId
+              ) &&
+              resolvedId > 0
+            ) {
+              resolvedDungeonReadyCheckIds.add(
+                resolvedId
+              );
+            }
+
+            dungeonReadyFetchGeneration++;
+
+            document
+              .getElementById(
+                "dungeonReadyModal"
+              )
+              ?.remove();
+
+            await transitionDungeonReadyCheck(
+              check
+            );
+
+            return;
+          }
+
+          if (
+            check.status ===
+              "cancelled" ||
+            check.status ===
+              "expired"
+          ) {
+            renderDungeonReadyCheck(
+              check
+            );
+
+            setTimeout(
+              closeDungeonReadyModal,
+              700
+            );
+          }
+        }
+      );
+
+
+      socket.on(
+        "dungeon:changed",
+        async () => {
+          /*
+           * Reserved for broader Dungeon lifecycle updates.
+           * Refresh active Dungeon state when we begin using this event.
+           */
+        }
+      );
+
+      socket.on(
+        "connect",
+        () => {
+          socket.emit(
+            "dungeon:subscribe"
+          );
+        }
+      );
+    }
+
+    /*
+     * Subscribe immediately if already connected. This joins the
+     * current Dungeon party room for future party-wide updates.
+     */
+    if (
+      socket.connected
+    ) {
+      socket.emit(
+        "dungeon:subscribe"
+      );
+    }
+
+    return socket;
+  } catch (
+    error
+  ) {
+    console.error(
+      "Dungeon websocket setup failed:",
+      error
+    );
+
+    return null;
+  }
+}
+
+
+function ensureDungeonReadyModal() {
+  let modal = document.getElementById("dungeonReadyModal");
+
+  if (modal) return modal;
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="dungeonReadyModal" class="dungeon-ready-modal hidden" role="dialog" aria-modal="true">
+      <div class="dungeon-ready-backdrop" aria-hidden="true"></div>
+
+      <section class="dungeon-ready-card frame-host">
+        <span class="frame-border panel" aria-hidden="true"></span>
+
+        <header class="dungeon-ready-header">
+          <div>
+            <div class="dungeon-ready-kicker">Dungeon Expedition</div>
+            <h2 id="dungeonReadyTitle">Ready Check</h2>
+          </div>
+
+          <div id="dungeonReadyCountdown" class="dungeon-ready-countdown">0:30</div>
+        </header>
+
+        <div class="dungeon-ready-content">
+          <p id="dungeonReadyStatus" class="dungeon-ready-status">
+            Waiting for the party...
+          </p>
+
+          <div id="dungeonReadyParticipants" class="dungeon-ready-participants"></div>
+          <div id="dungeonReadyError" class="dungeon-ready-error" hidden></div>
+        </div>
+
+        <footer class="dungeon-ready-footer">
+          <button id="dungeonReadyToggleBtn" class="dungeon-btn dungeon-btn--primary" type="button">
+            Ready
+          </button>
+
+          <button id="dungeonReadyCancelBtn" class="dungeon-btn dungeon-btn--ghost" type="button">
+            Cancel
+          </button>
+        </footer>
+      </section>
+    </div>
+  `);
+
+  modal = document.getElementById("dungeonReadyModal");
+
+  document.getElementById("dungeonReadyToggleBtn")
+    ?.addEventListener("click", toggleDungeonReadyState);
+
+  document.getElementById("dungeonReadyCancelBtn")
+    ?.addEventListener("click", cancelDungeonReadyCheck);
+
+  return modal;
+}
+
+function showDungeonReadyError(message = "") {
+  const root = document.getElementById("dungeonReadyError");
+  if (!root) return;
+
+  root.hidden = !message;
+  root.textContent = message;
+}
+
+function stopDungeonReadyTimers() {
+  if (dungeonReadyPollTimer) {
+    clearInterval(dungeonReadyPollTimer);
+    dungeonReadyPollTimer = null;
+  }
+
+  if (dungeonReadyCountdownTimer) {
+    clearInterval(dungeonReadyCountdownTimer);
+    dungeonReadyCountdownTimer = null;
+  }
+}
+
+function closeDungeonReadyModal() {
+  stopDungeonReadyTimers();
+
+  dungeonReadyCheck =
+    null;
+
+  dungeonReadyBusy =
+    false;
+
+  enteringDungeon =
+    false;
+
+  document
+    .getElementById(
+      "dungeonReadyModal"
+    )
+    ?.remove();
+}
+
+function renderDungeonReadyCountdown() {
+  const root = document.getElementById("dungeonReadyCountdown");
+  if (!root || !dungeonReadyCheck) return;
+
+  if (dungeonReadyCheck.status !== "pending") {
+    root.textContent = "0:00";
+    return;
+  }
+
+  const remaining = Math.max(
+    0,
+    new Date(dungeonReadyCheck.expiresAt).getTime() - Date.now()
+  );
+
+  const seconds = Math.ceil(remaining / 1000);
+
+  root.textContent = `0:${String(seconds).padStart(2, "0")}`;
+}
+
+function renderDungeonReadyCheck(check) {
+  if (!check) {
+    return;
+  }
+
+  const readyCheckId =
+    Number(
+      check.id
+    );
+
+  const dungeonModal =
+    document.getElementById(
+      "dungeonModal"
+    );
+
+  const dungeonAlreadyOpen =
+    Boolean(
+      dungeonModal &&
+      !dungeonModal.classList.contains(
+        "hidden"
+      )
+    );
+
+  /*
+   * Never recreate the ready-check modal after this check has
+   * completed, and never allow any ready-check UI to sit over
+   * an already-open Dungeon session.
+   */
+  if (
+    resolvedDungeonReadyCheckIds.has(
+      readyCheckId
+    ) ||
+    dungeonAlreadyOpen
+  ) {
+    document
+      .getElementById(
+        "dungeonReadyModal"
+      )
+      ?.remove();
+
+    return;
+  }
+
+  dungeonReadyCheck = check;
+
+  const modal = ensureDungeonReadyModal();
+  modal?.classList.remove("hidden");
+
+  const title = document.getElementById("dungeonReadyTitle");
+  if (title) title.textContent = check.dungeonName || "Dungeon Ready Check";
+
+  const players = Array.isArray(check.players) ? check.players : [];
+  const readyCount = players.filter(player => player.isReady).length;
+
+  const status = document.getElementById("dungeonReadyStatus");
+
+  if (status) {
+    status.textContent =
+      check.status === "pending"
+        ? `${readyCount} of ${players.length} adventurers ready`
+        : check.status === "completed"
+          ? "The expedition is entering the dungeon..."
+          : check.status === "expired"
+            ? "The ready check expired."
+            : "The ready check was cancelled.";
+  }
+
+  const list = document.getElementById("dungeonReadyParticipants");
+
+  if (list) {
+    list.innerHTML = players.map(player => `
+      <div class="dungeon-ready-player ${player.isReady ? "is-ready" : ""}">
+        <div>
+          <strong>${escapeHtml(player.name)}</strong>
+          <span>
+            ${player.className ? `${escapeHtml(player.className)} • ` : ""}
+            Lv. ${Number(player.level)}
+          </span>
+        </div>
+
+        <div class="dungeon-ready-player__state">
+          ${player.isReady ? "✓ Ready" : "… Waiting"}
+        </div>
+      </div>
+    `).join("");
+  }
+
+  const me = players.find(
+    player => Number(player.playerId) === Number(dungeonReadySelfId)
+  );
+
+  const toggle = document.getElementById("dungeonReadyToggleBtn");
+
+  if (toggle) {
+    toggle.disabled = dungeonReadyBusy || check.status !== "pending";
+    toggle.textContent = me?.isReady ? "Unready" : "Ready";
+  }
+
+  const cancel = document.getElementById("dungeonReadyCancelBtn");
+
+  if (cancel) {
+    const canCancel =
+      Number(check.createdByPlayerId) === Number(dungeonReadySelfId) ||
+      Boolean(me?.isLeader);
+
+    cancel.style.display = canCancel ? "inline-block" : "none";
+    cancel.disabled = dungeonReadyBusy || check.status !== "pending";
+  }
+
+  renderDungeonReadyCountdown();
+}
+
+async function transitionDungeonReadyCheck(check) {
+  if (
+    check?.status !== "completed" ||
+    !check.instanceId
+  ) {
+    return;
+  }
+
+  const readyCheckId =
+    Number(
+      check.id
+    );
+
+  /*
+   * Mark this check resolved immediately. Any older pending snapshot
+   * already in flight will be ignored when it eventually returns.
+   */
+  if (
+    Number.isInteger(
+      readyCheckId
+    ) &&
+    readyCheckId > 0
+  ) {
+    resolvedDungeonReadyCheckIds.add(
+      readyCheckId
+    );
+  }
+
+  dungeonReadyFetchGeneration++;
+
+  if (
+    dungeonReadyTransitioning
+  ) {
+    /*
+     * Even if another completion handler is already opening the
+     * Dungeon, make absolutely sure this overlay is gone.
+     */
+    document
+      .getElementById(
+        "dungeonReadyModal"
+      )
+      ?.remove();
+
+    return;
+  }
+
+  dungeonReadyTransitioning =
+    true;
+
+  stopDungeonReadyTimers();
+
+  dungeonReadyCheck =
+    null;
+
+  dungeonReadyBusy =
+    false;
+
+  enteringDungeon =
+    false;
+
+  document
+    .getElementById(
+      "dungeonReadyModal"
+    )
+    ?.remove();
+
+  try {
+    if (
+      typeof openDungeonModal ===
+      "function"
+    ) {
+      await openDungeonModal();
+    } else {
+      window.location.href =
+        "/dungeon";
+
+      return;
+    }
+
+    /*
+     * Final DOM guarantee. If an old async render raced with the
+     * Dungeon opening, remove the ready overlay again afterward.
+     */
+    document
+      .getElementById(
+        "dungeonReadyModal"
+      )
+      ?.remove();
+  } catch (error) {
+    console.error(
+      "Failed to transition into Dungeon:",
+      error
+    );
+  } finally {
+    dungeonReadyTransitioning =
+      false;
+  }
+}
+
+async function fetchDungeonReadyCheck() {
+  const fetchGeneration =
+    dungeonReadyFetchGeneration;
+
+  try {
+    const response =
+      await fetch(
+        "/api/dungeons/ready-check",
+        {
+          credentials:
+            "include",
+          cache:
+            "no-store"
+        }
+      );
+
+    const data =
+      await response.json();
+
+    /*
+     * A completion event happened while this request was in flight.
+     * Its response is now stale and must not touch the ready UI.
+     */
+    if (
+      fetchGeneration !==
+      dungeonReadyFetchGeneration
+    ) {
+      return null;
+    }
+
+    if (
+      !response.ok ||
+      data.ok === false
+    ) {
+      throw new Error(
+        data.error ||
+        "Unable to load Dungeon ready check."
+      );
+    }
+
+    dungeonReadySelfId =
+      Number(
+        data.playerId ||
+        0
+      ) ||
+      dungeonReadySelfId;
+
+    if (
+      !data.readyCheck
+    ) {
+      if (
+        dungeonReadyCheck
+      ) {
+        try {
+          const activeResponse =
+            await fetch(
+              "/api/dungeons/active",
+              {
+                credentials:
+                  "include",
+                cache:
+                  "no-store"
+              }
+            );
+
+          const activeData =
+            await activeResponse.json();
+
+          if (
+            fetchGeneration !==
+            dungeonReadyFetchGeneration
+          ) {
+            return null;
+          }
+
+          if (
+            activeResponse.ok &&
+            activeData?.dungeon
+          ) {
+            stopDungeonReadyTimers();
+
+            dungeonReadyCheck =
+              null;
+
+            dungeonReadyBusy =
+              false;
+
+            enteringDungeon =
+              false;
+
+            document
+              .getElementById(
+                "dungeonReadyModal"
+              )
+              ?.remove();
+
+            if (
+              typeof openDungeonModal ===
+              "function"
+            ) {
+              await openDungeonModal();
+            } else {
+              window.location.href =
+                "/dungeon";
+            }
+
+            document
+              .getElementById(
+                "dungeonReadyModal"
+              )
+              ?.remove();
+
+            return null;
+          }
+        } catch (
+          activeError
+        ) {
+          console.warn(
+            "Could not verify Dungeon after ready-check cleanup:",
+            activeError
+          );
+        }
+
+        closeDungeonReadyModal();
+      }
+
+      return null;
+    }
+
+    const readyCheckId =
+      Number(
+        data.readyCheck.id
+      );
+
+    if (
+      resolvedDungeonReadyCheckIds.has(
+        readyCheckId
+      )
+    ) {
+      return null;
+    }
+
+    if (
+      data.readyCheck.status ===
+      "completed"
+    ) {
+      await transitionDungeonReadyCheck(
+        data.readyCheck
+      );
+
+      return data.readyCheck;
+    }
+
+    renderDungeonReadyCheck(
+      data.readyCheck
+    );
+
+    if (
+      data.readyCheck.status !==
+      "pending"
+    ) {
+      setTimeout(
+        closeDungeonReadyModal,
+        900
+      );
+    }
+
+    return data.readyCheck;
+  } catch (error) {
+    console.warn(
+      "Dungeon ready-check refresh failed:",
+      error
+    );
+
+    return null;
+  }
+}
+
+function startDungeonReadyPolling() {
+  stopDungeonReadyTimers();
+
+  /*
+   * WebSocket is authoritative for live updates.
+   * This slow poll is only a reconnect/fallback safety net.
+   */
+  dungeonReadyPollTimer = window.setInterval(
+    fetchDungeonReadyCheck,
+    5000
+  );
+
+  dungeonReadyCountdownTimer = window.setInterval(
+    renderDungeonReadyCountdown,
+    200
+  );
+}
+
+async function toggleDungeonReadyState() {
+  if (
+    dungeonReadyBusy ||
+    !dungeonReadyCheck ||
+    dungeonReadyCheck.status !== "pending"
+  ) {
+    return;
+  }
+
+  dungeonReadyBusy = true;
+  showDungeonReadyError("");
+
+  try {
+    const me = dungeonReadyCheck.players?.find(
+      player => Number(player.playerId) === Number(dungeonReadySelfId)
+    );
+
+    const response = await fetch("/api/dungeons/ready-check/ready", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ready: !Boolean(me?.isReady)
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || "Unable to update ready state.");
+    }
+
+    dungeonReadySelfId = Number(data.playerId || 0) || dungeonReadySelfId;
+    renderDungeonReadyCheck(data.readyCheck);
+
+    if (data.readyCheck?.status === "completed") {
+      await transitionDungeonReadyCheck(data.readyCheck);
+    }
+  } catch (error) {
+    showDungeonReadyError(error?.message || "Unable to update ready state.");
+  } finally {
+    dungeonReadyBusy = false;
+
+    if (dungeonReadyCheck) {
+      renderDungeonReadyCheck(dungeonReadyCheck);
+    }
+  }
+}
+
+async function cancelDungeonReadyCheck() {
+  if (
+    dungeonReadyBusy ||
+    !dungeonReadyCheck ||
+    dungeonReadyCheck.status !== "pending"
+  ) {
+    return;
+  }
+
+  dungeonReadyBusy = true;
+  showDungeonReadyError("");
+
+  try {
+    const response = await fetch("/api/dungeons/ready-check/cancel", {
+      method: "POST",
+      credentials: "include"
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || "Unable to cancel Dungeon ready check.");
+    }
+
+    renderDungeonReadyCheck(data.readyCheck);
+    setTimeout(closeDungeonReadyModal, 700);
+  } catch (error) {
+    showDungeonReadyError(error?.message || "Unable to cancel Dungeon ready check.");
+  } finally {
+    dungeonReadyBusy = false;
+  }
+}
+
+
 async function enterDungeonFromWorld() {
   if (
     isInCombat() ||
@@ -854,6 +1940,13 @@ async function enterDungeonFromWorld() {
   }
 
   try {
+    /*
+     * Ensure the current player is subscribed before the leader starts
+     * the check. Other party members are still guaranteed delivery via
+     * their private player socket rooms.
+     */
+    await connectDungeonSocket();
+
     /*
      * Resolve the dungeon from the player's current tile.
      * This keeps the world frontend generic; it does not
@@ -930,63 +2023,54 @@ async function enterDungeonFromWorld() {
       return;
     }
 
-    const enterResponse =
+    const readyResponse =
       await fetch(
-        `/api/dungeons/${
-          dungeonId
-        }/enter`,
+        `/api/dungeons/${dungeonId}/ready-check/start`,
         {
-          method:
-            "POST",
-          credentials:
-            "include"
+          method: "POST",
+          credentials: "include"
         }
       );
 
-    const enterData =
-      await enterResponse.json();
+    const readyData =
+      await readyResponse.json();
 
     if (
-      !enterResponse.ok ||
-      enterData.ok === false
+      !readyResponse.ok ||
+      readyData.ok === false
     ) {
-      /*
-       * Race-safe fallback:
-       * if another request/session created the dungeon
-       * between the active check and enter request, simply
-       * rejoin the active dungeon page.
-       */
-      if (
-        String(
-          enterData.error ||
-          ""
-        )
-          .toLowerCase()
-          .includes(
-            "already inside an active dungeon"
-          )
-      ) {
-        window.location.href =
-          "/dungeon";
-
-        return;
-      }
-
       throw new Error(
-        enterData.error ||
-        "Unable to enter the dungeon."
+        readyData.error ||
+        "Unable to start Dungeon ready check."
+      );
+    }
+
+    dungeonReadySelfId =
+      Number(
+        readyData.playerId ||
+        0
+      ) ||
+      dungeonReadySelfId;
+
+    if (readyData.readyCheck) {
+      renderDungeonReadyCheck(
+        readyData.readyCheck
       );
     }
 
     if (
-      typeof openDungeonModal ===
-      "function"
+      readyData.readyCheck?.status ===
+      "completed"
     ) {
-      await openDungeonModal();
-    } else {
-      window.location.href =
-        "/dungeon";
+      await transitionDungeonReadyCheck(
+        readyData.readyCheck
+      );
+
+      return;
     }
+
+    startDungeonReadyPolling();
+    enteringDungeon = false;
 
   } catch (err) {
     console.error(
@@ -1152,6 +2236,18 @@ if (data.nearbyObjects) {
 if (data.regionData) {
   renderRegionHeader(
     data.regionData
+  );
+}
+
+if (
+  String(
+    data.terrain ||
+    ""
+  ).toLowerCase() ===
+  "dungeon"
+) {
+  await renderDungeonWorldHeaderIfNeeded(
+    data.terrain
   );
 }
 

@@ -3154,6 +3154,413 @@ body.dungeon-modal-open{
   overflow:
     visible !important;
 }
+
+/* Dungeon Ready Check */
+
+.dungeon-ready-modal{
+  position:fixed;
+  inset:0;
+  z-index:100003;
+  display:grid;
+  place-items:center;
+  padding:20px;
+}
+
+.dungeon-ready-modal.hidden{
+  display:none !important;
+}
+
+.dungeon-ready-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(2,4,7,.84);
+  backdrop-filter:blur(3px);
+}
+
+.dungeon-ready-card{
+  position:relative;
+  z-index:1;
+  width:min(520px,calc(100vw - 28px));
+  padding:22px;
+  background:
+    radial-gradient(420px 180px at 50% 0%,rgba(115,153,184,.10),transparent 72%),
+    linear-gradient(180deg,rgba(18,23,30,.98),rgba(7,10,14,.99));
+  box-shadow:0 28px 70px rgba(0,0,0,.72);
+}
+
+.dungeon-ready-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+  margin-bottom:16px;
+}
+
+.dungeon-ready-kicker{
+  color:#9cb8ca;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:1.7px;
+  text-transform:uppercase;
+}
+
+.dungeon-ready-header h2{
+  margin:3px 0 0;
+  color:#ead9b5;
+  font-family:Cinzel,Georgia,serif;
+  font-size:20px;
+}
+
+.dungeon-ready-countdown{
+  min-width:58px;
+  padding:7px 9px;
+  border:1px solid rgba(200,163,75,.28);
+  background:rgba(0,0,0,.30);
+  color:#e8cb79;
+  font-size:16px;
+  font-weight:900;
+  text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+
+.dungeon-ready-status{
+  margin:0 0 12px;
+  color:rgba(215,219,226,.74);
+  font-size:10px;
+}
+
+.dungeon-ready-participants{
+  display:grid;
+  gap:7px;
+}
+
+.dungeon-ready-player{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:10px 12px;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(0,0,0,.20);
+}
+
+.dungeon-ready-player.is-ready{
+  border-color:rgba(102,188,128,.32);
+  background:linear-gradient(90deg,rgba(60,135,83,.10),rgba(0,0,0,.18));
+}
+
+.dungeon-ready-player strong{
+  display:block;
+  color:#ece0c7;
+  font-size:11px;
+}
+
+.dungeon-ready-player span{
+  display:block;
+  margin-top:2px;
+  color:rgba(215,219,226,.48);
+  font-size:8px;
+}
+
+.dungeon-ready-player__state{
+  color:rgba(215,219,226,.52);
+  font-size:9px;
+  font-weight:900;
+  text-transform:uppercase;
+}
+
+.dungeon-ready-player.is-ready .dungeon-ready-player__state{
+  color:#8fd39f;
+}
+
+.dungeon-ready-error{
+  margin-top:12px;
+  padding:8px 10px;
+  border:1px solid rgba(210,73,59,.34);
+  background:rgba(110,24,18,.18);
+  color:#ef9b8e;
+  font-size:9px;
+}
+
+.dungeon-ready-footer{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:16px;
+  padding-top:14px;
+  border-top:1px solid rgba(255,255,255,.07);
+}
+
+/* =========================================================
+   DUNGEON INTERMISSION / RECOVERY
+========================================================= */
+
+.dungeon-rest-card{
+  display:grid;
+  gap:14px;
+}
+
+.dungeon-rest-heading{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+}
+
+.dungeon-rest-heading h3{
+  margin-bottom:6px;
+}
+
+.dungeon-rest-heading p{
+  margin:0;
+}
+
+.dungeon-rest-heading p strong{
+  color:#ddc88f;
+}
+
+.dungeon-rest-timer{
+  flex:0 0 auto;
+
+  min-width:92px;
+
+  padding:9px 12px;
+
+  border:1px solid rgba(200,163,75,.24);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(200,163,75,.07),
+      rgba(0,0,0,.20)
+    );
+
+  text-align:center;
+}
+
+.dungeon-rest-timer span{
+  display:block;
+
+  color:rgba(215,219,226,.50);
+
+  font-size:7px;
+  font-weight:900;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.dungeon-rest-timer strong{
+  display:block;
+
+  margin-top:2px;
+
+  color:#ead07b;
+
+  font-size:18px;
+  font-variant-numeric:tabular-nums;
+}
+
+.dungeon-rest-progress{
+  height:7px;
+
+  overflow:hidden;
+
+  border:1px solid rgba(201,184,154,.13);
+
+  background:rgba(0,0,0,.44);
+
+  box-shadow:
+    inset 0 1px 4px rgba(0,0,0,.75);
+}
+
+.dungeon-rest-progress__fill{
+  height:100%;
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(89,139,101,.78),
+      rgba(128,184,140,.92)
+    );
+
+  transition:
+    width .45s linear;
+}
+
+.dungeon-rest-meta{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+
+  color:rgba(215,219,226,.50);
+
+  font-size:8px;
+  font-weight:800;
+  letter-spacing:.35px;
+  text-transform:uppercase;
+}
+
+.dungeon-rest-party{
+  display:grid;
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(180px,1fr)
+    );
+
+  gap:8px;
+}
+
+.dungeon-rest-player{
+  padding:10px;
+
+  border:1px solid rgba(201,184,154,.11);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.018),
+      rgba(0,0,0,.20)
+    );
+}
+
+.dungeon-rest-player__top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+
+  margin-bottom:8px;
+}
+
+.dungeon-rest-player__top strong{
+  color:#e7dcc4;
+  font-size:10px;
+}
+
+.dungeon-rest-player__top span{
+  color:#8fc99c;
+
+  font-size:7px;
+  font-weight:900;
+  letter-spacing:.55px;
+  text-transform:uppercase;
+}
+
+.dungeon-rest-stat{
+  display:grid;
+  gap:3px;
+
+  margin-top:6px;
+}
+
+.dungeon-rest-stat > span{
+  color:rgba(215,219,226,.54);
+  font-size:8px;
+}
+
+@media(max-width:620px){
+  .dungeon-rest-heading{
+    flex-direction:column;
+  }
+
+  .dungeon-rest-timer{
+    width:100%;
+  }
+
+  .dungeon-rest-meta{
+    flex-direction:column;
+    gap:4px;
+  }
+}
+
+/* =========================================================
+   DUNGEON SPELL BAR — HUNT PARITY
+========================================================= */
+
+/*
+ * Q + six spell slots + E = eight fixed hotbar positions.
+ * Keep the whole row centered inside the Dungeon action panel.
+ */
+.dungeon-spell-hotbar{
+  display:grid;
+
+  grid-template-columns:
+    repeat(8, 66px);
+
+  justify-content:center;
+  align-items:center;
+
+  gap:10px;
+
+  width:100%;
+
+  margin:
+    4px auto 0;
+}
+
+
+/*
+ * Match the spell artwork behavior used by Hunt combat.
+ * The image fills the framed slot while preserving the icon artwork.
+ */
+.dungeon-spell-slot img{
+  position:absolute;
+
+  inset:0;
+
+  width:100%;
+  height:100%;
+
+  display:block;
+
+  object-fit:contain;
+
+  pointer-events:none;
+}
+
+
+/*
+ * Keep the action panel's heading/status visually centered over
+ * the hotbar now that the bar itself is centered.
+ */
+.dungeon-action-panel
+.dungeon-panel-header{
+  justify-content:center;
+
+  text-align:center;
+}
+
+.dungeon-action-panel
+.dungeon-action-status{
+  text-align:center;
+}
+
+
+/* Smaller screens can scroll the eight-slot bar without wrapping it. */
+@media(max-width:720px){
+  .dungeon-spell-hotbar{
+    display:flex;
+
+    justify-content:flex-start;
+
+    width:100%;
+
+    overflow-x:auto;
+    overflow-y:visible;
+
+    padding:
+      4px 4px 12px;
+
+    scrollbar-width:thin;
+  }
+
+  .dungeon-spell-slot{
+    flex:
+      0 0 66px;
+  }
+}
+
 @media(max-width:700px){
   .dungeon-combat-log{
     height:170px;

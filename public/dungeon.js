@@ -45,6 +45,9 @@ let dungeonPollingTimer =
 let dungeonBusy =
   false;
 
+let dungeonRestState =
+  null;
+
 const DUNGEON_POLL_MS =
   650;
 
@@ -202,7 +205,8 @@ function resolveDungeonIcon(
 ) {
   const raw =
     String(
-      rawIcon || ""
+      rawIcon ||
+      ""
     ).trim();
 
   if (!raw) {
@@ -215,21 +219,43 @@ function resolveDungeonIcon(
     ) ||
     raw.startsWith(
       "https://"
-    ) ||
-    raw.startsWith("/")
+    )
+  ) {
+    return raw;
+  }
+
+  /*
+   * Spell icons in the database are stored like:
+   *
+   *   /paladin/sacred_strike.webp
+   *   /elementalist/fireball.webp
+   *
+   * Hunt combat resolves those beneath /icons/spells/.
+   * Dungeon should use the exact same convention.
+   */
+  if (
+    raw.startsWith(
+      "/icons/spells/"
+    )
   ) {
     return raw;
   }
 
   if (
     raw.startsWith(
-      "icons/"
+      "icons/spells/"
     )
   ) {
     return `/${raw}`;
   }
 
-  return `/${raw}`;
+  return (
+    "/icons/spells/" +
+    raw.replace(
+      /^\/+/,
+      ""
+    )
+  );
 }
 
 
@@ -4354,6 +4380,9 @@ async function renderDungeonRestPanel(
     null;
 
   if (wipe) {
+    dungeonRestState =
+      null;
+
     panel.innerHTML =
       `
         <div class="dungeon-phase-card dungeon-phase-card--danger">
@@ -4406,28 +4435,294 @@ async function renderDungeonRestPanel(
     return;
   }
 
+  let rest =
+    null;
+
+  try {
+    const restResponse =
+      await fetch(
+        "/api/dungeons/active/rest",
+        {
+          credentials:
+            "include",
+          cache:
+            "no-store"
+        }
+      );
+
+    const restData =
+      await restResponse.json();
+
+    if (
+      !restResponse.ok ||
+      restData.ok === false
+    ) {
+      throw new Error(
+        restData.error ||
+        "Unable to recover during the intermission."
+      );
+    }
+
+    rest =
+      restData.rest ??
+      null;
+
+    dungeonRestState =
+      rest;
+  } catch (
+    error
+  ) {
+    console.error(
+      "Dungeon rest state failed:",
+      error
+    );
+
+    panel.innerHTML =
+      `
+        <div class="dungeon-phase-card">
+          <div class="dungeon-section-label">
+            Rest & Prepare
+          </div>
+
+          <h3>
+            Recovery unavailable
+          </h3>
+
+          <p>
+            ${
+              escapeDungeonHtml(
+                error?.message ||
+                "Unable to load the dungeon intermission."
+              )
+            }
+          </p>
+        </div>
+      `;
+
+    return;
+  }
+
+  if (!rest) {
+    return;
+  }
+
+  const remainingSeconds =
+    Math.max(
+      0,
+      Math.ceil(
+        Number(
+          rest.remainingMs
+        ) /
+        1000
+      )
+    );
+
+  const progress =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        (
+          1 -
+          (
+            Number(
+              rest.remainingMs
+            ) /
+            Math.max(
+              1,
+              Number(
+                rest.durationMs
+              )
+            )
+          )
+        ) *
+        100
+      )
+    );
+
+  const nextTickSeconds =
+    Math.max(
+      0,
+      Math.ceil(
+        Number(
+          rest.nextTickInMs
+        ) /
+        1000
+      )
+    );
+
+  const playerRows =
+    (
+      Array.isArray(
+        rest.players
+      )
+        ? rest.players
+        : []
+    )
+      .map(
+        player => `
+          <div class="dungeon-rest-player">
+            <div class="dungeon-rest-player__top">
+              <strong>
+                ${escapeDungeonHtml(
+                  player.name
+                )}
+              </strong>
+
+              <span>
+                ${
+                  player.hp >=
+                  player.maxHp &&
+                  player.sp >=
+                  player.maxSp
+                    ? "Recovered"
+                    : "Resting"
+                }
+              </span>
+            </div>
+
+            <div class="dungeon-rest-stat">
+              <span>
+                HP ${Number(
+                  player.hp
+                )} / ${Number(
+                  player.maxHp
+                )}
+              </span>
+
+              <div class="dungeon-mini-meter">
+                <div
+                  class="dungeon-mini-fill dungeon-mini-fill--hp"
+                  style="width:${
+                    ratioPercent(
+                      player.hp,
+                      player.maxHp
+                    )
+                  }%"
+                ></div>
+              </div>
+            </div>
+
+            <div class="dungeon-rest-stat">
+              <span>
+                SP ${Number(
+                  player.sp
+                )} / ${Number(
+                  player.maxSp
+                )}
+              </span>
+
+              <div class="dungeon-mini-meter">
+                <div
+                  class="dungeon-mini-fill dungeon-mini-fill--sp"
+                  style="width:${
+                    ratioPercent(
+                      player.sp,
+                      player.maxSp
+                    )
+                  }%"
+                ></div>
+              </div>
+            </div>
+          </div>
+        `
+      )
+      .join("");
+
   panel.innerHTML =
     `
-      <div class="dungeon-phase-card">
+      <div class="dungeon-phase-card dungeon-rest-card">
         <div class="dungeon-section-label">
           Rest & Prepare
         </div>
 
-        <h3>
-          The path ahead is quiet... for now.
-        </h3>
+        <div class="dungeon-rest-heading">
+          <div>
+            <h3>
+              The path ahead is quiet... for now.
+            </h3>
 
-        <p>
-          Recover, adjust your loadout, and prepare for the next room.
-        </p>
+            <p>
+              The party recovers
+              <strong>25% Health and Spirit every 5 seconds</strong>
+              during this 30-second intermission.
+            </p>
+          </div>
 
-        <button
-          id="dungeonAdvanceBtn"
-          class="dungeon-btn dungeon-btn--primary"
-          type="button"
-        >
-          Continue Expedition
-        </button>
+          <div class="dungeon-rest-timer">
+            <span>
+              Intermission
+            </span>
+
+            <strong>
+              ${remainingSeconds}s
+            </strong>
+          </div>
+        </div>
+
+        <div class="dungeon-rest-progress">
+          <div
+            class="dungeon-rest-progress__fill"
+            style="width:${progress}%"
+          ></div>
+        </div>
+
+        <div class="dungeon-rest-meta">
+          <span>
+            Recovery ${
+              Number(
+                rest.ticksApplied
+              )
+            } / ${
+              Number(
+                rest.totalTicks
+              )
+            }
+          </span>
+
+          <span>
+            ${
+              rest.complete
+                ? "Recovery complete"
+                : `Next recovery in ${nextTickSeconds}s`
+            }
+          </span>
+        </div>
+
+        <div class="dungeon-rest-party">
+          ${playerRows}
+        </div>
+
+        ${
+          rest.isLeader
+            ? `
+              <button
+                id="dungeonAdvanceBtn"
+                class="dungeon-btn dungeon-btn--primary"
+                type="button"
+                ${
+                  rest.complete
+                    ? ""
+                    : "disabled"
+                }
+              >
+                ${
+                  rest.complete
+                    ? "Continue Expedition"
+                    : `Resting... ${remainingSeconds}s`
+                }
+              </button>
+            `
+            : `
+              <div class="dungeon-waiting">
+                ${
+                  rest.complete
+                    ? "Recovery complete. Waiting for the dungeon leader..."
+                    : "Recovering before the next room..."
+                }
+              </div>
+            `
+        }
       </div>
     `;
 

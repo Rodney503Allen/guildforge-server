@@ -28,6 +28,17 @@ import {
   destroyDungeonCombatSession,
 } from "./services/dungeonCombatSessionService";
 
+import {
+  cancelDungeonReadyCheck,
+  getDungeonReadyCheck,
+  setDungeonReadyState,
+  startDungeonReadyCheck,
+} from "./services/dungeonReadyCheckService";
+
+import {
+  publishDungeonReadyCheck,
+} from "./dungeonSocket";
+
 const router = express.Router();
 
 function requireLogin(req: any, res: any, next: any) {
@@ -253,6 +264,120 @@ router.post("/active/rest/advance", async (req: any, res) => {
       error:
         err?.message ||
         "Unable to advance the dungeon.",
+    });
+  }
+});
+
+
+/* =========================================================
+   DUNGEON READY CHECK
+========================================================= */
+
+router.post("/:dungeonId/ready-check/start", async (req: any, res) => {
+  try {
+    const dungeonId = Number(req.params.dungeonId);
+
+    if (!Number.isInteger(dungeonId) || dungeonId <= 0) {
+      return res.status(400).json({ ok: false, error: "Invalid dungeon." });
+    }
+
+    const playerId = Number(req.session.playerId);
+
+    const result = await startDungeonReadyCheck(playerId, dungeonId);
+
+    publishDungeonReadyCheck(
+      result.readyCheck,
+      result.dungeon
+    );
+
+    return res.json({
+      ok: true,
+      playerId,
+      ...result,
+    });
+  } catch (err: any) {
+    console.error("POST /api/dungeons/:dungeonId/ready-check/start failed:", err);
+    return res.status(400).json({
+      ok: false,
+      error: err?.message || "Unable to start Dungeon ready check.",
+    });
+  }
+});
+
+router.get("/ready-check", async (req: any, res) => {
+  try {
+    const playerId = Number(req.session.playerId);
+    const readyCheck = await getDungeonReadyCheck(playerId);
+
+    return res.json({
+      ok: true,
+      playerId,
+      readyCheck,
+    });
+  } catch (err: any) {
+    console.error("GET /api/dungeons/ready-check failed:", err);
+    return res.status(400).json({
+      ok: false,
+      error: err?.message || "Unable to load Dungeon ready check.",
+    });
+  }
+});
+
+router.post("/ready-check/ready", async (req: any, res) => {
+  try {
+    if (typeof req.body?.ready !== "boolean") {
+      return res.status(400).json({
+        ok: false,
+        error: "Ready must be true or false.",
+      });
+    }
+
+    const playerId = Number(req.session.playerId);
+
+    const result = await setDungeonReadyState(
+      playerId,
+      req.body.ready,
+    );
+
+    publishDungeonReadyCheck(
+      result.readyCheck,
+      result.dungeon
+    );
+
+    return res.json({
+      ok: true,
+      playerId,
+      ...result,
+    });
+  } catch (err: any) {
+    console.error("POST /api/dungeons/ready-check/ready failed:", err);
+    return res.status(400).json({
+      ok: false,
+      error: err?.message || "Unable to update Dungeon ready state.",
+    });
+  }
+});
+
+router.post("/ready-check/cancel", async (req: any, res) => {
+  try {
+    const playerId = Number(req.session.playerId);
+    const result = await cancelDungeonReadyCheck(playerId);
+
+    publishDungeonReadyCheck(
+      result.readyCheck,
+      result.dungeon
+    );
+
+    return res.json({
+      ok: true,
+      playerId,
+      ...result,
+    });
+  } catch (err: any) {
+    console.error("POST /api/dungeons/ready-check/cancel failed:", err);
+    return res.status(400).json({
+      ok: false,
+      error: err?.message || "Unable to cancel Dungeon ready check.",
     });
   }
 });
