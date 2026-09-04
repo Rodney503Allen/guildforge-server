@@ -285,6 +285,12 @@ async function applyDungeonRestTicks(
             memberPlayerId
           );
 
+        if (!stats) {
+          throw new Error(
+            `Could not load final stats for dungeon rest player ${memberPlayerId}.`
+          );
+        }
+
         const maxHp =
           Math.max(
             1,
@@ -554,6 +560,12 @@ async function buildDungeonRestSnapshot(
       await getFinalPlayerStats(
         playerId
       );
+
+    if (!stats) {
+      throw new Error(
+        `Could not load final stats for dungeon rest player ${playerId}.`
+      );
+    }
 
     players.push({
       playerId,
