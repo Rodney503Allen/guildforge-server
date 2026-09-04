@@ -351,12 +351,25 @@ router.get("/world", async (req, res) => {
     `
       SELECT
         CASE
-          WHEN wm.terrain = 'town'
-            THEN COALESCE(wm.region_name, r.name, 'Unknown Region')
-          ELSE COALESCE(r.name, wm.region_name, 'Unknown Region')
+          WHEN wm.terrain IN ('town', 'dungeon')
+            THEN COALESCE(
+              l.name,
+              wm.region_name,
+              r.name,
+              'Unknown Region'
+            )
+          ELSE COALESCE(
+            r.name,
+            wm.region_name,
+            'Unknown Region'
+          )
         END AS location_name
       FROM world_map wm
-      LEFT JOIN regions r ON r.id = wm.region_id
+      LEFT JOIN regions r
+        ON r.id = wm.region_id
+      LEFT JOIN locations l
+        ON l.map_x = wm.x
+       AND l.map_y = wm.y
       WHERE wm.x = ?
         AND wm.y = ?
       LIMIT 1
@@ -459,6 +472,7 @@ res.send(`
   <link rel="stylesheet" href="/ui/itemTooltip.css">
   <link rel="stylesheet" href="/hunt-ready-check.css">
   <link rel="stylesheet" href="/hunt-combat.css">
+  <link rel="stylesheet" href="/dungeon.css">
 
 </head>
 
@@ -486,6 +500,16 @@ res.send(`
           onclick="enterTown()"
         >
           Enter Town
+        </button>
+
+        <button
+          id="enter-dungeon-btn"
+          class="world-action-btn"
+          type="button"
+          hidden
+          onclick="enterDungeonFromWorld()"
+        >
+          Enter Dungeon
         </button>
       </div>
       </div>
@@ -991,6 +1015,258 @@ res.send(`
 <div id="combat-root"></div>
   <!-- Shared Party Hunt Combat -->
   <div id="hunt-combat-root"></div>
+
+  <!-- Dungeon Expedition Modal -->
+  <div
+    id="dungeonModal"
+    class="dungeon-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="dungeonTitle"
+  >
+    <div
+      class="dungeon-modal-backdrop"
+      aria-hidden="true"
+    ></div>
+
+    <div class="dungeon-modal-scroll">
+      <main class="dungeon-shell frame-host">
+        <span
+          class="frame-border main"
+          aria-hidden="true"
+        ></span>
+
+        <header class="dungeon-header">
+          <div>
+            <div class="dungeon-kicker">
+              Dungeon Expedition
+            </div>
+
+            <h1 id="dungeonTitle">
+              Dungeon
+            </h1>
+
+            <div
+              id="dungeonSubtitle"
+              class="dungeon-subtitle"
+            >
+              Preparing expedition...
+            </div>
+          </div>
+
+          <div class="dungeon-header-actions">
+            <div
+              id="dungeonPhaseBadge"
+              class="dungeon-phase-badge"
+            >
+              Loading
+            </div>
+
+            <button
+              id="dungeonLeaveBtn"
+              class="dungeon-btn dungeon-btn--ghost button-frame"
+              type="button"
+            >
+              Abandon Dungeon
+            </button>
+          </div>
+        </header>
+
+        <section class="dungeon-progress-card frame-host">
+          <span
+            class="frame-border panel"
+            aria-hidden="true"
+          ></span>
+
+          <div class="dungeon-progress-copy">
+            <div class="dungeon-section-label">
+              Expedition Progress
+            </div>
+
+            <div
+              id="dungeonRoomTitle"
+              class="dungeon-room-title"
+            >
+              Room —
+            </div>
+
+            <div
+              id="dungeonWaveText"
+              class="dungeon-wave-text"
+            >
+              Wave —
+            </div>
+          </div>
+
+          <div
+            id="dungeonRoomSteps"
+            class="dungeon-room-steps"
+            aria-label="Dungeon rooms"
+          ></div>
+        </section>
+
+        <section
+          id="dungeonEnemyCast"
+          class="dungeon-cast-warning frame-host hidden"
+          aria-live="assertive"
+        >
+          <span
+            class="frame-border panel"
+            aria-hidden="true"
+          ></span>
+
+          <div class="dungeon-cast-warning__icon">
+            ⚠
+          </div>
+
+          <div class="dungeon-cast-warning__body">
+            <div class="dungeon-cast-warning__eyebrow">
+              Enemy Ability Incoming
+            </div>
+
+            <div class="dungeon-cast-warning__top">
+              <strong id="dungeonCastName">
+                Incoming Attack
+              </strong>
+
+              <span id="dungeonCastTime">
+                0.0s
+              </span>
+            </div>
+
+            <div class="dungeon-cast-track">
+              <div
+                id="dungeonCastBar"
+                class="dungeon-cast-fill"
+              ></div>
+            </div>
+
+            <div class="dungeon-cast-warning__bottom">
+              <span id="dungeonCastTargets">
+                Prepare to react
+              </span>
+
+              <span
+                id="dungeonCastInterrupt"
+                class="dungeon-cast-interrupt"
+              >
+                Interruptible
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <div class="dungeon-layout">
+
+          <section class="dungeon-panel dungeon-enemy-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div class="dungeon-section-label">
+                Active Enemies
+              </div>
+            </div>
+
+            <div class="dungeon-loading">
+              Preparing enemies...
+            </div>
+          </section>
+
+          <section class="dungeon-panel dungeon-party-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div class="dungeon-section-label">
+                Adventuring Company
+              </div>
+            </div>
+
+            <div
+              id="dungeonPartyList"
+              class="dungeon-party-list"
+            >
+              <div class="dungeon-loading">
+                Gathering party...
+              </div>
+            </div>
+          </section>
+
+          <section class="dungeon-panel dungeon-log-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div class="dungeon-section-label">
+                Encounter
+              </div>
+            </div>
+
+            <div
+              id="dungeonCombatLog"
+              class="dungeon-combat-log"
+            >
+              <div>
+                The expedition prepares to move.
+              </div>
+            </div>
+          </section>
+
+          <section class="dungeon-panel dungeon-action-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div>
+                <div class="dungeon-section-label">
+                  Your Actions
+                </div>
+
+                <div
+                  id="dungeonActionStatus"
+                  class="dungeon-action-status"
+                >
+                  Preparing...
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="dungeonSpellHotbar"
+              class="dungeon-spell-hotbar"
+            >
+              <div class="dungeon-loading">
+                Loading abilities...
+              </div>
+            </div>
+
+            <div
+              id="dungeonTargetPrompt"
+              class="dungeon-target-prompt hidden"
+            >
+              <span>
+                Choose a party member.
+              </span>
+
+              <button
+                id="dungeonCancelTargetBtn"
+                class="dungeon-btn dungeon-btn--ghost button-frame"
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+
+          <section
+            id="dungeonPhasePanel"
+            class="dungeon-panel dungeon-phase-panel frame-host hidden"
+          >
+            <span class="frame-border panel" aria-hidden="true"></span>
+          </section>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
   <div id="rest-root"></div>
 
 
@@ -1163,6 +1439,7 @@ res.send(`
   <script src="/hunt-ready-check.js"></script>
   <script src="/hunt-combat.js"></script>
   <script src="/rest.js" defer></script>
+  <script src="/dungeon.js"></script>
 </body>
 
 
@@ -1193,8 +1470,199 @@ router.get("/town/enter", async (req, res) => {
     return res.status(403).send("You are not in a town.");
   }
 
+
   // ✅ Valid town entry
   res.redirect("/town");
+});
+
+/*
+ * Resolve the dungeon attached to the player's current
+ * world-map tile.
+ *
+ * Dungeon locations mirror towns:
+ *   world_map.terrain = 'dungeon'
+ *   locations.map_x/map_y = same tile
+ *   locations.name = dungeons.name
+ */
+router.get("/world/current-dungeon", async (req, res) => {
+  try {
+    const pid =
+      (req.session as any)?.playerId;
+
+    if (!pid) {
+      return res
+        .status(401)
+        .json({
+          ok: false,
+          error: "not_logged_in"
+        });
+    }
+
+    const [[player]]: any =
+      await db.query(
+        `
+          SELECT
+            map_x,
+            map_y
+
+          FROM players
+
+          WHERE id = ?
+
+          LIMIT 1
+        `,
+        [pid]
+      );
+
+    if (!player) {
+      return res
+        .status(404)
+        .json({
+          ok: false,
+          error: "player_not_found"
+        });
+    }
+
+    const [[row]]: any =
+      await db.query(
+        `
+          SELECT
+            wm.x,
+            wm.y,
+            wm.terrain,
+
+            l.id AS location_id,
+            l.name AS location_name,
+            l.description AS location_description,
+            l.image AS location_image,
+
+            d.id AS dungeon_id,
+            d.name AS dungeon_name,
+            d.slug,
+            d.min_level,
+            d.max_level,
+            d.recommended_level,
+            d.min_party_size,
+            d.max_party_size,
+            d.image AS dungeon_image
+
+          FROM world_map wm
+
+          LEFT JOIN locations l
+            ON l.map_x = wm.x
+           AND l.map_y = wm.y
+
+          LEFT JOIN dungeons d
+            ON d.name COLLATE utf8mb4_unicode_ci =
+              l.name COLLATE utf8mb4_unicode_ci
+          AND d.is_active = 1
+
+          WHERE wm.x = ?
+            AND wm.y = ?
+
+          LIMIT 1
+        `,
+        [
+          Number(player.map_x),
+          Number(player.map_y)
+        ]
+      );
+
+    if (
+      !row ||
+      String(row.terrain || "")
+        .toLowerCase() !== "dungeon"
+    ) {
+      return res
+        .status(403)
+        .json({
+          ok: false,
+          error: "not_on_dungeon_tile"
+        });
+    }
+
+    if (!row.dungeon_id) {
+      return res
+        .status(404)
+        .json({
+          ok: false,
+          error: "dungeon_not_configured"
+        });
+    }
+
+    return res.json({
+      ok: true,
+
+      dungeon: {
+        id:
+          Number(row.dungeon_id),
+
+        name:
+          String(
+            row.dungeon_name ||
+            row.location_name ||
+            "Dungeon"
+          ),
+
+        slug:
+          row.slug ?? null,
+
+        description:
+          row.location_description ?? null,
+
+        image:
+          row.dungeon_image ??
+          row.location_image ??
+          null,
+
+        minLevel:
+          Number(
+            row.min_level ?? 1
+          ),
+
+        maxLevel:
+          row.max_level == null
+            ? null
+            : Number(row.max_level),
+
+        recommendedLevel:
+          row.recommended_level == null
+            ? null
+            : Number(
+                row.recommended_level
+              ),
+
+        minPartySize:
+          Number(
+            row.min_party_size ?? 1
+          ),
+
+        maxPartySize:
+          Number(
+            row.max_party_size ?? 4
+          ),
+
+        x:
+          Number(row.x),
+
+        y:
+          Number(row.y)
+      }
+    });
+
+  } catch (err) {
+    console.error(
+      "GET /world/current-dungeon failed:",
+      err
+    );
+
+    return res
+      .status(500)
+      .json({
+        ok: false,
+        error: "server_error"
+      });
+  }
 });
 
 // =======================
@@ -1269,6 +1737,13 @@ mountain: [
   "Loose gravel skitters down the slope below you.",
   "The wind howls between jagged peaks.",
   "Far below, the world looks small and fragile."
+],
+
+dungeon: [
+  "Ancient stone looms before you.",
+  "Runes flicker across a sealed mountain entrance.",
+  "A low rumble echoes from somewhere beyond the gate.",
+  "The air crackles with old, unstable power."
 ]
   };
 
@@ -1378,18 +1853,45 @@ const [[tile]]: any = await db.query(
   SELECT
     wm.terrain,
     wm.region_id,
-    COALESCE(r.name, wm.region_name, 'Unknown Region') AS region_name,
+
+    COALESCE(
+      r.name,
+      wm.region_name,
+      'Unknown Region'
+    ) AS region_name,
+
     CASE
-      WHEN wm.terrain = 'town'
-        THEN COALESCE(wm.region_name, r.name, 'Unknown Region')
-      ELSE COALESCE(r.name, wm.region_name, 'Unknown Region')
+      WHEN wm.terrain IN ('town', 'dungeon')
+        THEN COALESCE(
+          l.name,
+          wm.region_name,
+          r.name,
+          'Unknown Region'
+        )
+      ELSE COALESCE(
+        r.name,
+        wm.region_name,
+        'Unknown Region'
+      )
     END AS location_name,
+
+    l.name AS special_location_name,
+
     COALESCE(r.level_min, 1) AS level_min,
     COALESCE(r.level_max, 1) AS level_max,
     r.controlling_guild_id
+
   FROM world_map wm
-  LEFT JOIN regions r ON r.id = wm.region_id
+
+  LEFT JOIN regions r
+    ON r.id = wm.region_id
+
+  LEFT JOIN locations l
+    ON l.map_x = wm.x
+   AND l.map_y = wm.y
+
   WHERE wm.x=? AND wm.y=?
+
   LIMIT 1
   `,
   [newX, newY]
@@ -1645,6 +2147,76 @@ await db.query(
     }
   } catch (e) {
     console.warn("nearest town lookup failed", e);
+  }
+
+  // Nearest Dungeon
+  try {
+    const [[bestDungeon]]: any =
+      await db.query(
+        `
+          SELECT
+            wm.x,
+            wm.y,
+            COALESCE(
+              l.name,
+              'Dungeon'
+            ) AS name,
+
+            (
+              ABS(wm.x - ?) +
+              ABS(wm.y - ?)
+            ) AS distance
+
+          FROM world_map wm
+
+          LEFT JOIN locations l
+            ON l.map_x = wm.x
+           AND l.map_y = wm.y
+
+          WHERE wm.terrain = 'dungeon'
+
+          ORDER BY
+            distance ASC
+
+          LIMIT 1
+        `,
+        [
+          newX,
+          newY
+        ]
+      );
+
+    if (bestDungeon) {
+      nearestDungeon = {
+        name:
+          String(
+            bestDungeon.name ||
+            "Dungeon"
+          ),
+
+        distance:
+          Number(
+            bestDungeon.distance ??
+            0
+          ),
+
+        arrow:
+          dirArrow(
+            Number(
+              bestDungeon.x
+            ) - newX,
+            Number(
+              bestDungeon.y
+            ) - newY
+          )
+      };
+    }
+
+  } catch (e) {
+    console.warn(
+      "nearest dungeon lookup failed",
+      e
+    );
   }
 
   // =======================

@@ -315,14 +315,11 @@ SpellHandlerDefinition = {
   requiresEnemy:
     true,
 
-
   validate(spell) {
-
     const baseDamage =
       Number(
         spell.damage
       ) || 0;
-
 
     if (
       baseDamage <= 0
@@ -332,15 +329,14 @@ SpellHandlerDefinition = {
       );
     }
 
-
     return null;
   },
-
 
   async execute({
     spell,
     player,
-    enemy
+    enemy,
+    enemies
   }): Promise<SpellHandlerResult> {
 
     if (
@@ -351,90 +347,181 @@ SpellHandlerDefinition = {
       );
     }
 
+    const targets =
+      (
+        Array.isArray(
+          enemies
+        ) &&
+        enemies.length
+          ? enemies
+          : [
+              enemy
+            ]
+      )
+        .filter(
+          target =>
+            Number(
+              target.hp
+            ) > 0
+        )
+        .slice(
+          0,
+          3
+        );
 
     const baseDamage =
       Number(
         spell.damage
       ) || 0;
 
+    const bounceMultipliers =
+      [
+        1,
+        0.75,
+        0.5
+      ];
 
-    const scaledDamage =
-      calculateScaledSpellAmount(
-        player,
-        baseDamage
-      );
+    const enemyResults:
+      any[] =
+      [];
 
+    let totalDamage =
+      0;
 
-    const damageResult =
-      resolveDamageAgainstEnemy(
-        player,
-        enemy,
-        scaledDamage
-      );
+    for (
+      let index = 0;
+      index <
+      targets.length;
+      index++
+    ) {
+      const target =
+        targets[index];
 
+      const scaledDamage =
+        calculateScaledSpellAmount(
+          player,
+          baseDamage
+        );
 
-    const damage =
-      damageResult.dodged
-        ? 0
-        : Math.max(
-            1,
-            Number(
-              damageResult.damage
-            ) || 1
-          );
-
-
-    const enemyHP =
-      Math.max(
-        0,
-        Number(
-          enemy.hp
-        ) -
-        damage
-      );
-
-
-    await setSpellEnemyHP(
-      enemy,
-      enemyHP
-    );
-
-
-    const log =
-      damageResult.dodged
-        ? (
-            `⚡ ${spell.name} misses the enemy!`
-          )
-        : damageResult.crit
-          ? (
-              `⚡ Critical! ${spell.name} strikes the enemy ` +
-              `for ${damage} damage!`
+      const bounceDamage =
+        Math.max(
+          1,
+          Math.floor(
+            scaledDamage *
+            (
+              bounceMultipliers[
+                index
+              ] ??
+              0.5
             )
-          : (
-              `⚡ ${spell.name} strikes the enemy ` +
-              `for ${damage} damage!`
+          )
+        );
+
+      const damageResult =
+        resolveDamageAgainstEnemy(
+          player,
+          target,
+          bounceDamage
+        );
+
+      const damage =
+        damageResult.dodged
+          ? 0
+          : Math.max(
+              1,
+              Number(
+                damageResult.damage
+              ) || 1
             );
 
+      const enemyHP =
+        Math.max(
+          0,
+          Number(
+            target.hp
+          ) -
+          damage
+        );
+
+      await setSpellEnemyHP(
+        target,
+        enemyHP
+      );
+
+      totalDamage +=
+        damage;
+
+      enemyResults.push({
+        enemyId:
+          Number(
+            target.id
+          ),
+
+        enemyName:
+          target.name,
+
+        damage,
+
+        enemyHP,
+
+        killedEnemy:
+          enemyHP <= 0,
+
+        crit:
+          Boolean(
+            damageResult.crit
+          ),
+
+        dodged:
+          Boolean(
+            damageResult.dodged
+          ),
+      });
+    }
+
+    const hits =
+      enemyResults.filter(
+        hit =>
+          !hit.dodged
+      ).length;
 
     return {
-      log,
+      log:
+        targets.length > 1
+          ? `⚡ ${spell.name} arcs through ${targets.length} enemies for ${totalDamage} total damage!`
+          : enemyResults[0]?.dodged
+            ? `⚡ ${spell.name} misses the enemy!`
+            : `⚡ ${spell.name} strikes the enemy for ${totalDamage} damage!`,
 
-      damage,
+      damage:
+        totalDamage,
 
-      enemyHP,
+      enemyHP:
+        enemyResults[0]
+          ?.enemyHP ??
+        Number(
+          enemy.hp
+        ),
+
+      enemyResults,
+
+      targetsHit:
+        hits,
 
       killedEnemy:
-        enemyHP <= 0,
+        Boolean(
+          enemyResults[0]
+            ?.killedEnemy
+        ),
 
       crit:
-        Boolean(
-          damageResult.crit
+        enemyResults.some(
+          hit =>
+            hit.crit
         ),
 
       dodged:
-        Boolean(
-          damageResult.dodged
-        )
+        hits === 0,
     };
   }
 };
@@ -443,13 +530,8 @@ SpellHandlerDefinition = {
 // =====================================================
 // INFERNO
 //
-// Deals immediate damage and applies a burn.
-//
-// Current Hunt behavior:
-// Applies to the Hunt target.
-//
-// Future dungeon/raid behavior:
-// Apply to all active enemies.
+// Deals immediate damage and applies a burn to all living enemies
+// when the owning combat mode supplies a hostile collection.
 // =====================================================
 
 export const infernoHandler:
@@ -458,32 +540,26 @@ SpellHandlerDefinition = {
   requiresEnemy:
     true,
 
-
   validate(spell) {
-
     const directDamage =
       Number(
         spell.damage
       ) || 0;
-
 
     const dotDamage =
       Number(
         spell.dot_damage
       ) || 0;
 
-
     const dotDuration =
       Number(
         spell.dot_duration
       ) || 0;
 
-
     const tickInterval =
       Number(
         spell.dot_tick_rate
       ) || 0;
-
 
     if (
       directDamage <= 0
@@ -493,7 +569,6 @@ SpellHandlerDefinition = {
       );
     }
 
-
     if (
       dotDamage <= 0
     ) {
@@ -501,7 +576,6 @@ SpellHandlerDefinition = {
         `${spell.name} has invalid burn damage`
       );
     }
-
 
     if (
       dotDuration <= 0
@@ -511,7 +585,6 @@ SpellHandlerDefinition = {
       );
     }
 
-
     if (
       tickInterval <= 0
     ) {
@@ -520,16 +593,15 @@ SpellHandlerDefinition = {
       );
     }
 
-
     return null;
   },
-
 
   async execute({
     playerId,
     spell,
     player,
-    enemy
+    enemy,
+    enemies
   }): Promise<SpellHandlerResult> {
 
     if (
@@ -540,138 +612,33 @@ SpellHandlerDefinition = {
       );
     }
 
-
-    // =================================================
-    // DIRECT HIT
-    // =================================================
-
-    const scaledDirectDamage =
-      calculateScaledSpellAmount(
-        player,
-        Number(
-          spell.damage
-        ) || 0
-      );
-
-
-    const directResult =
-      resolveDamageAgainstEnemy(
-        player,
-        enemy,
-        scaledDirectDamage
-      );
-
-
-    const directDamage =
-      directResult.dodged
-        ? 0
-        : Math.max(
-            1,
+    const targets =
+      (
+        Array.isArray(
+          enemies
+        ) &&
+        enemies.length
+          ? enemies
+          : [
+              enemy
+            ]
+      )
+        .filter(
+          target =>
             Number(
-              directResult.damage
-            ) || 1
-          );
-
-
-    const enemyHP =
-      Math.max(
-        0,
-        Number(
-          enemy.hp
-        ) -
-        directDamage
-      );
-
-
-    await setSpellEnemyHP(
-      enemy,
-      enemyHP
-    );
-
-
-    /*
-     * If the direct spell misses, do not
-     * attach the burn.
-     */
-    if (
-      directResult.dodged
-    ) {
-
-      return {
-        log:
-          `🔥 ${spell.name} misses the enemy!`,
-
-        enemyHP,
-
-        killedEnemy:
-          false,
-
-        appliedStatus:
-          false,
-
-        crit:
-          false,
-
-        dodged:
-          true
-      };
-    }
-
-
-    /*
-     * Do not burn something already killed
-     * by the initial eruption.
-     */
-    if (
-      enemyHP <= 0
-    ) {
-
-      return {
-        log:
-          directResult.crit
-            ? (
-                `🔥 Critical! ${spell.name} erupts for ` +
-                `${directDamage} damage!`
-              )
-            : (
-                `🔥 ${spell.name} erupts for ` +
-                `${directDamage} damage!`
-              ),
-
-        enemyHP,
-
-        killedEnemy:
-          true,
-
-        appliedStatus:
-          false,
-
-        crit:
-          Boolean(
-            directResult.crit
-          ),
-
-        dodged:
-          false
-      };
-    }
-
-
-    // =================================================
-    // BURN
-    // =================================================
+              target.hp
+            ) > 0
+        );
 
     const dotDuration =
       Number(
         spell.dot_duration
       ) || 0;
 
-
     const tickInterval =
       Number(
         spell.dot_tick_rate
       ) || 1;
-
 
     const totalTicks =
       Math.max(
@@ -682,131 +649,214 @@ SpellHandlerDefinition = {
         )
       );
 
+    const enemyResults:
+      any[] =
+      [];
 
-    /*
-     * Inferno's dot_damage represents
-     * base damage per tick.
-     *
-     * Preserve the existing smaller
-     * DOT scaling coefficient.
-     */
-    const scaledDamagePerTick =
-      calculateScaledSpellAmount(
-        player,
-        Number(
-          spell.dot_damage
-        ) || 0,
-        0.15
-      );
+    let totalDirectDamage =
+      0;
 
+    let burnedTargets =
+      0;
 
-    const dotResult =
-      resolveDamageAgainstEnemy(
-        player,
-        enemy,
-        scaledDamagePerTick
-      );
-
-
-    const damagePerTick =
-      Math.max(
-        1,
-        Number(
-          dotResult.damage
-        ) || 1
-      );
-
-
-    const totalDotDamage =
-      damagePerTick *
-      totalTicks;
-
-
-    /*
-     * Universal DOT application.
-     *
-     * Normal combat:
-     * player_creature_dots
-     *
-     * Hunt:
-     * session.dots
-     */
-    await applySpellDot(
-      enemy,
-      {
-        sourcePlayerId:
-          playerId,
-
-        spellId:
+    for (
+      const target of
+      targets
+    ) {
+      const scaledDirectDamage =
+        calculateScaledSpellAmount(
+          player,
           Number(
-            spell.id
-          ),
+            spell.damage
+          ) || 0
+        );
 
-        spellName:
-          String(
-            spell.name ||
-            "Inferno"
-          ),
+      const directResult =
+        resolveDamageAgainstEnemy(
+          player,
+          target,
+          scaledDirectDamage
+        );
 
-        totalDamage:
-          totalDotDamage,
+      const directDamage =
+        directResult.dodged
+          ? 0
+          : Math.max(
+              1,
+              Number(
+                directResult.damage
+              ) || 1
+            );
 
-        durationSeconds:
-          dotDuration,
+      const enemyHP =
+        Math.max(
+          0,
+          Number(
+            target.hp
+          ) -
+          directDamage
+        );
 
-        tickRateSeconds:
-          tickInterval,
-        escalationPercentPerTick: Number(spell.rank_config?.dotEscalationPercent) || 0,
-        escalationMaxPercent: Number(spell.rank_config?.dotEscalationCap) || 0,
-        healingReductionPercent: Number(spell.rank_config?.dotHealingReductionPercent) || 0
-      }
-    );
+      await setSpellEnemyHP(
+        target,
+        enemyHP
+      );
 
+      totalDirectDamage +=
+        directDamage;
 
-    let log =
-      directResult.crit
-        ? (
-            `🔥 Critical! ${spell.name} erupts for ` +
-            `${directDamage} damage and burns the enemy for ` +
-            `${totalDotDamage} damage over ${dotDuration}s!`
-          )
-        : (
-            `🔥 ${spell.name} erupts for ` +
-            `${directDamage} damage and burns the enemy for ` +
-            `${totalDotDamage} damage over ${dotDuration}s!`
+      if (
+        !directResult.dodged &&
+        enemyHP > 0
+      ) {
+        const scaledDamagePerTick =
+          calculateScaledSpellAmount(
+            player,
+            Number(
+              spell.dot_damage
+            ) || 0,
+            0.15
           );
 
+        const dotResult =
+          resolveDamageAgainstEnemy(
+            player,
+            target,
+            scaledDamagePerTick
+          );
 
-    if (
-      dotResult.crit
-    ) {
+        const damagePerTick =
+          Math.max(
+            1,
+            Number(
+              dotResult.damage
+            ) || 1
+          );
 
-      log +=
-        " The burn was critically empowered!";
+        const totalDotDamage =
+          damagePerTick *
+          totalTicks;
+
+        await applySpellDot(
+          target,
+          {
+            sourcePlayerId:
+              playerId,
+
+            spellId:
+              Number(
+                spell.id
+              ),
+
+            spellName:
+              String(
+                spell.name ||
+                "Inferno"
+              ),
+
+            totalDamage:
+              totalDotDamage,
+
+            durationSeconds:
+              dotDuration,
+
+            tickRateSeconds:
+              tickInterval,
+
+            escalationPercentPerTick:
+              Number(
+                spell.rank_config
+                  ?.dotEscalationPercent
+              ) || 0,
+
+            escalationMaxPercent:
+              Number(
+                spell.rank_config
+                  ?.dotEscalationCap
+              ) || 0,
+
+            healingReductionPercent:
+              Number(
+                spell.rank_config
+                  ?.dotHealingReductionPercent
+              ) || 0
+          } as any
+        );
+
+        burnedTargets++;
+      }
+
+      enemyResults.push({
+        enemyId:
+          Number(
+            target.id
+          ),
+
+        enemyName:
+          target.name,
+
+        damage:
+          directDamage,
+
+        enemyHP,
+
+        killedEnemy:
+          enemyHP <= 0,
+
+        crit:
+          Boolean(
+            directResult.crit
+          ),
+
+        dodged:
+          Boolean(
+            directResult.dodged
+          ),
+      });
     }
 
-
     return {
-      log,
+      log:
+        `🔥 ${spell.name} engulfs ${targets.length} enem${targets.length === 1 ? "y" : "ies"} for ${totalDirectDamage} total damage${burnedTargets > 0 ? ` and burns ${burnedTargets}` : ""}!`,
 
-      damage: directDamage,
-      dotDamage: totalDotDamage,
+      damage:
+        totalDirectDamage,
 
-      enemyHP,
+      enemyHP:
+        enemyResults[0]
+          ?.enemyHP ??
+        Number(
+          enemy.hp
+        ),
+
+      enemyResults,
+
+      targetsHit:
+        enemyResults.filter(
+          hit =>
+            !hit.dodged
+        ).length,
 
       appliedStatus:
-        true,
+        burnedTargets > 0,
 
       killedEnemy:
-        false,
+        Boolean(
+          enemyResults[0]
+            ?.killedEnemy
+        ),
 
       crit:
-        Boolean(
-          directResult.crit
+        enemyResults.some(
+          hit =>
+            hit.crit
         ),
 
       dodged:
-        false
+        enemyResults.every(
+          hit =>
+            hit.dodged
+        ),
     };
   }
 };
@@ -815,13 +865,7 @@ SpellHandlerDefinition = {
 // =====================================================
 // CATACLYSM
 //
-// Massive elemental damage.
-//
-// Current Hunt behavior:
-// Hits the Hunt target.
-//
-// Future dungeon/raid behavior:
-// Apply to all active enemies.
+// Massive elemental damage to all living enemies.
 // =====================================================
 
 export const cataclysmHandler:
@@ -830,14 +874,11 @@ SpellHandlerDefinition = {
   requiresEnemy:
     true,
 
-
   validate(spell) {
-
     const baseDamage =
       Number(
         spell.damage
       ) || 0;
-
 
     if (
       baseDamage <= 0
@@ -847,15 +888,14 @@ SpellHandlerDefinition = {
       );
     }
 
-
     return null;
   },
-
 
   async execute({
     spell,
     player,
-    enemy
+    enemy,
+    enemies
   }): Promise<SpellHandlerResult> {
 
     if (
@@ -866,86 +906,144 @@ SpellHandlerDefinition = {
       );
     }
 
-
-    const scaledDamage =
-      calculateScaledSpellAmount(
-        player,
-        Number(
-          spell.damage
-        ) || 0
-      );
-
-
-    const damageResult =
-      resolveDamageAgainstEnemy(
-        player,
-        enemy,
-        scaledDamage
-      );
-
-
-    const damage =
-      damageResult.dodged
-        ? 0
-        : Math.max(
-            1,
+    const targets =
+      (
+        Array.isArray(
+          enemies
+        ) &&
+        enemies.length
+          ? enemies
+          : [
+              enemy
+            ]
+      )
+        .filter(
+          target =>
             Number(
-              damageResult.damage
-            ) || 1
-          );
+              target.hp
+            ) > 0
+        );
 
+    const enemyResults:
+      any[] =
+      [];
 
-    const enemyHP =
-      Math.max(
-        0,
-        Number(
-          enemy.hp
-        ) -
-        damage
-      );
+    let totalDamage =
+      0;
 
+    for (
+      const target of
+      targets
+    ) {
+      const scaledDamage =
+        calculateScaledSpellAmount(
+          player,
+          Number(
+            spell.damage
+          ) || 0
+        );
 
-    await setSpellEnemyHP(
-      enemy,
-      enemyHP
-    );
+      const damageResult =
+        resolveDamageAgainstEnemy(
+          player,
+          target,
+          scaledDamage
+        );
 
-
-    const log =
-      damageResult.dodged
-        ? (
-            `🌩️ ${spell.name} misses the enemy!`
-          )
-        : damageResult.crit
-          ? (
-              `🌩️ Critical! ${spell.name} tears through the enemy ` +
-              `for ${damage} damage!`
-            )
-          : (
-              `🌩️ ${spell.name} tears through the enemy ` +
-              `for ${damage} damage!`
+      const damage =
+        damageResult.dodged
+          ? 0
+          : Math.max(
+              1,
+              Number(
+                damageResult.damage
+              ) || 1
             );
 
+      const enemyHP =
+        Math.max(
+          0,
+          Number(
+            target.hp
+          ) -
+          damage
+        );
+
+      await setSpellEnemyHP(
+        target,
+        enemyHP
+      );
+
+      totalDamage +=
+        damage;
+
+      enemyResults.push({
+        enemyId:
+          Number(
+            target.id
+          ),
+
+        enemyName:
+          target.name,
+
+        damage,
+
+        enemyHP,
+
+        killedEnemy:
+          enemyHP <= 0,
+
+        crit:
+          Boolean(
+            damageResult.crit
+          ),
+
+        dodged:
+          Boolean(
+            damageResult.dodged
+          ),
+      });
+    }
 
     return {
-      log,
+      log:
+        `🌩️ ${spell.name} tears through ${targets.length} enem${targets.length === 1 ? "y" : "ies"} for ${totalDamage} total damage!`,
 
-      damage,
+      damage:
+        totalDamage,
 
-      enemyHP,
+      enemyHP:
+        enemyResults[0]
+          ?.enemyHP ??
+        Number(
+          enemy.hp
+        ),
+
+      enemyResults,
+
+      targetsHit:
+        enemyResults.filter(
+          hit =>
+            !hit.dodged
+        ).length,
 
       killedEnemy:
-        enemyHP <= 0,
+        Boolean(
+          enemyResults[0]
+            ?.killedEnemy
+        ),
 
       crit:
-        Boolean(
-          damageResult.crit
+        enemyResults.some(
+          hit =>
+            hit.crit
         ),
 
       dodged:
-        Boolean(
-          damageResult.dodged
-        )
+        enemyResults.every(
+          hit =>
+            hit.dodged
+        ),
     };
   }
 };

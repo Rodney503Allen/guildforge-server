@@ -55,7 +55,7 @@ type RolledAffix = {
   baseValue?: number;
 };
 
-type GeneratedItem = {
+export type GeneratedItem = {
   itemBaseId: number;
   name: string;
   slot: string;
@@ -74,7 +74,7 @@ type SavedItem = GeneratedItem & {
   playerItemId: number;
 };
 
-type LootRarity = "base" | "dormant" | "awakened" | "empowered" | "transcendent";
+export type LootRarity = "base" | "dormant" | "awakened" | "empowered" | "transcendent";
 
 const RARITY_ORDER: Record<LootRarity, number> = {
   base: 0,
@@ -659,6 +659,90 @@ function rollWeighted<T>(entries: readonly { key: T; weight: number }[]): T {
   return entries[entries.length - 1].key;
 }
 
+
+export async function generateLootPreviewFromBaseItem(args: {
+  baseItemId: number;
+  itemLevel: number;
+  rarityOverride?: LootRarity;
+  conn?: any;
+}): Promise<GeneratedItem | null> {
+  const {
+    baseItemId,
+    itemLevel,
+  } = args;
+
+  const runner =
+    args.conn ?? db;
+
+  const [rows]: any =
+    await runner.query(
+      `
+        SELECT
+          id,
+          name,
+          slot,
+          item_type,
+          armor_weight,
+          weapon_class,
+          required_level,
+          max_level,
+          COALESCE(base_attack, 0) AS base_attack,
+          COALESCE(base_defense, 0) AS base_defense,
+          icon,
+          COALESCE(sell_value, 0) AS sell_value
+
+        FROM item_bases
+
+        WHERE id = ?
+          AND is_active = 1
+          AND required_level <= ?
+          AND max_level >= ?
+
+        LIMIT 1
+      `,
+      [
+        baseItemId,
+        itemLevel,
+        itemLevel,
+      ],
+    );
+
+  const base =
+    rows?.[0] as
+      | ItemBaseRow
+      | undefined;
+
+  if (!base) {
+    return null;
+  }
+
+  const rarity =
+    args.rarityOverride ??
+    rollShopRarity();
+
+  const affixPool =
+    await getEligibleAffixes({
+      base,
+      itemLevel,
+      rarity,
+    });
+
+  const affixes =
+    rollAffixes(
+      affixPool,
+      rarity,
+      base.armor_weight,
+      itemLevel,
+    );
+
+  return buildFinalItem({
+    base,
+    itemLevel,
+    rarity,
+    affixes,
+  });
+}
+
 export async function generateLootFromBaseItem(args: {
   playerId: number;
   baseItemId: number;
@@ -666,68 +750,51 @@ export async function generateLootFromBaseItem(args: {
   sourceType?: string;
   sourceId?: number | null;
   isClaimed?: boolean;
+  rarityOverride?: LootRarity;
+  conn?: any;
 }): Promise<SavedItem | null> {
-  const { playerId, baseItemId, itemLevel } = args;
+  const runner =
+    args.conn ?? db;
 
-  const [rows]: any = await db.query(
-    `
-    SELECT
-      id,
-      name,
-      slot,
-      item_type,
-      armor_weight,
-      weapon_class,
-      required_level,
-      max_level,
-      COALESCE(base_attack, 0) AS base_attack,
-      COALESCE(base_defense, 0) AS base_defense,
-      icon,
-      COALESCE(sell_value, 0) AS sell_value
-    FROM item_bases
-    WHERE id = ?
-      AND is_active = 1
-      AND required_level <= ?
-      AND max_level >= ?
-    LIMIT 1
-    `,
-    [baseItemId, itemLevel, itemLevel]
-  );
+  const item =
+    await generateLootPreviewFromBaseItem({
+      baseItemId:
+        args.baseItemId,
+      itemLevel:
+        args.itemLevel,
+      rarityOverride:
+        args.rarityOverride,
+      conn:
+        args.conn,
+    });
 
-  const base = rows?.[0] as ItemBaseRow | undefined;
-  if (!base) return null;
+  if (!item) {
+    return null;
+  }
 
-  const rarity = rollShopRarity();
-
-  const affixPool = await getEligibleAffixes({
-    base,
-    itemLevel,
-    rarity,
-  });
-
-  const affixes = rollAffixes(affixPool, rarity, base.armor_weight, itemLevel);
-
-  const item = buildFinalItem({
-    base,
-    itemLevel,
-    rarity,
-    affixes,
-  });
-
-  const saved = await saveItemInstance(
-    playerId,
-    item,
-    args.sourceType ?? "shop",
-    args.sourceId ?? null
-  );
+  const saved =
+    await saveItemInstance(
+      args.playerId,
+      item,
+      args.sourceType ??
+        "shop",
+      args.sourceId ??
+        null,
+      args.conn,
+    );
 
   if (args.isClaimed) {
-    await db.query(
-      `UPDATE player_items SET is_claimed = 1 WHERE id = ?`,
-      [saved.playerItemId]
+    await runner.query(
+      `
+        UPDATE player_items
+        SET is_claimed = 1
+        WHERE id = ?
+      `,
+      [
+        saved.playerItemId
+      ],
     );
   }
 
   return saved;
 }
-

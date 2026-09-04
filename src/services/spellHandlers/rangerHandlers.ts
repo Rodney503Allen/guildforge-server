@@ -220,62 +220,233 @@ export const aimedShotHandler: SpellHandlerDefinition = {
 export const volleyHandler: SpellHandlerDefinition = {
   requiresEnemy: true,
   validate: validateDamage,
+
   async execute({
     playerId,
     spell,
     player,
     enemy,
+    enemies,
   }): Promise<SpellHandlerResult> {
-    if (!enemy) throw new Error("Volley handler received no enemy");
-    const poisoned = await isPoisoned(enemy);
-    const poisonBonus = Math.max(
-      0,
-      rankNumber(spell, "poisonedDamageBonusPercent", 20),
-    );
-    const result = await dealRangerDamage(spell, player, enemy, {
-      damageMultiplier: poisoned ? 1 + poisonBonus / 100 : 1,
-    });
+    if (!enemy) {
+      throw new Error(
+        "Volley handler received no enemy"
+      );
+    }
 
-    const venomousRainPercent = Math.max(
-      0,
-      rankNumber(spell, "venomousRainEffectivenessPercent", 0),
-    );
+    const targets =
+      (
+        Array.isArray(
+          enemies
+        ) &&
+        enemies.length
+          ? enemies
+          : [
+              enemy
+            ]
+      )
+        .filter(
+          target =>
+            Number(
+              target.hp
+            ) > 0
+        );
 
-    if (!result.dodged && result.enemyHP > 0 && venomousRainPercent > 0) {
-      const poisonDamage = Math.max(
-        1,
-        Math.floor((result.damage * venomousRainPercent) / 100),
+    const poisonBonus =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "poisonedDamageBonusPercent",
+          20
+        ),
       );
 
-      await applySpellDot(enemy, {
-        sourcePlayerId: playerId,
-        spellId: Number(spell.id),
-        spellName: `${spell.name} — Venomous Rain`,
-        totalDamage: poisonDamage,
-        durationSeconds: 12,
-        tickRateSeconds: 2,
-      });
+    const venomousRainPercent =
+      Math.max(
+        0,
+        rankNumber(
+          spell,
+          "venomousRainEffectivenessPercent",
+          0
+        ),
+      );
 
-      await applySpellDebuff(enemy, {
-        sourcePlayerId: playerId,
-        spellId: Number(spell.id),
-        spellName: `${spell.name} — Venomous Rain`,
-        stat: "poisoned",
-        value: 1,
-        durationSeconds: 12,
+    const enemyResults:
+      any[] =
+      [];
+
+    let totalDamage =
+      0;
+
+    let statusTargets =
+      0;
+
+    for (
+      const target of
+      targets
+    ) {
+      const poisoned =
+        await isPoisoned(
+          target
+        );
+
+      const result =
+        await dealRangerDamage(
+          spell,
+          player,
+          target,
+          {
+            damageMultiplier:
+              poisoned
+                ? 1 +
+                  poisonBonus /
+                  100
+                : 1,
+          }
+        );
+
+      totalDamage +=
+        result.damage;
+
+      if (
+        !result.dodged &&
+        result.enemyHP > 0 &&
+        venomousRainPercent > 0
+      ) {
+        const poisonDamage =
+          Math.max(
+            1,
+            Math.floor(
+              (
+                result.damage *
+                venomousRainPercent
+              ) /
+              100
+            ),
+          );
+
+        await applySpellDot(
+          target,
+          {
+            sourcePlayerId:
+              playerId,
+
+            spellId:
+              Number(
+                spell.id
+              ),
+
+            spellName:
+              `${spell.name} — Venomous Rain`,
+
+            totalDamage:
+              poisonDamage,
+
+            durationSeconds:
+              12,
+
+            tickRateSeconds:
+              2,
+          }
+        );
+
+        await applySpellDebuff(
+          target,
+          {
+            sourcePlayerId:
+              playerId,
+
+            spellId:
+              Number(
+                spell.id
+              ),
+
+            spellName:
+              `${spell.name} — Venomous Rain`,
+
+            stat:
+              "poisoned",
+
+            value:
+              1,
+
+            durationSeconds:
+              12,
+          }
+        );
+
+        statusTargets++;
+      }
+
+      enemyResults.push({
+        enemyId:
+          Number(
+            target.id
+          ),
+
+        enemyName:
+          target.name,
+
+        damage:
+          result.damage,
+
+        enemyHP:
+          result.enemyHP,
+
+        killedEnemy:
+          result.enemyHP <= 0,
+
+        crit:
+          result.critical,
+
+        dodged:
+          result.dodged,
       });
     }
+
     return {
-      ...damageResult(
-        spell,
-        result,
-        "rains down",
-        poisoned && !result.dodged
-          ? ` Poison increases the hit by ${poisonBonus}%.`
-          : "",
-      ),
-      targetsHit: result.dodged ? 0 : 1,
-      appliedStatus: !result.dodged && venomousRainPercent > 0,
+      log:
+        `🏹 ${spell.name} rains across ${targets.length} enem${targets.length === 1 ? "y" : "ies"} for ${totalDamage} total damage${statusTargets > 0 ? ` and poisons ${statusTargets}` : ""}!`,
+
+      damage:
+        totalDamage,
+
+      enemyHP:
+        enemyResults[0]
+          ?.enemyHP ??
+        Number(
+          enemy.hp
+        ),
+
+      enemyResults,
+
+      targetsHit:
+        enemyResults.filter(
+          hit =>
+            !hit.dodged
+        ).length,
+
+      appliedStatus:
+        statusTargets > 0,
+
+      killedEnemy:
+        Boolean(
+          enemyResults[0]
+            ?.killedEnemy
+        ),
+
+      crit:
+        enemyResults.some(
+          hit =>
+            hit.crit
+        ),
+
+      dodged:
+        enemyResults.every(
+          hit =>
+            hit.dodged
+        ),
     };
   },
 };

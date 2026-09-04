@@ -69,6 +69,7 @@ const [candidates]: any = await db.query(
     ON ca.id = c.archetype_id
   WHERE (c.terrain = ? OR c.terrain = 'any')
     AND c.level BETWEEN ? AND ?
+    AND c.spawn_context IN ('world', 'both')
   `,
   [terrain, zoneMin, zoneMax]
 );

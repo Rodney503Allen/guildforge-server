@@ -199,10 +199,28 @@ export type SpellRecord = {
 // SPELL HANDLER RESULT
 // =====================================================
 
+export type SpellEnemyHitResult = {
+  enemyId: number;
+  enemyName?: string;
+
+  damage: number;
+  enemyHP: number;
+
+  killedEnemy?: boolean;
+  crit?: boolean;
+  dodged?: boolean;
+};
+
 export type SpellHandlerResult = {
   log?: string;
 
   damage?: number;
+
+  /*
+   * Multi-hostile spells populate this with the exact result for
+   * each enemy they affected. Single-target handlers may omit it.
+   */
+  enemyResults?: SpellEnemyHitResult[];
   healing?: number;
 
   enemyHP?: number;
@@ -262,6 +280,15 @@ export type SpellHandlerContext = {
   player: any;
 
   enemy?: SpellEnemy | null;
+
+  /*
+   * Optional hostile collection for multi-enemy combat.
+   *
+   * Hunts / normal combat may omit this and continue using `enemy`.
+   * Dungeons / raids can provide every living hostile, with the
+   * player's selected target placed first.
+   */
+  enemies?: SpellEnemy[];
 
   currentPlayerHP?: number;
   currentPlayerSP?: number;

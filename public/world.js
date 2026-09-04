@@ -29,7 +29,31 @@ async function initWorldPage() {
       return;
     }
 
+    const dungeonResponse =
+      await fetch(
+        "/api/dungeons/active",
+        {
+          credentials:
+            "include",
+          cache:
+            "no-store"
+        }
+      );
+
+    const dungeonData =
+      await dungeonResponse.json();
+
     await refreshWorld();
+
+    if (
+      dungeonResponse.ok &&
+      dungeonData?.dungeon &&
+      typeof openDungeonModal ===
+        "function"
+    ) {
+      await openDungeonModal();
+      return;
+    }
   } catch (err) {
     console.error("World init failed", err);
   }
@@ -189,9 +213,23 @@ function isInCombat() {
       )
     );
 
+  const dungeonModal =
+    document.getElementById(
+      "dungeonModal"
+    );
+
+  const dungeonActive =
+    Boolean(
+      dungeonModal &&
+      !dungeonModal.classList.contains(
+        "hidden"
+      )
+    );
+
   return (
     normalCombatActive ||
-    huntCombatActive
+    huntCombatActive ||
+    dungeonActive
   );
 }
 
@@ -683,6 +721,34 @@ function renderWorldFromData({
         </div>
       ` : "";
 
+      const dungeonHtml =
+        String(
+          t.terrain ||
+          ""
+        ).toLowerCase() ===
+        "dungeon"
+          ? `
+            <div
+              class="dungeon-tile-marker"
+              title="Dungeon Entrance"
+              aria-label="Dungeon entrance"
+            >
+              <span
+                class="dungeon-tile-marker__symbol"
+                aria-hidden="true"
+              >
+                ⚡
+              </span>
+
+              <span
+                class="dungeon-tile-marker__badge"
+              >
+                DUNGEON
+              </span>
+            </div>
+          `
+          : "";
+
       html.push(`
         <div
           class="tile ${escapeHtml(terrainClass)} ${isPlayer ? "player" : ""} ${isPlayer && lastMoveDir ? `moving-${lastMoveDir}` : ""}"
@@ -691,6 +757,7 @@ function renderWorldFromData({
         >
           ${overlayHtml}
           ${resourceHtml}
+          ${dungeonHtml}
           ${huntClueHtml}
           ${huntTargetHtml}
         </div>
@@ -702,9 +769,34 @@ function renderWorldFromData({
 
   const currentTile = tileMap[`${player.map_x},${player.map_y}`];
 
-  const enterBtn = document.getElementById("enter-town-btn");
-  if (enterBtn) {
-    enterBtn.style.display = currentTile?.terrain === "town" ? "inline-block" : "none";
+  const enterTownBtn =
+    document.getElementById(
+      "enter-town-btn"
+    );
+
+  const enterDungeonBtn =
+    document.getElementById(
+      "enter-dungeon-btn"
+    );
+
+  const currentTerrain =
+    String(
+      currentTile?.terrain ||
+      ""
+    ).toLowerCase();
+
+  if (enterTownBtn) {
+    enterTownBtn.style.display =
+      currentTerrain === "town"
+        ? "inline-block"
+        : "none";
+  }
+
+  if (enterDungeonBtn) {
+    enterDungeonBtn.style.display =
+      currentTerrain === "dungeon"
+        ? "inline-block"
+        : "none";
   }
 
   const coords = document.querySelector(".coords");
@@ -733,6 +825,196 @@ async function refreshWorld() {
 function enterTown() {
   window.location.href = "/town/enter";
 }
+
+let enteringDungeon =
+  false;
+
+async function enterDungeonFromWorld() {
+  if (
+    isInCombat() ||
+    enteringDungeon
+  ) {
+    return;
+  }
+
+  enteringDungeon =
+    true;
+
+  const button =
+    document.getElementById(
+      "enter-dungeon-btn"
+    );
+
+  if (button) {
+    button.disabled =
+      true;
+
+    button.textContent =
+      "Entering...";
+  }
+
+  try {
+    /*
+     * Resolve the dungeon from the player's current tile.
+     * This keeps the world frontend generic; it does not
+     * hard-code Stormvault's dungeon ID.
+     */
+    const resolveResponse =
+      await fetch(
+        "/world/current-dungeon",
+        {
+          credentials:
+            "include",
+          cache:
+            "no-store"
+        }
+      );
+
+    const resolved =
+      await resolveResponse.json();
+
+    if (
+      !resolveResponse.ok ||
+      resolved.ok === false ||
+      !resolved.dungeon?.id
+    ) {
+      throw new Error(
+        resolved.error ===
+          "not_on_dungeon_tile"
+          ? "You must stand on the dungeon entrance."
+          : resolved.error ===
+              "dungeon_not_configured"
+            ? "This dungeon entrance is not configured yet."
+            : resolved.error ||
+              "Unable to identify this dungeon."
+      );
+    }
+
+    const dungeonId =
+      Number(
+        resolved.dungeon.id
+      );
+
+    /*
+     * If the player already has an active dungeon,
+     * rejoin that run instead of treating it as an error.
+     */
+    const activeResponse =
+      await fetch(
+        "/api/dungeons/active",
+        {
+          credentials:
+            "include",
+          cache:
+            "no-store"
+        }
+      );
+
+    const activeData =
+      await activeResponse.json();
+
+    if (
+      activeResponse.ok &&
+      activeData?.dungeon
+    ) {
+      if (
+        typeof openDungeonModal ===
+        "function"
+      ) {
+        await openDungeonModal();
+      } else {
+        window.location.href =
+          "/dungeon";
+      }
+
+      return;
+    }
+
+    const enterResponse =
+      await fetch(
+        `/api/dungeons/${
+          dungeonId
+        }/enter`,
+        {
+          method:
+            "POST",
+          credentials:
+            "include"
+        }
+      );
+
+    const enterData =
+      await enterResponse.json();
+
+    if (
+      !enterResponse.ok ||
+      enterData.ok === false
+    ) {
+      /*
+       * Race-safe fallback:
+       * if another request/session created the dungeon
+       * between the active check and enter request, simply
+       * rejoin the active dungeon page.
+       */
+      if (
+        String(
+          enterData.error ||
+          ""
+        )
+          .toLowerCase()
+          .includes(
+            "already inside an active dungeon"
+          )
+      ) {
+        window.location.href =
+          "/dungeon";
+
+        return;
+      }
+
+      throw new Error(
+        enterData.error ||
+        "Unable to enter the dungeon."
+      );
+    }
+
+    if (
+      typeof openDungeonModal ===
+      "function"
+    ) {
+      await openDungeonModal();
+    } else {
+      window.location.href =
+        "/dungeon";
+    }
+
+  } catch (err) {
+    console.error(
+      "Dungeon entry failed:",
+      err
+    );
+
+    showErrorToast(
+      err?.message ||
+      "Unable to enter the dungeon.",
+      "Dungeon Entry Failed"
+    );
+
+    if (button) {
+      button.disabled =
+        false;
+
+      button.textContent =
+        "Enter Dungeon";
+    }
+
+    enteringDungeon =
+      false;
+  }
+}
+
+window.enterDungeonFromWorld =
+  enterDungeonFromWorld;
 
 // =======================
 // MOVEMENT

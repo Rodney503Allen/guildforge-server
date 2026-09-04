@@ -36,6 +36,9 @@ import partyRoutes from "./party.routes";
 import huntRoutes from "./hunt.routes";
 import tradeRoutes from "./trade.routes";
 import { initializeSocketServer } from "./socketServer";
+import dungeonRoutes from "./dungeon.routes";
+import dungeonCombatRoutes from "./dungeonCombat.routes";
+import dungeonPageRoutes from "./dungeonPage.routes";
 
 const app = express();
 const server = createServer(app);
@@ -153,6 +156,9 @@ app.use(spellLoadoutRoutes);
 app.use(partyRoutes);
 app.use(huntRoutes);
 app.use("/api",tradeRoutes);
+app.use("/api/dungeons", dungeonRoutes);
+app.use("/api/dungeon-combat",dungeonCombatRoutes);
+app.use("/", dungeonPageRoutes);
 
 // =======================
 // MAIN PAGE
