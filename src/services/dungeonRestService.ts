@@ -285,6 +285,10 @@ async function applyDungeonRestTicks(
             memberPlayerId
           );
 
+        if (!stats) {
+          continue;
+        }
+
         const maxHp =
           Math.max(
             1,
@@ -554,6 +558,10 @@ async function buildDungeonRestSnapshot(
       await getFinalPlayerStats(
         playerId
       );
+
+    if (!stats) {
+      continue;
+    }
 
     players.push({
       playerId,
