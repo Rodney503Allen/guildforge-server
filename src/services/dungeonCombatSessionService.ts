@@ -1294,30 +1294,41 @@ async function completeDungeonCombatEnemyDefeatById(
 function addDungeonThreatForEnemy(
   session:
     DungeonCombatSession,
-  runtimeEnemyId: number,
+  _runtimeEnemyId: number,
   playerId: number,
   threat: number,
 ) {
-  const state =
-    session.enemies.get(
-      Number(
-        runtimeEnemyId
-      )
+  const amount =
+    Math.max(
+      0,
+      Number(threat) || 0,
     );
 
-  if (
-    !state ||
-    state.enemy.hp <= 0
-  ) {
+  if (amount <= 0) {
     return;
   }
 
-  addCombatThreat(
-    state.enemy,
-    session.players.values(),
-    playerId,
-    threat,
-  );
+  /*
+   * Dungeon threat is encounter-wide rather than enemy-local.
+   *
+   * Shared combat helpers still store threat on PartyCombatEnemy, so mirror
+   * every threat event onto every living dungeon enemy. This gives every
+   * monster in the active wave/room the same threat table while preserving
+   * independent HP, ATB, mechanics, DOTs and debuffs.
+   */
+  for (
+    const state of
+    getLivingEnemyStates(
+      session
+    )
+  ) {
+    addCombatThreat(
+      state.enemy,
+      session.players.values(),
+      playerId,
+      amount,
+    );
+  }
 }
 
 /* =========================================================
@@ -2110,9 +2121,9 @@ async function processDungeonPlayerAutoAttacks(
         player.playerId
       );
 
-    addCombatThreat(
-      session.enemy,
-      session.players.values(),
+    addDungeonThreatForEnemy(
+      session,
+      session.runtimeEnemyId,
       player.playerId,
       result.damage *
         Math.max(
