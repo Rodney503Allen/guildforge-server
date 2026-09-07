@@ -826,6 +826,25 @@ const participantIds =
     return null;
   }
 
+  /*
+   * Dungeon-wide shared threat table.
+   *
+   * Every enemy in the current encounter references the SAME object.
+   * Shared spell code may mutate session.enemy.threat directly, while
+   * dungeon-specific threat helpers may mutate another enemy. Because all
+   * enemies share this exact object, those mutations can no longer drift.
+   */
+  const sharedThreat =
+    firstState.enemy.threat;
+
+  for (
+    const state of
+    enemies.values()
+  ) {
+    state.enemy.threat =
+      sharedThreat;
+  }
+
   const selectedEnemyByPlayer =
     new Map<
       number,
@@ -1294,7 +1313,7 @@ async function completeDungeonCombatEnemyDefeatById(
 function addDungeonThreatForEnemy(
   session:
     DungeonCombatSession,
-  _runtimeEnemyId: number,
+  runtimeEnemyId: number,
   playerId: number,
   threat: number,
 ) {
@@ -1309,26 +1328,33 @@ function addDungeonThreatForEnemy(
   }
 
   /*
-   * Dungeon threat is encounter-wide rather than enemy-local.
-   *
-   * Shared combat helpers still store threat on PartyCombatEnemy, so mirror
-   * every threat event onto every living dungeon enemy. This gives every
-   * monster in the active wave/room the same threat table while preserving
-   * independent HP, ATB, mechanics, DOTs and debuffs.
+   * Every living dungeon enemy references one shared threat object.
+   * Add the threat exactly ONCE. Writing it to every enemy would multiply
+   * the generated threat by the number of monsters in the wave.
    */
-  for (
-    const state of
-    getLivingEnemyStates(
-      session
-    )
-  ) {
-    addCombatThreat(
-      state.enemy,
-      session.players.values(),
-      playerId,
-      amount,
+  const requested =
+    session.enemies.get(
+      Number(runtimeEnemyId)
     );
+
+  const state =
+    requested &&
+    requested.enemy.hp > 0
+      ? requested
+      : getFirstLivingEnemyState(
+          session
+        );
+
+  if (!state) {
+    return;
   }
+
+  addCombatThreat(
+    state.enemy,
+    session.players.values(),
+    playerId,
+    amount,
+  );
 }
 
 /* =========================================================
