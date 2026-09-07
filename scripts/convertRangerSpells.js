@@ -2,8 +2,8 @@ const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
 
-const inputDir = "./public/icons/spellspng";
-const outputDir = "./public/icons/spells_webp";
+const inputDir = "./public/images/world/procedural/greenreach-wilds";
+const outputDir = "./public/images/world/procedural/greenreach-wilds-webp";
 
 async function convertDirectory(currentDir) {
   const entries = fs.readdirSync(currentDir, {

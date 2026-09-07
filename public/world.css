@@ -17,8 +17,8 @@
   --frame: rgba(255,255,255,.04);
   --glass: rgba(0,0,0,.18);
 
-  --tile: 70px;
-  --gap: 6px;
+  --tile: 66px;
+  --gap: 0px;
 }
 
 *{ box-sizing:border-box; }
@@ -183,19 +183,19 @@ body::before{
 .map-wrapper{
   position: relative;
   display: inline-block;
-  padding: 70px;
+  padding: 14px;
   max-width: 100%;
 }
 
 /* Map frame */
 .grid{
   display:grid;
-  grid-template-columns: repeat(7, var(--tile));
-  gap: var(--gap);
-  padding: 14px;
+  grid-template-columns: repeat(11, var(--tile));
+  gap: 0;
+  padding: 0;
 
-  border-radius: 16px;
-  border: 1px solid rgba(43,52,64,.95);
+  border-radius: 0;
+  border: 0;
 
   background:
     radial-gradient(900px 260px at 18% 0%, rgba(182,75,46,.10), transparent 60%),
@@ -210,18 +210,16 @@ body::before{
 .tile{
   width: var(--tile);
   height: var(--tile);
-  border-radius: 10px;
+  border-radius: 0;
   position: relative;
 
-  border: 1px solid rgba(43,52,64,.95);
+  border: 0;
   background: rgba(0,0,0,.22);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   
-  box-shadow:
-    inset 0 0 16px rgba(0,0,0,.85),
-    inset 0 1px 0 rgba(255,255,255,.05);
+  box-shadow: none;
 
   overflow: hidden;
 }
@@ -235,6 +233,49 @@ body::before{
   pointer-events: none;
   z-index: 2;
 }
+
+/* =========================================
+   PROCEDURAL WORLD VISUAL TEST
+   Cosmetic decoration sits below existing
+   world-object overlays and gameplay markers.
+========================================= */
+.procedural-biome-transition {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+
+  /* The mask itself carries the alpha blend. These keep the generated mask
+     aligned exactly to the current world cell. */
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+
+  /* Slightly soften the large brightness jump between Coastal and Blackfen
+     while preserving Blackfen's darker interior away from the transition. */
+  filter: saturate(.94) brightness(1.035);
+}
+
+.procedural-decoration {
+  position: absolute;
+  max-width: none;
+  max-height: none;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center center;
+  image-rendering: auto;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
 
 .tile .move-arrow {
   position: relative;
@@ -414,8 +455,7 @@ body::before{
   gap: 12px;
 }
 
-/* full-width travel log strip */
-.travel-log-card,
+/* full-width flavor card sizing */
 .flavor-card{
   width: 100%;
   min-height: 74px;
@@ -1019,8 +1059,8 @@ body::before{
   width: 340px;
   z-index: 150000;
 
-  border-radius: 16px;
-  border: 1px solid rgba(43,52,64,.95);
+  border-radius: 0;
+  border: 0;
 
   background:
     radial-gradient(520px 220px at 25% 0%, rgba(182,75,46,.14), transparent 60%),
@@ -2055,9 +2095,6 @@ body::before{
   padding: 12px;
 }
 
-.world-sidebar .travel-log-card{
-  min-height: 88px;
-}
 
 .world-sidebar .nearby-card{
   max-height: 260px;
@@ -2118,7 +2155,7 @@ body::before{
 /* Slightly better map sizing on common laptop heights */
 @media (max-height: 820px) and (min-width: 981px){
   :root{
-    --tile: 58px;
+    --tile: 64px;
     --gap: 5px;
   }
 
@@ -2131,7 +2168,7 @@ body::before{
   }
 
   .world-map-panel .map-wrapper{
-    padding: 46px;
+    padding: 12px;
   }
 
   .world-sidebar{
@@ -2149,7 +2186,7 @@ body::before{
 
 @media (max-height: 700px) and (min-width: 981px){
   :root{
-    --tile: 52px;
+    --tile: 58px;
     --gap: 4px;
   }
 
@@ -2167,7 +2204,7 @@ body::before{
   }
 
   .world-map-panel .map-wrapper{
-    padding: 42px;
+    padding: 10px;
   }
 
   .move-btn.up,
@@ -2655,9 +2692,6 @@ body::before{
   padding:14px;
 }
 
-.world-sidebar .travel-log-card{
-  min-height:92px;
-}
 
 .world-sidebar .nearby-card{
   min-height:180px;
@@ -3820,4 +3854,771 @@ body::before{
     0 2px 2px rgba(0,0,0,.95),
     0 0 10px rgba(145,92,185,.50),
     0 0 24px rgba(89,54,128,.30);
+}
+
+
+/* =========================================
+   SEAMLESS 9x9 WORLD VIEW
+   ========================================= */
+.grid-viewport {
+  width: calc(var(--tile) * 9);
+  height: calc(var(--tile) * 9);
+  overflow: hidden;
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid rgba(43,52,64,.72);
+  background: rgba(0,0,0,.22);
+  box-shadow: 0 18px 44px rgba(0,0,0,.55);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(11, var(--tile));
+  grid-template-rows: repeat(11, var(--tile));
+  width: calc(var(--tile) * 11);
+  height: calc(var(--tile) * 11);
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  transform: translate(calc(-1 * var(--tile)), calc(-1 * var(--tile)));
+  will-change: transform;
+}
+
+.tile {
+  width: var(--tile);
+  height: var(--tile);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.tile.player,
+.tile.player.moving-north,
+.tile.player.moving-south,
+.tile.player.moving-west,
+.tile.player.moving-east {
+  border: 0;
+  box-shadow: none;
+}
+
+.tile.player::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  z-index: 20;
+  pointer-events: none;
+  border: 2px solid rgba(255,214,102,.92);
+  border-radius: 7px;
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,.72),
+    0 0 12px rgba(255,214,102,.34);
+}
+
+
+/* =========================================
+   CLASSIC RPG CONTINUOUS WORLD MOVEMENT
+   ========================================= */
+.grid-viewport {
+  isolation: isolate;
+}
+
+/* The actual logical player tile still exists for gameplay, but the visible
+   player indicator is now camera-fixed so terrain can move continuously. */
+.grid-viewport .tile.player,
+.grid-viewport .tile.player.moving-north,
+.grid-viewport .tile.player.moving-south,
+.grid-viewport .tile.player.moving-west,
+.grid-viewport .tile.player.moving-east {
+  box-shadow: none;
+  border: 0;
+}
+
+.world-player-sprite {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--tile) * .58);
+  height: calc(var(--tile) * .72);
+  transform: translate(-50%, -58%);
+  z-index: 50;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 85%;
+  will-change: transform;
+}
+
+.world-player-sprite__shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 3%;
+  width: 62%;
+  height: 18%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgba(0,0,0,.42);
+  filter: blur(2px);
+}
+
+.world-player-sprite__body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 62%;
+  aspect-ratio: 1;
+  border-radius: 50% 50% 44% 44%;
+  border: 2px solid rgba(255,225,150,.92);
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255,255,255,.20), transparent 24%),
+    linear-gradient(180deg, rgba(182,75,46,.98), rgba(82,28,25,.98));
+  color: #f4dfb7;
+  font-size: calc(var(--tile) * .23);
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,.95);
+  box-shadow:
+    0 2px 8px rgba(0,0,0,.72),
+    0 0 0 1px rgba(0,0,0,.5);
+}
+
+.world-player-sprite[data-direction="west"] .world-player-sprite__body {
+  transform: scaleX(-1);
+}
+
+.world-player-sprite.is-moving {
+  animation: gfWorldWalkBob 210ms linear infinite;
+}
+
+@keyframes gfWorldWalkBob {
+  0%, 100% { transform: translate(-50%, -58%) translateY(0); }
+  25% { transform: translate(-50%, -58%) translateY(-2px) rotate(-1.5deg); }
+  50% { transform: translate(-50%, -58%) translateY(0); }
+  75% { transform: translate(-50%, -58%) translateY(-2px) rotate(1.5deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-player-sprite.is-moving {
+    animation: none;
+  }
+}
+
+
+/* =========================================
+   PROCEDURAL ROADS — EDGE + CORNER BLEND POLISH
+
+   Every road cell begins as one full road.webp tile.
+   Biome ground is painted back only over EXPOSED outer sides,
+   and then over exposed outer corners as a diagonal feather.
+
+   This keeps the interior seam between neighboring road cells
+   fully road-colored while softening the outside silhouette so
+   the path reads like one connected ribbon rather than boxes.
+========================================= */
+.procedural-road {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+.procedural-road-base,
+.procedural-road-edge,
+.procedural-road-corner {
+  position: absolute;
+  inset: -1px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.procedural-road-base {
+  z-index: 1;
+  transform: scale(1.04);
+  transform-origin: center;
+}
+
+/*
+   Edge overlays are a bit tighter now so the road keeps more
+   of its width. The strongest fade happens near the outer edge,
+   and the mask becomes transparent sooner toward the middle.
+*/
+.procedural-road-edge {
+  z-index: 2;
+}
+
+.procedural-road-edge--north {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+}
+
+.procedural-road-edge--south {
+  -webkit-mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+  mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+}
+
+.procedural-road-edge--west {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+}
+
+.procedural-road-edge--east {
+  -webkit-mask-image: linear-gradient(
+    to left,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+  mask-image: linear-gradient(
+    to left,
+    #000 0%,
+    #000 6%,
+    rgba(0,0,0,.94) 14%,
+    rgba(0,0,0,.64) 24%,
+    rgba(0,0,0,.22) 34%,
+    transparent 44%
+  );
+}
+
+/*
+   Corner overlays are stronger and tighter than before. They
+   specifically round off exposed outer corners so diagonals and
+   bends stop reading as square blocks.
+*/
+.procedural-road-corner {
+  z-index: 3;
+}
+
+.procedural-road-corner--north-west {
+  -webkit-mask-image: radial-gradient(
+    circle at 0% 0%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+  mask-image: radial-gradient(
+    circle at 0% 0%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+}
+
+.procedural-road-corner--north-east {
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 0%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+  mask-image: radial-gradient(
+    circle at 100% 0%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+}
+
+.procedural-road-corner--south-west {
+  -webkit-mask-image: radial-gradient(
+    circle at 0% 100%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+  mask-image: radial-gradient(
+    circle at 0% 100%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+}
+
+.procedural-road-corner--south-east {
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 100%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+  mask-image: radial-gradient(
+    circle at 100% 100%,
+    #000 0%,
+    #000 12%,
+    rgba(0,0,0,.90) 22%,
+    rgba(0,0,0,.58) 34%,
+    rgba(0,0,0,.18) 46%,
+    transparent 56%
+  );
+}
+
+
+/* =========================================
+   ROAD V13 — HALF-TILE EDGE BLENDS
+   These overrides intentionally make the biome reclaim about half
+   of an exposed road cell. Shared road-to-road edges remain solid.
+========================================= */
+
+.procedural-road-base,
+.procedural-road-edge,
+.procedural-road-corner,
+.procedural-road-diagonal {
+  position: absolute;
+  inset: -1px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.procedural-road-base {
+  transform: scale(1.035);
+}
+
+/* Exposed side = biome owns roughly half of that side of the tile. */
+.procedural-road-edge--north {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+}
+
+.procedural-road-edge--south {
+  -webkit-mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+  mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+}
+
+.procedural-road-edge--west {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+}
+
+.procedural-road-edge--east {
+  -webkit-mask-image: linear-gradient(
+    to left,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+  mask-image: linear-gradient(
+    to left,
+    #000 0%,
+    #000 40%,
+    rgba(0,0,0,.92) 46%,
+    rgba(0,0,0,.58) 51%,
+    rgba(0,0,0,.18) 56%,
+    transparent 62%
+  );
+}
+
+/* Stronger corner reclaim so bends stop looking square. */
+.procedural-road-corner--north-west {
+  -webkit-mask-image: radial-gradient(circle at 0 0, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+  mask-image: radial-gradient(circle at 0 0, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+}
+.procedural-road-corner--north-east {
+  -webkit-mask-image: radial-gradient(circle at 100% 0, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+  mask-image: radial-gradient(circle at 100% 0, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+}
+.procedural-road-corner--south-west {
+  -webkit-mask-image: radial-gradient(circle at 0 100%, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+  mask-image: radial-gradient(circle at 0 100%, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+}
+.procedural-road-corner--south-east {
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+  mask-image: radial-gradient(circle at 100% 100%, #000 0 36%, rgba(0,0,0,.75) 44%, rgba(0,0,0,.22) 53%, transparent 62%);
+}
+
+/* Diagonal-only/stair-step road cells use an actual diagonal band. */
+.procedural-road-diagonal {
+  z-index: 1;
+  transform: scale(1.06);
+  transform-origin: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+.procedural-road-diagonal--nw-se {
+  -webkit-mask-image: linear-gradient(
+    45deg,
+    transparent 0%,
+    transparent 25%,
+    rgba(0,0,0,.25) 31%,
+    #000 38%,
+    #000 62%,
+    rgba(0,0,0,.25) 69%,
+    transparent 75%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    45deg,
+    transparent 0%,
+    transparent 25%,
+    rgba(0,0,0,.25) 31%,
+    #000 38%,
+    #000 62%,
+    rgba(0,0,0,.25) 69%,
+    transparent 75%,
+    transparent 100%
+  );
+}
+
+.procedural-road-diagonal--ne-sw {
+  -webkit-mask-image: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 25%,
+    rgba(0,0,0,.25) 31%,
+    #000 38%,
+    #000 62%,
+    rgba(0,0,0,.25) 69%,
+    transparent 75%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 25%,
+    rgba(0,0,0,.25) 31%,
+    #000 38%,
+    #000 62%,
+    rgba(0,0,0,.25) 69%,
+    transparent 75%,
+    transparent 100%
+  );
+}
+
+/* =========================================
+   PROCEDURAL ROADS — WORLD CANVAS LAYER
+
+   Road coordinates remain normal world_map cells, but their
+   visual shape is painted once across the complete 11x11
+   moving buffer. This removes per-cell road seams and allows
+   cardinal + diagonal road cells to form one continuous shape.
+========================================= */
+.grid {
+  position: relative;
+}
+
+.procedural-road-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--tile) * 11);
+  height: calc(var(--tile) * 11);
+  z-index: 1;
+  pointer-events: none;
+  user-select: none;
+  image-rendering: auto;
+}
+
+/* Procedural clutter and authored world markers must remain above roads. */
+.procedural-decoration {
+  z-index: 3;
+}
+
+.tile-overlay {
+  z-index: 4;
+}
+
+.resource-node-marker,
+.hunt-clue-marker,
+.hunt-target-marker {
+  z-index: 8;
+}
+
+
+/* ==========================================================
+   FIXED DESKTOP WORLD HEIGHT + SCROLLING NEARBY PANEL
+   Keeps the main world UI stable as Nearby content changes.
+   ========================================================== */
+
+@media (min-width: 981px) {
+  /*
+   * Keep the left map + right sidebar area at one predictable height.
+   * The header remains outside this measurement.
+   */
+  .world-layout {
+    height: 650px;
+    min-height: 650px;
+    max-height: 650px;
+    align-items: stretch;
+  }
+
+  .world-map-panel {
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
+  }
+
+  /*
+   * Lock the sidebar to the same world-layout height.
+   * It may scroll as a fallback if another card unexpectedly exceeds
+   * available room, but Nearby itself gets its own internal scroller.
+   */
+  .world-sidebar,
+  .world-sidebar.nav-hud {
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    align-self: stretch;
+  }
+
+  /*
+   * Nearby stays the same size whether there are zero interactions or many.
+   */
+  .world-sidebar .nearby-card,
+  .nearby-card {
+    height: 300px !important;
+    min-height: 300px !important;
+    max-height: 300px !important;
+    overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /*
+   * Destinations remain fixed at the top of Nearby.
+   */
+  .nearby-card .nearby-destinations {
+    flex: 0 0 auto;
+  }
+
+  /*
+   * The interactions area consumes the remaining card space.
+   */
+  .nearby-card .nearby-interactions {
+    flex: 1 1 auto;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .nearby-card .nearby-interactions__heading {
+    flex: 0 0 auto;
+  }
+
+  /*
+   * Only the actual Nearby interaction rows scroll.
+   */
+  .nearby-card .world-interact__list,
+  .world-sidebar .nearby-card .world-interact__list {
+    flex: 1 1 auto;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color:
+      rgba(200, 163, 75, 0.46)
+      rgba(0, 0, 0, 0.18);
+    padding-right: 5px;
+  }
+
+  .nearby-card .world-interact__list::-webkit-scrollbar {
+    width: 7px;
+  }
+
+  .nearby-card .world-interact__list::-webkit-scrollbar-thumb {
+    background: rgba(200, 163, 75, 0.46);
+    border-radius: 999px;
+  }
+
+  .nearby-card .world-interact__list::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 999px;
+  }
+}
+
+/*
+ * Restore natural vertical flow when the sidebar stacks below the map.
+ */
+@media (max-width: 980px) {
+  .world-layout {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+  }
+
+  .world-map-panel {
+    height: auto;
+    max-height: none;
+  }
+
+  .world-sidebar,
+  .world-sidebar.nav-hud {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .world-sidebar .nearby-card,
+  .nearby-card {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  .nearby-card .nearby-interactions,
+  .nearby-card .world-interact__list {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
+
+/* World movement is keyboard/WASD only. */
+.move-btn{
+  display:none !important;
+}
+
+
+/* =========================================
+   VOID / OCEAN WATER
+   Void world-map cells render as open water.
+========================================= */
+.tile.void{
+  background-image:
+    url("/images/world/procedural/water/water.webp");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: #168fa1;
 }

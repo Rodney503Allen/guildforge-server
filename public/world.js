@@ -4,7 +4,15 @@ let pendingCombatEnemy = null;
 let lastMoveDir = null;
 
 // ✅ Movement cooldown
-const MOVE_COOLDOWN_MS = 500;
+const MOVE_COOLDOWN_MS = 0;
+
+// Visible world is 9x9. We render an extra hidden one-tile buffer on every
+// side (11x11 total) so full-cell scrolling never reveals an empty edge.
+const WORLD_VIEW_RADIUS = 4;
+const WORLD_VIEW_SIZE = 9;
+const WORLD_BUFFER_RADIUS = 5;
+const WORLD_BUFFER_SIZE = 11;
+const WORLD_SCROLL_MS = 420;
 let lastMoveAt = 0;
 let moveLock = false;
 
@@ -30,6 +38,1294 @@ const resolvedDungeonReadyCheckIds =
 
 let dungeonReadyFetchGeneration =
   0;
+
+// ==========================================
+// PROCEDURAL WORLD VISUAL TEST
+// ==========================================
+// Enable only with /world?procedural=1. Normal /world rendering is untouched.
+const PROCEDURAL_WORLD_TEST =
+  new URLSearchParams(window.location.search).get("procedural") === "1";
+
+// Lock this once we settle on Valewyn's permanent seed.
+const VALEWYN_WORLD_SEED = 582941;
+
+// One neutral road texture is shaped at render time from neighboring road tiles.
+const PROCEDURAL_ROAD_ASSET =
+  "/images/world/procedural/roads/road.webp";
+
+const PROCEDURAL_BIOMES = {
+  coastal: {
+    terrains: new Set(["plains"]),
+    ground: "/images/world/procedural/coastal-lowlands/ground.webp",
+    decorations: [
+      "/images/world/procedural/coastal-lowlands/grass-01.webp",
+      "/images/world/procedural/coastal-lowlands/grass-02.webp",
+      "/images/world/procedural/coastal-lowlands/rocks-01.webp",
+      "/images/world/procedural/coastal-lowlands/rocks-02.webp",
+      "/images/world/procedural/coastal-lowlands/flowers-01.webp",
+      "/images/world/procedural/coastal-lowlands/shrub-01.webp",
+      "/images/world/procedural/coastal-lowlands/driftwood-01.webp"
+    ]
+  },
+
+  blackfen: {
+    terrains: new Set(["swamp"]),
+    ground: "/images/world/procedural/blackfen-marsh/ground.webp",
+    decorations: [
+      "/images/world/procedural/blackfen-marsh/reeds-01.webp",
+      "/images/world/procedural/blackfen-marsh/mud-01.webp",
+      "/images/world/procedural/blackfen-marsh/deadbranch-01.webp",
+      "/images/world/procedural/blackfen-marsh/mushrooms-01.webp",
+      "/images/world/procedural/blackfen-marsh/swamprock-01.webp",
+      "/images/world/procedural/blackfen-marsh/deadshrub-01.webp"
+    ]
+  },
+
+  greenreach: {
+    terrains: new Set(["forest"]),
+    ground: "/images/world/procedural/greenreach-wilds/ground.webp",
+    decorations: [
+      "/images/world/procedural/greenreach-wilds/fern-01.webp",
+      "/images/world/procedural/greenreach-wilds/fern-02.webp",
+      "/images/world/procedural/greenreach-wilds/mushrooms-01.webp",
+      "/images/world/procedural/greenreach-wilds/leafpile-01.webp",
+      "/images/world/procedural/greenreach-wilds/bush-01.webp",
+      "/images/world/procedural/greenreach-wilds/sapling-01.webp",
+      "/images/world/procedural/greenreach-wilds/stump-01.webp",
+      "/images/world/procedural/greenreach-wilds/tree-01.webp"
+    ]
+  },
+
+  water: {
+    terrains: new Set(["void"]),
+    ground: "/images/world/procedural/water/water.webp",
+    decorations: []
+  }
+};
+
+function hashWorldCoordinate(x, y, channel = 0) {
+  let h = VALEWYN_WORLD_SEED | 0;
+
+  h = Math.imul(h ^ Math.imul(Number(x) | 0, 374761393), 668265263);
+  h = Math.imul(h ^ Math.imul(Number(y) | 0, 1274126177), 2246822519);
+  h = Math.imul(h ^ Math.imul(Number(channel) | 0, 3266489917), 668265263);
+
+  h ^= h >>> 13;
+  h = Math.imul(h, 1274126177);
+  h ^= h >>> 16;
+
+  return h >>> 0;
+}
+
+function seededWorldRandom(x, y, channel = 0) {
+  return hashWorldCoordinate(x, y, channel) / 4294967296;
+}
+
+function getDirectProceduralBiomeKey(tile) {
+  if (!tile) return null;
+
+  const terrain = String(tile.terrain || "")
+    .trim()
+    .toLowerCase();
+
+  for (const [key, config] of Object.entries(PROCEDURAL_BIOMES)) {
+    if (config.terrains.has(terrain)) {
+      return key;
+    }
+  }
+
+  return null;
+}
+
+function getProceduralBiomeKey(tile, x = null, y = null, tileMap = null) {
+  if (!tile) return null;
+
+  const directBiome = getDirectProceduralBiomeKey(tile);
+  if (directBiome) return directBiome;
+
+  const terrain = String(tile.terrain || "")
+    .trim()
+    .toLowerCase();
+
+  if (terrain !== "road") {
+    return null;
+  }
+
+  // First try the road tile's own region metadata.
+  const regionName = String(
+    tile.region_name ??
+    tile.region ??
+    tile.regionName ??
+    ""
+  ).trim().toLowerCase();
+
+  if (regionName.includes("blackfen")) return "blackfen";
+  if (regionName.includes("greenreach") || regionName.includes("wilds")) {
+    return "greenreach";
+  }
+  if (regionName.includes("coastal") || regionName.includes("lowlands")) {
+    return "coastal";
+  }
+
+  // Some existing road rows do not carry a biome-style region name. In that
+  // case, infer the road's underlying biome from the nearest non-road terrain
+  // in the currently-rendered world buffer. This makes old road tiles work
+  // without changing world_map data.
+  if (tileMap && Number.isFinite(Number(x)) && Number.isFinite(Number(y))) {
+    const cx = Number(x);
+    const cy = Number(y);
+
+    for (let radius = 1; radius <= 5; radius++) {
+      const counts = new Map();
+
+      for (let dx = -radius; dx <= radius; dx++) {
+        const dy = radius - Math.abs(dx);
+        const candidates = dy === 0
+          ? [[cx + dx, cy]]
+          : [[cx + dx, cy - dy], [cx + dx, cy + dy]];
+
+        for (const [tx, ty] of candidates) {
+          const candidate = tileMap[`${tx},${ty}`];
+          const biomeKey = getDirectProceduralBiomeKey(candidate);
+          if (!biomeKey) continue;
+          counts.set(biomeKey, (counts.get(biomeKey) || 0) + 1);
+        }
+      }
+
+      if (counts.size) {
+        return [...counts.entries()]
+          .sort((a, b) => b[1] - a[1])[0][0];
+      }
+    }
+  }
+
+  return null;
+}
+
+function isProceduralRoadTile(tile) {
+  return String(tile?.terrain || "")
+    .trim()
+    .toLowerCase() === "road";
+}
+
+function getRoadConnections(x, y, tileMap) {
+  const roadAt = (tx, ty) =>
+    isProceduralRoadTile(tileMap?.[`${tx},${ty}`]);
+
+  return {
+    north: roadAt(x, y - 1),
+    south: roadAt(x, y + 1),
+    east: roadAt(x + 1, y),
+    west: roadAt(x - 1, y)
+  };
+}
+
+function shouldUseProceduralTile(tile, replaceSprite, x, y, tileMap) {
+  return Boolean(
+    PROCEDURAL_WORLD_TEST &&
+    tile &&
+    !replaceSprite &&
+    getProceduralBiomeKey(tile, x, y, tileMap)
+  );
+}
+
+function getProceduralAssetKind(src) {
+  const file = String(src || "").split("/").pop()?.toLowerCase() || "";
+
+  if (file.startsWith("grass-")) return "grass";
+  if (file.startsWith("rocks-")) return "rocks";
+  if (file.startsWith("flowers-")) return "flowers";
+  if (file.startsWith("shrub-")) return "shrub";
+  if (file.startsWith("driftwood-")) return "driftwood";
+  if (file.startsWith("reeds-")) return "reeds";
+  if (file.startsWith("mud-")) return "mud";
+  if (file.startsWith("deadbranch-")) return "deadbranch";
+  if (file.startsWith("mushrooms-")) return "mushrooms";
+  if (file.startsWith("swamprock-")) return "swamprock";
+  if (file.startsWith("deadshrub-")) return "deadshrub";
+  if (file.startsWith("fern-")) return "fern";
+  if (file.startsWith("leafpile-")) return "leafpile";
+  if (file.startsWith("bush-")) return "bush";
+  if (file.startsWith("sapling-")) return "sapling";
+  if (file.startsWith("stump-")) return "stump";
+  if (file.startsWith("tree-")) return "tree";
+
+  return "default";
+}
+
+function getProceduralPropSize(x, y, src, channel) {
+  const kind = getProceduralAssetKind(src);
+  const roll = seededWorldRandom(x, y, channel);
+
+  const ranges = {
+    grass: [20, 30],
+    flowers: [18, 27],
+    rocks: [22, 34],
+    shrub: [25, 36],
+    driftwood: [27, 39],
+    reeds: [22, 34],
+    mud: [34, 52],
+    deadbranch: [27, 41],
+    mushrooms: [19, 29],
+    swamprock: [23, 35],
+    deadshrub: [27, 41],
+    fern: [24, 36],
+    leafpile: [25, 39],
+    bush: [30, 44],
+    sapling: [34, 49],
+    stump: [27, 38],
+    tree: [60, 84],
+    default: [20, 32]
+  };
+
+  const [min, max] = ranges[kind] || ranges.default;
+  return min + roll * (max - min);
+}
+
+function getSafeProceduralPosition(x, y, sizePercent, channelBase) {
+  const padding = 5;
+  const min = padding;
+  const max = Math.max(min, 100 - sizePercent - padding);
+  const span = Math.max(0, max - min);
+
+  return {
+    xPercent: min + seededWorldRandom(x, y, channelBase + 1) * span,
+    yPercent: min + seededWorldRandom(x, y, channelBase + 2) * span
+  };
+}
+
+function getTransitionBiomeKey(x, y, biomeKey, tileMap) {
+  if (!tileMap || !biomeKey) return null;
+
+  const counts = new Map();
+  const distances = new Map();
+
+  for (let oy = -BIOME_TRANSITION_RADIUS; oy <= BIOME_TRANSITION_RADIUS; oy++) {
+    for (let ox = -BIOME_TRANSITION_RADIUS; ox <= BIOME_TRANSITION_RADIUS; ox++) {
+      if (ox === 0 && oy === 0) continue;
+
+      const tx = x + ox;
+      const ty = y + oy;
+      const candidate = tileMap[`${tx},${ty}`];
+      const candidateBiome = getProceduralBiomeKey(candidate, tx, ty, tileMap);
+
+      if (!candidateBiome || candidateBiome === biomeKey) continue;
+
+      const distance = Math.hypot(ox, oy);
+      counts.set(candidateBiome, (counts.get(candidateBiome) || 0) + 1);
+
+      const currentBest = distances.get(candidateBiome) ?? Infinity;
+      if (distance < currentBest) distances.set(candidateBiome, distance);
+    }
+  }
+
+  if (!counts.size) return null;
+
+  return [...counts.keys()].sort((a, b) => {
+    const distanceDelta = (distances.get(a) ?? Infinity) - (distances.get(b) ?? Infinity);
+    if (Math.abs(distanceDelta) > 0.001) return distanceDelta;
+    return (counts.get(b) || 0) - (counts.get(a) || 0);
+  })[0];
+}
+
+// Biome boundaries use a continuous world-space noise field. Because the
+// sampled coordinates are global rather than tile-local, the mask continues
+// cleanly from one tile into the next instead of restarting as a rectangle.
+const BIOME_TRANSITION_RADIUS = 3;
+const BIOME_TRANSITION_WIDTH = 1.65;
+const BIOME_TRANSITION_MAX_MIX = 0.50;
+const BIOME_TRANSITION_MASK_SIZE = 24;
+const biomeTransitionMaskCache = new Map();
+
+function smoothWorldNoiseStep(t) {
+  const v = Math.max(0, Math.min(1, t));
+  return v * v * (3 - 2 * v);
+}
+
+function lerpWorldNoise(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function valueWorldNoise2D(x, y, channel = 0) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
+
+  const sx = smoothWorldNoiseStep(x - x0);
+  const sy = smoothWorldNoiseStep(y - y0);
+
+  const n00 = seededWorldRandom(x0, y0, channel);
+  const n10 = seededWorldRandom(x1, y0, channel);
+  const n01 = seededWorldRandom(x0, y1, channel);
+  const n11 = seededWorldRandom(x1, y1, channel);
+
+  const north = lerpWorldNoise(n00, n10, sx);
+  const south = lerpWorldNoise(n01, n11, sx);
+
+  return lerpWorldNoise(north, south, sy);
+}
+
+function getWorldTransitionNoise(worldX, worldY) {
+  const broad = valueWorldNoise2D(
+    worldX * 0.72,
+    worldY * 0.72,
+    9011
+  );
+
+  const detail = valueWorldNoise2D(
+    worldX * 1.85,
+    worldY * 1.85,
+    9012
+  );
+
+  return broad * 0.68 + detail * 0.32;
+}
+
+function getNearbyOppositeBiomeCells(x, y, biomeKey, tileMap, targetBiomeKey = null) {
+  const oppositeBiomeKey = targetBiomeKey || getTransitionBiomeKey(x, y, biomeKey, tileMap);
+  if (!oppositeBiomeKey || !tileMap) return [];
+
+  const cells = [];
+
+  for (let oy = -BIOME_TRANSITION_RADIUS; oy <= BIOME_TRANSITION_RADIUS; oy++) {
+    for (let ox = -BIOME_TRANSITION_RADIUS; ox <= BIOME_TRANSITION_RADIUS; ox++) {
+      const tx = x + ox;
+      const ty = y + oy;
+      const neighbor = tileMap[`${tx},${ty}`];
+
+      if (getProceduralBiomeKey(neighbor) === oppositeBiomeKey) {
+        cells.push({ x: tx, y: ty });
+      }
+    }
+  }
+
+  return cells;
+}
+
+function distancePointToWorldTile(worldX, worldY, tileX, tileY) {
+  const nearestX = Math.max(tileX, Math.min(worldX, tileX + 1));
+  const nearestY = Math.max(tileY, Math.min(worldY, tileY + 1));
+  const dx = worldX - nearestX;
+  const dy = worldY - nearestY;
+  return Math.hypot(dx, dy);
+}
+
+function getDistanceToOppositeBiome(worldX, worldY, oppositeCells) {
+  let best = Infinity;
+
+  for (const cell of oppositeCells) {
+    const distance = distancePointToWorldTile(
+      worldX,
+      worldY,
+      cell.x,
+      cell.y
+    );
+
+    if (distance < best) {
+      best = distance;
+    }
+  }
+
+  return best;
+}
+
+function getBiomeTransitionStrength(x, y, biomeKey, tileMap, targetBiomeKey = null) {
+  const oppositeCells = getNearbyOppositeBiomeCells(
+    x,
+    y,
+    biomeKey,
+    tileMap,
+    targetBiomeKey
+  );
+
+  if (!oppositeCells.length) return 0;
+
+  const centerX = x + 0.5;
+  const centerY = y + 0.5;
+  const distance = getDistanceToOppositeBiome(
+    centerX,
+    centerY,
+    oppositeCells
+  );
+
+  const normalized = 1 - Math.min(1, distance / BIOME_TRANSITION_WIDTH);
+  return smoothWorldNoiseStep(normalized);
+}
+
+function createBiomeTransitionMask(x, y, biomeKey, tileMap, targetBiomeKey = null) {
+  const oppositeCells = getNearbyOppositeBiomeCells(
+    x,
+    y,
+    biomeKey,
+    tileMap,
+    targetBiomeKey
+  );
+
+  if (!oppositeCells.length) {
+    return null;
+  }
+
+  // Include the nearby biome layout in the cache key so editing the world map
+  // cannot leave a stale transition mask behind during development.
+  const signature = oppositeCells
+    .map(cell => `${cell.x}:${cell.y}`)
+    .sort()
+    .join("|");
+
+  const cacheKey = `${x},${y},${biomeKey},${targetBiomeKey || "auto"},${signature}`;
+  const cached = biomeTransitionMaskCache.get(cacheKey);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = BIOME_TRANSITION_MASK_SIZE;
+  canvas.height = BIOME_TRANSITION_MASK_SIZE;
+
+  const context = canvas.getContext("2d", {
+    alpha: true,
+    willReadFrequently: false
+  });
+
+  if (!context) {
+    return null;
+  }
+
+  const image = context.createImageData(
+    BIOME_TRANSITION_MASK_SIZE,
+    BIOME_TRANSITION_MASK_SIZE
+  );
+
+  for (let py = 0; py < BIOME_TRANSITION_MASK_SIZE; py++) {
+    for (let px = 0; px < BIOME_TRANSITION_MASK_SIZE; px++) {
+      const localX = (px + 0.5) / BIOME_TRANSITION_MASK_SIZE;
+      const localY = (py + 0.5) / BIOME_TRANSITION_MASK_SIZE;
+      const worldX = x + localX;
+      const worldY = y + localY;
+
+      const distance = getDistanceToOppositeBiome(
+        worldX,
+        worldY,
+        oppositeCells
+      );
+
+      // Push/pull the blend line with continuous noise. This produces marsh
+      // fingers, damp pockets, and surviving grass without square gradients.
+      const noise = getWorldTransitionNoise(worldX, worldY);
+      const noiseOffset = (noise - 0.5) * 0.72;
+      const effectiveDistance = Math.max(0, distance + noiseOffset);
+
+      const normalized = 1 - Math.min(
+        1,
+        effectiveDistance / BIOME_TRANSITION_WIDTH
+      );
+
+      const blend =
+        smoothWorldNoiseStep(normalized) *
+        BIOME_TRANSITION_MAX_MIX;
+
+      const alpha = Math.round(blend * 255);
+      const index = (py * BIOME_TRANSITION_MASK_SIZE + px) * 4;
+
+      image.data[index] = 0;
+      image.data[index + 1] = 0;
+      image.data[index + 2] = 0;
+      image.data[index + 3] = alpha;
+    }
+  }
+
+  context.putImageData(image, 0, 0);
+  const dataUrl = canvas.toDataURL("image/png");
+  biomeTransitionMaskCache.set(cacheKey, dataUrl);
+
+  return dataUrl;
+}
+
+function getGreenreachDensity(x, y) {
+  const broad = valueWorldNoise2D(
+    x * 0.22,
+    y * 0.22,
+    7341
+  );
+
+  const detail = valueWorldNoise2D(
+    x * 0.58,
+    y * 0.58,
+    7342
+  );
+
+  return Math.max(
+    0,
+    Math.min(1, broad * 0.78 + detail * 0.22)
+  );
+}
+
+function chooseGreenreachDecorationAsset(x, y, channelBase, density) {
+  const base = "/images/world/procedural/greenreach-wilds/";
+  const roll = seededWorldRandom(x, y, channelBase);
+
+  // Clearings favor low forest-floor detail. Dense cells increasingly favor
+  // bushes, saplings and full tree canopies.
+  let weighted;
+
+  if (density < 0.28) {
+    weighted = [
+      ["fern-01.webp", 10],
+      ["fern-02.webp", 9],
+      ["mushrooms-01.webp", 16],
+      ["leafpile-01.webp", 20],
+      ["stump-01.webp", 12],
+      ["sapling-01.webp", 16],
+      ["bush-01.webp", 10],
+      ["tree-01.webp", 7]
+    ];
+  } else if (density < 0.58) {
+    weighted = [
+      ["fern-01.webp", 9],
+      ["fern-02.webp", 9],
+      ["mushrooms-01.webp", 9],
+      ["leafpile-01.webp", 10],
+      ["bush-01.webp", 16],
+      ["sapling-01.webp", 15],
+      ["stump-01.webp", 6],
+      ["tree-01.webp", 26]
+    ];
+  } else {
+    weighted = [
+      ["fern-01.webp", 6],
+      ["fern-02.webp", 6],
+      ["mushrooms-01.webp", 5],
+      ["leafpile-01.webp", 6],
+      ["bush-01.webp", 18],
+      ["sapling-01.webp", 16],
+      ["stump-01.webp", 4],
+      ["tree-01.webp", 39]
+    ];
+  }
+
+  const total = weighted.reduce((sum, [, weight]) => sum + weight, 0);
+  let cursor = roll * total;
+
+  for (const [file, weight] of weighted) {
+    cursor -= weight;
+    if (cursor <= 0) return base + file;
+  }
+
+  return base + weighted[weighted.length - 1][0];
+}
+
+function chooseProceduralDecorationAsset(
+  x,
+  y,
+  biomeKey,
+  transitionStrength,
+  channelBase,
+  transitionBiomeKey = null,
+  forestDensity = null
+) {
+  const primary = PROCEDURAL_BIOMES[biomeKey];
+  const oppositeKey = transitionBiomeKey;
+  const opposite = oppositeKey ? PROCEDURAL_BIOMES[oppositeKey] : null;
+
+  // Opposite-biome props gradually appear throughout the same transition band
+  // used by the ground mask instead of only on the single touching edge tile.
+  const blendChance = opposite
+    ? Math.min(0.46, transitionStrength * 0.46)
+    : 0;
+
+  const useOpposite =
+    opposite &&
+    transitionStrength > 0 &&
+    seededWorldRandom(x, y, channelBase + 7) < blendChance;
+
+  const selectedBiomeKey = useOpposite ? oppositeKey : biomeKey;
+  const pool = useOpposite ? opposite.decorations : primary.decorations;
+
+  if (selectedBiomeKey === "greenreach") {
+    return chooseGreenreachDecorationAsset(
+      x,
+      y,
+      channelBase,
+      forestDensity ?? getGreenreachDensity(x, y)
+    );
+  }
+
+  const assetRoll = seededWorldRandom(x, y, channelBase);
+  const assetIndex = Math.min(
+    pool.length - 1,
+    Math.floor(assetRoll * pool.length)
+  );
+
+  return pool[assetIndex];
+}
+
+function generateProceduralTileVisuals(x, y, tile, replaceSprite, tileMap) {
+  if (!shouldUseProceduralTile(tile, replaceSprite, x, y, tileMap)) {
+    return null;
+  }
+
+  const biomeKey = getProceduralBiomeKey(tile, x, y, tileMap);
+  const biome = PROCEDURAL_BIOMES[biomeKey];
+
+  // Procedural /world?procedural=1 should use the same water artwork for
+  // void tiles as the regular world renderer, but without generating any
+  // land-style decorations, biome transitions, or road overlays.
+  if (biomeKey === "water") {
+    return {
+      biomeKey,
+      ground: biome.ground,
+      transitionGround: null,
+      transitionMask: null,
+      transitionStrength: 0,
+      decorations: [],
+      road: false,
+      roadConnections: null
+    };
+  }
+
+  const isRoad = isProceduralRoadTile(tile);
+  const roadConnections = isRoad
+    ? getRoadConnections(x, y, tileMap)
+    : null;
+
+  const transitionBiomeKey = getTransitionBiomeKey(
+    x,
+    y,
+    biomeKey,
+    tileMap
+  );
+
+  const transitionStrength = getBiomeTransitionStrength(
+    x,
+    y,
+    biomeKey,
+    tileMap,
+    transitionBiomeKey
+  );
+
+  const decorations = [];
+  const forestDensity = biomeKey === "greenreach"
+    ? getGreenreachDensity(x, y)
+    : null;
+
+  const decorationCountRoll = seededWorldRandom(x, y, 10);
+  let decorationCount = 0;
+
+  if (!isRoad) {
+    if (biomeKey === "blackfen") {
+      decorationCount = decorationCountRoll < 0.20
+        ? 0
+        : decorationCountRoll < 0.67
+          ? 1
+          : 2;
+    } else if (biomeKey === "greenreach") {
+      if (forestDensity < 0.24) {
+        decorationCount = decorationCountRoll < 0.58 ? 0 : 1;
+      } else if (forestDensity < 0.48) {
+        decorationCount = decorationCountRoll < 0.12 ? 0 : decorationCountRoll < 0.70 ? 1 : 2;
+      } else if (forestDensity < 0.72) {
+        decorationCount = decorationCountRoll < 0.10
+          ? 1
+          : decorationCountRoll < 0.60
+            ? 2
+            : 3;
+      } else {
+        decorationCount = decorationCountRoll < 0.10 ? 2 : 3;
+      }
+    } else {
+      decorationCount = decorationCountRoll < 0.30
+        ? 0
+        : decorationCountRoll < 0.78
+          ? 1
+          : 2;
+    }
+  }
+
+  for (let i = 0; i < decorationCount; i++) {
+    const channelBase = 100 + i * 20;
+    const src = chooseProceduralDecorationAsset(
+      x,
+      y,
+      biomeKey,
+      transitionStrength,
+      channelBase,
+      transitionBiomeKey,
+      forestDensity
+    );
+
+    const sizePercent = getProceduralPropSize(
+      x,
+      y,
+      src,
+      channelBase + 3
+    );
+
+    const { xPercent, yPercent } = getSafeProceduralPosition(
+      x,
+      y,
+      sizePercent,
+      channelBase
+    );
+
+    const rotation = -6 + seededWorldRandom(x, y, channelBase + 4) * 12;
+    const flipX = seededWorldRandom(x, y, channelBase + 5) >= 0.5;
+
+    decorations.push({
+      src,
+      xPercent,
+      yPercent,
+      sizePercent,
+      rotation,
+      flipX
+    });
+  }
+
+  const oppositeBiomeKey = transitionBiomeKey;
+  const transitionMask = transitionStrength > 0 && oppositeBiomeKey
+    ? createBiomeTransitionMask(
+        x,
+        y,
+        biomeKey,
+        tileMap,
+        oppositeBiomeKey
+      )
+    : null;
+
+  return {
+    biomeKey,
+    ground: biome.ground,
+    transitionGround:
+      transitionMask && oppositeBiomeKey
+        ? PROCEDURAL_BIOMES[oppositeBiomeKey].ground
+        : null,
+    transitionMask,
+    transitionStrength,
+    decorations,
+    road: isRoad
+      ? {
+          asset: PROCEDURAL_ROAD_ASSET,
+          connections: roadConnections
+        }
+      : null
+  };
+}
+
+let proceduralRoadImage = null;
+let proceduralRoadImageReady = false;
+let pendingRoadCanvasState = null;
+
+function getProceduralRoadImage() {
+  if (proceduralRoadImage) {
+    return proceduralRoadImage;
+  }
+
+  proceduralRoadImage = new Image();
+  proceduralRoadImage.decoding = "async";
+
+  proceduralRoadImage.onload = () => {
+    proceduralRoadImageReady = true;
+
+    if (pendingRoadCanvasState) {
+      drawProceduralRoadCanvas(
+        pendingRoadCanvasState.grid,
+        pendingRoadCanvasState.tileMap,
+        pendingRoadCanvasState.minX,
+        pendingRoadCanvasState.minY
+      );
+    }
+  };
+
+  proceduralRoadImage.onerror = () => {
+    proceduralRoadImageReady = false;
+    console.warn(
+      "Guildforge procedural road texture failed to load:",
+      PROCEDURAL_ROAD_ASSET
+    );
+  };
+
+  proceduralRoadImage.src = PROCEDURAL_ROAD_ASSET;
+  return proceduralRoadImage;
+}
+
+function ensureProceduralRoadCanvas(grid) {
+  if (!grid) return null;
+
+  let canvas = grid.querySelector(':scope > .procedural-road-canvas');
+
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.className = 'procedural-road-canvas';
+    canvas.setAttribute('aria-hidden', 'true');
+    grid.prepend(canvas);
+  }
+
+  return canvas;
+}
+
+function roundedRectPath(ctx, x, y, width, height, radius) {
+  const r = Math.max(
+    0,
+    Math.min(radius, width / 2, height / 2)
+  );
+
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - r,
+    y + height
+  );
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawRoadMaskGeometry(ctx, tileMap, minX, minY, tileSize) {
+  const roads = [];
+  const roadSet = new Set();
+
+  for (let r = 0; r < WORLD_BUFFER_SIZE; r++) {
+    for (let c = 0; c < WORLD_BUFFER_SIZE; c++) {
+      const x = minX + c;
+      const y = minY + r;
+      const tile = tileMap[`${x},${y}`];
+
+      if (!tile || String(tile.terrain || '').toLowerCase() !== 'road') {
+        continue;
+      }
+
+      roads.push({ x, y, c, r });
+      roadSet.add(`${x},${y}`);
+    }
+  }
+
+  if (!roads.length) {
+    return false;
+  }
+
+  // The road texture no longer has a built-in black border, so the mask no
+  // longer needs artificial overlap between neighboring cells. Each logical
+  // road coordinate occupies its exact tile footprint.
+  const inset = 0;
+  const radius = tileSize * 0.14;
+
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#fff';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const road of roads) {
+    const px = road.c * tileSize + inset;
+    const py = road.r * tileSize + inset;
+    const size = tileSize - inset * 2;
+
+    roundedRectPath(ctx, px, py, size, size, radius);
+    ctx.fill();
+  }
+
+  const hasRoadAt = (x, y) =>
+    roadSet.has(`${x},${y}`);
+
+  /*
+   * Connect CARDINAL neighbors at exactly one tile of width.
+   *
+   * Diagonal bridges are deliberately much stricter than before. Previously
+   * every diagonal road neighbor received a bridge, which produced little
+   * triangular/spine-shaped protrusions around wide roads and junctions.
+   *
+   * A diagonal bridge is now created only when the pair is a genuine
+   * stair-step connection: neither of the two orthogonal cells between them
+   * is road. If east/south (or the equivalent pair) already contains road,
+   * the normal filled cells/cardinal joins define the shape and no diagonal
+   * connector is added.
+   */
+  for (const road of roads) {
+    const cx = road.c * tileSize + tileSize / 2;
+    const cy = road.r * tileSize + tileSize / 2;
+
+    const cardinalNeighbors = [
+      [1, 0],
+      [0, 1]
+    ];
+
+    for (const [dx, dy] of cardinalNeighbors) {
+      if (!hasRoadAt(road.x + dx, road.y + dy)) {
+        continue;
+      }
+
+      ctx.lineWidth = tileSize;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(
+        cx + dx * tileSize,
+        cy + dy * tileSize
+      );
+      ctx.stroke();
+    }
+
+    const diagonalNeighbors = [
+      [1, 1],
+      [-1, 1]
+    ];
+
+    for (const [dx, dy] of diagonalNeighbors) {
+      const diagonalX = road.x + dx;
+      const diagonalY = road.y + dy;
+
+      if (!hasRoadAt(diagonalX, diagonalY)) {
+        continue;
+      }
+
+      // The two cardinal cells that could already bridge this diagonal pair.
+      const horizontalExists =
+        hasRoadAt(road.x + dx, road.y);
+
+      const verticalExists =
+        hasRoadAt(road.x, road.y + dy);
+
+      // If either orthogonal route already exists, this is part of a broad
+      // corner/junction rather than a true diagonal-only stair step.
+      if (horizontalExists || verticalExists) {
+        continue;
+      }
+
+      ctx.lineWidth = tileSize * 0.72;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(
+        cx + dx * tileSize,
+        cy + dy * tileSize
+      );
+      ctx.stroke();
+    }
+  }
+
+  return true;
+}
+
+function drawProceduralRoadCanvas(grid, tileMap, minX, minY) {
+  if (!grid || !PROCEDURAL_WORLD_TEST) {
+    return;
+  }
+
+  pendingRoadCanvasState = {
+    grid,
+    tileMap,
+    minX,
+    minY
+  };
+
+  const canvas = ensureProceduralRoadCanvas(grid);
+  if (!canvas) return;
+
+  const tileSize = getWorldTileSize();
+  const width = Math.round(tileSize * WORLD_BUFFER_SIZE);
+  const height = Math.round(tileSize * WORLD_BUFFER_SIZE);
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const mask = document.createElement('canvas');
+  mask.width = width;
+  mask.height = height;
+
+  const maskCtx = mask.getContext('2d');
+  if (!maskCtx) return;
+
+  const hasRoad = drawRoadMaskGeometry(
+    maskCtx,
+    tileMap,
+    minX,
+    minY,
+    tileSize
+  );
+
+  if (!hasRoad) {
+    canvas.hidden = true;
+    return;
+  }
+
+  canvas.hidden = false;
+
+  /*
+   * Smooth the COMBINED road silhouette after all road cells and connectors
+   * have been drawn.
+   *
+   * This is intentionally a world-shape operation rather than another
+   * per-cell corner rule. The raw mask is blurred enough to soften stair-step
+   * geometry, then thresholded back to an opaque binary mask so the road body
+   * remains crisp. The later alpha-mask pass adds only a tiny edge feather.
+   */
+  const smoothedMask = document.createElement('canvas');
+  smoothedMask.width = width;
+  smoothedMask.height = height;
+
+  const smoothedCtx = smoothedMask.getContext('2d');
+  if (!smoothedCtx) return;
+
+  const smoothingSource = document.createElement('canvas');
+  smoothingSource.width = width;
+  smoothingSource.height = height;
+
+  const smoothingCtx = smoothingSource.getContext('2d');
+  if (!smoothingCtx) return;
+
+  smoothingCtx.save();
+  smoothingCtx.filter =
+    `blur(${Math.max(4, tileSize * 0.115)}px)`;
+  smoothingCtx.drawImage(mask, 0, 0);
+  smoothingCtx.restore();
+
+  const smoothedPixels =
+    smoothingCtx.getImageData(
+      0,
+      0,
+      width,
+      height
+    );
+
+  const pixelData =
+    smoothedPixels.data;
+
+  // Lower threshold slightly expands the blended silhouette and helps turn
+  // stair-step diagonals into one continuous sloped ribbon without creating
+  // the thin spines that the old diagonal-connector system produced.
+  const silhouetteThreshold = 102;
+
+  for (
+    let i = 3;
+    i < pixelData.length;
+    i += 4
+  ) {
+    pixelData[i] =
+      pixelData[i] >= silhouetteThreshold
+        ? 255
+        : 0;
+  }
+
+  smoothedCtx.putImageData(
+    smoothedPixels,
+    0,
+    0
+  );
+
+  const roadImage = getProceduralRoadImage();
+  if (!proceduralRoadImageReady || !roadImage.complete) {
+    return;
+  }
+
+  // Build one continuous feathered alpha mask around the COMBINED road shape.
+  // We deliberately avoid re-applying the hard mask afterward; the broad road
+  // interior remains effectively opaque while the outer shoulder gets a much
+  // softer transition into the biome beneath it.
+  const alphaMask = document.createElement('canvas');
+  alphaMask.width = width;
+  alphaMask.height = height;
+
+  const alphaCtx = alphaMask.getContext('2d');
+  if (!alphaCtx) return;
+
+  alphaCtx.save();
+
+  /*
+   * Give the road a controlled terrain-blend shoulder.
+   *
+   * The v22 road shape is already good, so we leave its geometry untouched.
+   * This wider alpha feather only affects the OUTER perimeter of the combined
+   * road silhouette. Because the road canvas sits over the procedural biome
+   * ground, partially-transparent edge pixels naturally mix dirt with the
+   * grass/swamp texture underneath instead of ending at a hard boundary.
+   */
+  alphaCtx.filter =
+    `blur(${Math.max(2.4, tileSize * 0.055)}px)`;
+
+  alphaCtx.globalAlpha = 1;
+  alphaCtx.drawImage(
+    smoothedMask,
+    0,
+    0
+  );
+
+  alphaCtx.restore();
+
+  /*
+   * Paint road.webp as a WORLD-ANCHORED mirrored texture.
+   *
+   * The earlier canvas versions anchored the texture to the current 11x11
+   * buffer. Every time the server recenters that buffer after a logical step,
+   * the road geometry stayed in the correct world location but the texture
+   * phase restarted at canvas (0,0). That made the dirt appear to slide
+   * underneath the player while walking.
+   *
+   * Here the texture phase is derived from absolute map coordinates
+   * (minX/minY), so the same world coordinate always receives the same part
+   * of road.webp. Adjacent large texture blocks are mirrored, which removes
+   * hard repeat seams even when road.webp itself is not perfectly tileable.
+   */
+  ctx.save();
+  ctx.globalAlpha = 0.97;
+
+  const textureSize =
+    Math.max(
+      tileSize * 4,
+      1
+    );
+
+  const worldPixelX =
+    minX * tileSize;
+
+  const worldPixelY =
+    minY * tileSize;
+
+  const firstPatternX =
+    Math.floor(
+      worldPixelX /
+      textureSize
+    ) - 1;
+
+  const firstPatternY =
+    Math.floor(
+      worldPixelY /
+      textureSize
+    ) - 1;
+
+  const lastPatternX =
+    Math.ceil(
+      (worldPixelX + width) /
+      textureSize
+    ) + 1;
+
+  const lastPatternY =
+    Math.ceil(
+      (worldPixelY + height) /
+      textureSize
+    ) + 1;
+
+  for (
+    let patternY = firstPatternY;
+    patternY <= lastPatternY;
+    patternY++
+  ) {
+    for (
+      let patternX = firstPatternX;
+      patternX <= lastPatternX;
+      patternX++
+    ) {
+      const localX =
+        patternX * textureSize -
+        worldPixelX;
+
+      const localY =
+        patternY * textureSize -
+        worldPixelY;
+
+      const flipX =
+        Math.abs(patternX) % 2 === 1;
+
+      const flipY =
+        Math.abs(patternY) % 2 === 1;
+
+      ctx.save();
+
+      ctx.translate(
+        localX + (flipX ? textureSize : 0),
+        localY + (flipY ? textureSize : 0)
+      );
+
+      ctx.scale(
+        flipX ? -1 : 1,
+        flipY ? -1 : 1
+      );
+
+      ctx.drawImage(
+        roadImage,
+        0,
+        0,
+        textureSize,
+        textureSize
+      );
+
+      ctx.restore();
+    }
+  }
+
+  ctx.globalCompositeOperation =
+    'destination-in';
+
+  ctx.globalAlpha = 1;
+  ctx.drawImage(alphaMask, 0, 0);
+
+  ctx.restore();
+}
+
+// Roads are no longer rendered inside individual tile DOM nodes. They are
+// painted once across the full 11x11 moving world buffer by the canvas above.
+function renderProceduralRoad() {
+  return "";
+}
+
+function renderProceduralTransitions(visuals) {
+  if (
+    !visuals?.transitionGround ||
+    !visuals?.transitionMask
+  ) {
+    return "";
+  }
+
+  const mask = escapeHtml(visuals.transitionMask);
+
+  return `
+    <div
+      class="procedural-biome-transition"
+      aria-hidden="true"
+      style="
+        background-image:url('${escapeHtml(visuals.transitionGround)}');
+        -webkit-mask-image:url('${mask}');
+        mask-image:url('${mask}');
+      "
+    ></div>
+  `;
+}
+
+function renderProceduralDecorations(visuals) {
+  if (!visuals?.decorations?.length) {
+    return "";
+  }
+
+  return visuals.decorations.map(decoration => {
+    const scaleX = decoration.flipX ? -1 : 1;
+
+    return `
+      <img
+        class="procedural-decoration"
+        src="${escapeHtml(decoration.src)}"
+        alt=""
+        aria-hidden="true"
+        style="
+          left:${decoration.xPercent.toFixed(2)}%;
+          top:${decoration.yPercent.toFixed(2)}%;
+          width:${decoration.sizePercent.toFixed(2)}%;
+          transform:rotate(${decoration.rotation.toFixed(2)}deg) scaleX(${scaleX});
+        "
+        onerror="this.style.display='none';"
+      >
+    `;
+  }).join("");
+}
 
 // =======================
 // INIT
@@ -142,26 +1438,152 @@ function updateNavHUD(data) {
   if (flavor) flavor.textContent = data?.flavor ?? "You press onward.";
 }
 
-function animateStep(dir) {
+function getWorldTileSize() {
+  return (
+    parseFloat(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--tile")
+    ) || 58
+  );
+}
+
+function getWorldGridBaseTransform() {
+  const tileSize = getWorldTileSize();
+  return {
+    tileSize,
+    x: -tileSize,
+    y: -tileSize
+  };
+}
+
+function getWorldStepTarget(dir) {
+  const base = getWorldGridBaseTransform();
+
+  // Camera-follow movement: the player remains centered while the terrain
+  // travels continuously beneath them one complete logical tile at a time.
+  const offsets = {
+    north: [0, base.tileSize],
+    south: [0, -base.tileSize],
+    west: [base.tileSize, 0],
+    east: [-base.tileSize, 0]
+  };
+
+  const [dx, dy] = offsets[dir] || [0, 0];
+
+  return {
+    ...base,
+    targetX: base.x + dx,
+    targetY: base.y + dy
+  };
+}
+
+function setWorldPlayerMotion(dir, moving) {
+  const sprite = document.getElementById("worldPlayerSprite");
+  if (!sprite) return;
+
+  sprite.dataset.direction = dir || "south";
+  sprite.classList.toggle("is-moving", Boolean(moving));
+}
+
+function ensureWorldPlayerSprite() {
+  const viewport = document.querySelector(".grid-viewport");
+  if (!viewport) return null;
+
+  let sprite = document.getElementById("worldPlayerSprite");
+  if (sprite) return sprite;
+
+  sprite = document.createElement("div");
+  sprite.id = "worldPlayerSprite";
+  sprite.className = "world-player-sprite";
+  sprite.dataset.direction = "south";
+  sprite.setAttribute("aria-hidden", "true");
+  sprite.innerHTML = `
+    <span class="world-player-sprite__shadow"></span>
+    <span class="world-player-sprite__body">◆</span>
+  `;
+
+  viewport.appendChild(sprite);
+  return sprite;
+}
+
+function resetWorldGridToBase() {
   const grid = document.getElementById("Grid");
   if (!grid) return;
 
-  const map = {
-    north: [0, 10],
-    south: [0, -10],
-    west: [10, 0],
-    east: [-10, 0]
-  };
+  grid.getAnimations?.().forEach(animation => animation.cancel());
 
-  const v = map[dir] || [0, 0];
+  const base = getWorldGridBaseTransform();
+  grid.style.transform = `translate3d(${base.x}px, ${base.y}px, 0)`;
+}
 
-  grid.animate(
+function animateWorldTravelStep(dir) {
+  const grid = document.getElementById("Grid");
+  if (!grid || !dir) return Promise.resolve();
+
+  ensureWorldPlayerSprite();
+  setWorldPlayerMotion(dir, true);
+
+  const step = getWorldStepTarget(dir);
+
+  grid.getAnimations?.().forEach(animation => animation.cancel());
+  grid.style.transform = `translate3d(${step.x}px, ${step.y}px, 0)`;
+
+  const animation = grid.animate(
     [
-      { transform: `translate(${v[0]}px, ${v[1]}px)` },
-      { transform: "translate(0px, 0px)" }
+      {
+        transform: `translate3d(${step.x}px, ${step.y}px, 0)`
+      },
+      {
+        transform: `translate3d(${step.targetX}px, ${step.targetY}px, 0)`
+      }
     ],
-    { duration: 140, easing: "cubic-bezier(.2,.8,.2,1)" }
+    {
+      duration: WORLD_SCROLL_MS,
+      easing: "linear",
+      fill: "forwards"
+    }
   );
+
+  return animation.finished
+    .then(() => {
+      grid.style.transform =
+        `translate3d(${step.targetX}px, ${step.targetY}px, 0)`;
+      animation.cancel();
+    })
+    .catch(() => {});
+}
+
+function animateWorldRollback(dir) {
+  const grid = document.getElementById("Grid");
+  if (!grid || !dir) return Promise.resolve();
+
+  const step = getWorldStepTarget(dir);
+
+  grid.getAnimations?.().forEach(animation => animation.cancel());
+
+  const animation = grid.animate(
+    [
+      {
+        transform: `translate3d(${step.targetX}px, ${step.targetY}px, 0)`
+      },
+      {
+        transform: `translate3d(${step.x}px, ${step.y}px, 0)`
+      }
+    ],
+    {
+      duration: 110,
+      easing: "ease-out",
+      fill: "forwards"
+    }
+  );
+
+  return animation.finished
+    .then(() => {
+      resetWorldGridToBase();
+    })
+    .catch(() => {
+      resetWorldGridToBase();
+    });
 }
 
 function normalizeMoveDir(dir) {
@@ -785,19 +2207,19 @@ function renderWorldFromData({
   const html = [];
 
   const minX =
-    Number(player.map_x) - 3;
+    Number(player.map_x) - WORLD_BUFFER_RADIUS;
 
   const minY =
-    Number(player.map_y) - 3;
+    Number(player.map_y) - WORLD_BUFFER_RADIUS;
 
-  for (let r = 0; r < 7; r++) {
-    for (let c = 0; c < 7; c++) {
+  for (let r = 0; r < WORLD_BUFFER_SIZE; r++) {
+    for (let c = 0; c < WORLD_BUFFER_SIZE; c++) {
       const x = minX + c;
       const y = minY + r;
       const t = tileMap[`${x},${y}`];
 
       if (!t) {
-        html.push(`<div class="tile"></div>`);
+        html.push(`<div class="tile void" data-x="${x}" data-y="${y}"></div>`);
         continue;
       }
 
@@ -827,10 +2249,40 @@ function renderWorldFromData({
           objectMap
         );
 
-      const terrainClass = replaceSprite ? "" : t.terrain;
+      const proceduralVisuals =
+        generateProceduralTileVisuals(
+          x,
+          y,
+          t,
+          replaceSprite,
+          tileMap
+        );
+
+      const terrainClass =
+        replaceSprite || proceduralVisuals
+          ? ""
+          : t.terrain;
+
       const baseStyle = replaceSprite
         ? ` style="background-image: url('${escapeHtml(replaceSprite)}');"`
-        : "";
+        : proceduralVisuals
+          ? ` style="background-image: url('${escapeHtml(proceduralVisuals.ground)}');"`
+          : "";
+
+      const proceduralTransitionHtml =
+        renderProceduralTransitions(
+          proceduralVisuals
+        );
+
+      const proceduralDecorationHtml =
+        renderProceduralDecorations(
+          proceduralVisuals
+        );
+
+      const proceduralRoadHtml =
+        renderProceduralRoad(
+          proceduralVisuals
+        );
 
       const huntClueHtml =
   huntClue
@@ -932,6 +2384,9 @@ function renderWorldFromData({
           data-x="${x}"
           data-y="${y}"${baseStyle}
         >
+          ${proceduralTransitionHtml}
+          ${proceduralDecorationHtml}
+          ${proceduralRoadHtml}
           ${overlayHtml}
           ${resourceHtml}
           ${dungeonHtml}
@@ -943,6 +2398,22 @@ function renderWorldFromData({
   }
 
   grid.innerHTML = html.join("");
+
+  // Draw every road cell as one continuous world-level layer. Because the
+  // canvas lives inside #Grid it moves through the exact same camera transform
+  // as the terrain during continuous WASD travel.
+  drawProceduralRoadCanvas(
+    grid,
+    tileMap,
+    minX,
+    minY
+  );
+
+  // Every server-confirmed tile boundary recenters the hidden 11x11 buffer.
+  // The visible world does not jump because the old end frame and new base
+  // frame show the exact same world coordinates.
+  resetWorldGridToBase();
+  ensureWorldPlayerSprite();
 
   const currentTile = tileMap[`${player.map_x},${player.map_y}`];
 
@@ -2103,36 +3574,97 @@ window.enterDungeonFromWorld =
 // =======================
 // MOVEMENT
 // =======================
-document.addEventListener("keydown", (e) => {
-  if (e.repeat) return;
+// Classic tile-RPG movement: key state is continuous, but the authoritative
+// server position remains integer-based. A released key finishes the current
+// tile step, then stops cleanly on the next tile center.
+const heldWorldDirections = new Set();
+let mostRecentWorldDirection = null;
 
-  if (isInCombat()) {
-    e.preventDefault();
+function directionFromWorldKey(key) {
+  switch (String(key || "").toLowerCase()) {
+    case "arrowup":
+    case "w":
+      return "north";
+    case "arrowdown":
+    case "s":
+      return "south";
+    case "arrowleft":
+    case "a":
+      return "west";
+    case "arrowright":
+    case "d":
+      return "east";
+    default:
+      return null;
+  }
+}
+
+function getHeldWorldDirection() {
+  if (
+    mostRecentWorldDirection &&
+    heldWorldDirections.has(mostRecentWorldDirection)
+  ) {
+    return mostRecentWorldDirection;
+  }
+
+  return heldWorldDirections.values().next().value || null;
+}
+
+function isWorldTypingTarget(target) {
+  const tag = String(target?.tagName || "").toLowerCase();
+
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target?.isContentEditable
+  );
+}
+
+function continueHeldWorldMovement() {
+  if (moveLock || isInCombat()) return;
+
+  const dir = getHeldWorldDirection();
+  if (!dir) {
+    setWorldPlayerMotion(lastMoveDir || "south", false);
     return;
   }
 
-  switch (e.key) {
-    case "ArrowUp":
-    case "w":
-    case "W":
-      moveWorld("north");
-      break;
-    case "ArrowDown":
-    case "s":
-    case "S":
-      moveWorld("south");
-      break;
-    case "ArrowLeft":
-    case "a":
-    case "A":
-      moveWorld("west");
-      break;
-    case "ArrowRight":
-    case "d":
-    case "D":
-      moveWorld("east");
-      break;
+  void moveWorld(dir);
+}
+
+document.addEventListener("keydown", (e) => {
+  const dir = directionFromWorldKey(e.key);
+  if (!dir || isWorldTypingTarget(e.target)) return;
+
+  e.preventDefault();
+
+  if (isInCombat()) return;
+
+  const wasHeld = heldWorldDirections.has(dir);
+  heldWorldDirections.add(dir);
+  mostRecentWorldDirection = dir;
+
+  if (!wasHeld) {
+    continueHeldWorldMovement();
   }
+});
+
+document.addEventListener("keyup", (e) => {
+  const dir = directionFromWorldKey(e.key);
+  if (!dir || isWorldTypingTarget(e.target)) return;
+
+  e.preventDefault();
+  heldWorldDirections.delete(dir);
+
+  if (mostRecentWorldDirection === dir) {
+    mostRecentWorldDirection = null;
+  }
+});
+
+window.addEventListener("blur", () => {
+  heldWorldDirections.clear();
+  mostRecentWorldDirection = null;
 });
 
 
@@ -2188,28 +3720,48 @@ async function syncWorldAudio(region, terrain) {
 }
 
 async function moveWorld(dir) {
-  if (isInCombat()) return;
+  dir = normalizeMoveDir(dir);
 
-  const now = Date.now();
-  if (moveLock || (now - lastMoveAt) < MOVE_COOLDOWN_MS) return;
+  if (!dir || isInCombat() || moveLock) return;
 
   moveLock = true;
-  lastMoveAt = now;
+  lastMoveDir = dir;
+  lastMoveAt = Date.now();
 
-  // ⚡ Animate immediately — don't wait for the server response
-  lastMoveDir = normalizeMoveDir(dir);
-  animateStep(dir);
+  // Begin visual travel immediately. The network request runs in parallel,
+  // so the character/world starts moving on the very frame the key is pressed.
+  const visualStepPromise = animateWorldTravelStep(dir);
 
   try {
-    const res = await fetch(`/world/move/${dir}`, {
-      credentials: "include"
-    });
-    const data = await res.json();
+    const responsePromise = fetch(`/world/move/${dir}`, {
+      credentials: "include",
+      cache: "no-store"
+    }).then(async res => ({
+      res,
+      data: await res.json()
+    }));
 
-    if (!data?.success) return;
+    const [responseResult] = await Promise.all([
+      responsePromise,
+      visualStepPromise
+    ]);
 
-    // Keep soundtrack + environment ambience synchronized
-    // with the tile the player actually moved onto.
+    const { res, data } = responseResult;
+
+    if (!res.ok || !data?.success) {
+      await animateWorldRollback(dir);
+      return;
+    }
+
+    // Swapping to the newly-centered 11x11 buffer is visually seamless here:
+    // the old grid's completed transform and the new grid's base transform
+    // expose the same nine world rows/columns at this exact frame.
+    if (data.world) {
+      renderWorldFromData(data.world);
+    } else {
+      resetWorldGridToBase();
+    }
+
     syncWorldAudio(
       data.region,
       data.terrain
@@ -2220,57 +3772,49 @@ async function moveWorld(dir) {
       );
     });
 
-    // Use bundled data from the single move response — no extra fetches
-if (data.world) {
-  renderWorldFromData(
-    data.world
-  );
-}
+    if (data.nearbyObjects) {
+      renderNearbyObjects(data.nearbyObjects);
+    }
 
-if (data.nearbyObjects) {
-  renderNearbyObjects(
-    data.nearbyObjects
-  );
-}
+    if (data.regionData) {
+      renderRegionHeader(data.regionData);
+    }
 
-if (data.regionData) {
-  renderRegionHeader(
-    data.regionData
-  );
-}
+    if (
+      String(data.terrain || "").toLowerCase() === "dungeon"
+    ) {
+      await renderDungeonWorldHeaderIfNeeded(data.terrain);
+    }
 
-if (
-  String(
-    data.terrain ||
-    ""
-  ).toLowerCase() ===
-  "dungeon"
-) {
-  await renderDungeonWorldHeaderIfNeeded(
-    data.terrain
-  );
-}
+    updateNavHUD(data);
 
-updateNavHUD(data);
+    if (data.huntProgress?.advanced) {
+      showHuntProgress(data.huntProgress);
+    }
 
-if (data.huntProgress?.advanced) {
-  showHuntProgress(
-    data.huntProgress
-  );
-}
+    if (data.inCombat && data.enemy) {
+      heldWorldDirections.clear();
+      mostRecentWorldDirection = null;
+      setWorldPlayerMotion(dir, false);
 
-if (data.inCombat && data.enemy) {
-  pendingCombatEnemy =
-    data.enemy;
-
-  queueCombatOpen();
-}
+      pendingCombatEnemy = data.enemy;
+      queueCombatOpen();
+    }
   } catch (err) {
     console.error("World movement failed", err);
+    await animateWorldRollback(dir);
   } finally {
-    setTimeout(() => {
-      moveLock = false;
-    }, MOVE_COOLDOWN_MS);
+    moveLock = false;
+
+    if (!isInCombat() && heldWorldDirections.size) {
+      // Start the next cell on the next paint frame. No artificial cooldown or
+      // interval gap means held WASD reads as one continuous walk.
+      requestAnimationFrame(() => {
+        continueHeldWorldMovement();
+      });
+    } else {
+      setWorldPlayerMotion(lastMoveDir || dir, false);
+    }
   }
 }
 

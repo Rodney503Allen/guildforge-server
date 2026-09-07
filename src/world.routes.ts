@@ -72,7 +72,7 @@ function getTileVisualData(
   };
 }
 
-async function getResourceNodesInRange(playerId: number, centerX: number, centerY: number, range = 3){
+async function getResourceNodesInRange(playerId: number, centerX: number, centerY: number, range = 5){
   const [rows]: any = await db.query(
     `
     SELECT
@@ -118,7 +118,7 @@ async function getHuntTargetsInRange(
   playerId: number,
   centerX: number,
   centerY: number,
-  range = 3
+  range = 5
 ) {
   const [rows]: any =
     await db.query(
@@ -403,10 +403,10 @@ router.get("/world", async (req, res) => {
     player.location = currentLocationName;
   }
 
-  const minX = player.map_x - 3;
-  const maxX = player.map_x + 3;
-  const minY = player.map_y - 3;
-  const maxY = player.map_y + 3;
+  const minX = player.map_x - 5;
+  const maxX = player.map_x + 5;
+  const minY = player.map_y - 5;
+  const maxY = player.map_y + 5;
   const [worldObjects]: any = await db.query(`
     SELECT
       id,
@@ -432,14 +432,14 @@ router.get("/world", async (req, res) => {
       AND y BETWEEN ? AND ?
   `, [minX, maxX, minY, maxY]);
 
-  const resourceNodes = await getResourceNodesInRange(Number(pid), player.map_x, player.map_y, 3);
+  const resourceNodes = await getResourceNodesInRange(Number(pid), player.map_x, player.map_y, 5);
 
   const huntTargets =
   await getHuntTargetsInRange(
     Number(pid),
     Number(player.map_x),
     Number(player.map_y),
-    3
+    5
   );
 
   // Guild ownership
@@ -524,38 +524,20 @@ res.send(`
         <span class="frame-border panel" aria-hidden="true"></span>
 
         <div class="map-stage">
-          <div class="map-wrapper">
-            <button
-              class="move-btn up"
-              type="button"
-              aria-label="Move north"
-              onclick="moveWorld('north')"
-            >
-              ⬆
-            </button>
-
-            <button
-              class="move-btn left"
-              type="button"
-              aria-label="Move west"
-              onclick="moveWorld('west')"
-            >
-              ⬅
-            </button>
-
-            <div class="grid" id="Grid">
+          <div class="map-wrapper">            <div class="grid-viewport">
+              <div class="grid" id="Grid">
               ${
-                Array.from({ length: 7 }).map((_, r) => {
+                Array.from({ length: 11 }).map((_, r) => {
                   const y = minY + r;
 
-                  return Array.from({ length: 7 }).map((_, c) => {
+                  return Array.from({ length: 11 }).map((_, c) => {
                     const x = minX + c;
                     const t = tileMap[x + "," + y];
 
                     if (!t) {
                       return `
                         <div
-                          class="tile"
+                          class="tile void"
                           data-x="${x}"
                           data-y="${y}"
                         ></div>
@@ -599,25 +581,8 @@ res.send(`
                   }).join("");
                 }).join("")
               }
+              </div>
             </div>
-
-            <button
-              class="move-btn right"
-              type="button"
-              aria-label="Move east"
-              onclick="moveWorld('east')"
-            >
-              ➡
-            </button>
-
-            <button
-              class="move-btn down"
-              type="button"
-              aria-label="Move south"
-              onclick="moveWorld('south')"
-            >
-              ⬇
-            </button>
           </div>
         </div>
       </section>
@@ -682,16 +647,6 @@ res.send(`
   </div>
 </section>
 
-        <!-- Travel Log -->
-        <section class="flavor-card travel-log-card world-sidebar-card">
-          <span class="frame-border sub" aria-hidden="true"></span>
-
-          <div class="flavor-title">Travel Log</div>
-
-          <div class="flavor-text" id="movement-flavor">
-            You press onward.
-          </div>
-        </section>
         <!-- Field Actions -->
 
         <!-- Current Resource -->
@@ -1841,10 +1796,10 @@ const [huntClueRows]: any =
     `,
     [
       pid,
-      newX - 3,
-      newX + 3,
-      newY - 3,
-      newY + 3
+      newX - 5,
+      newX + 5,
+      newY - 5,
+      newY + 5
     ]
   );
 
@@ -2020,14 +1975,14 @@ const [
     pid,
     newX,
     newY,
-    3
+    5
   ),
 
   getHuntTargetsInRange(
     Number(pid),
     newX,
     newY,
-    3
+    5
   )
 ]);
 
@@ -2222,10 +2177,10 @@ await db.query(
   // =======================
   // BUNDLE: world/partial data
   // =======================
-  const minX = newX - 3;
-  const maxX = newX + 3;
-  const minY = newY - 3;
-  const maxY = newY + 3;
+  const minX = newX - 5;
+  const maxX = newX + 5;
+  const minY = newY - 5;
+  const maxY = newY + 5;
 
 const [worldObjects]: any = await db.query(`
 SELECT
@@ -2475,10 +2430,10 @@ router.get("/api/world/nearby-objects", async (req, res) => {
           ORDER BY id ASC
         `,
         [
-          px - 3,
-          px + 3,
-          py - 3,
-          py + 3
+          px - 5,
+          px + 5,
+          py - 5,
+          py + 5
         ]
       );
 
@@ -2608,10 +2563,10 @@ router.get("/api/world/nearby-objects", async (req, res) => {
         `,
         [
           pid,
-          px - 3,
-          px + 3,
-          py - 3,
-          py + 3
+          px - 5,
+          px + 5,
+          py - 5,
+          py + 5
         ]
       );
 
@@ -2690,7 +2645,7 @@ router.get("/api/world/nearby-objects", async (req, res) => {
     Number(pid),
     px,
     py,
-    3
+    5
   );
 
 
@@ -2770,10 +2725,10 @@ router.get("/world/partial", async (req, res) => {
   const py =
     Number(player.map_y);
 
-  const minX = px - 3;
-  const maxX = px + 3;
-  const minY = py - 3;
-  const maxY = py + 3;
+  const minX = px - 5;
+  const maxX = px + 5;
+  const minY = py - 5;
+  const maxY = py + 5;
 
 
   /* =========================================
@@ -2843,7 +2798,7 @@ router.get("/world/partial", async (req, res) => {
       Number(pid),
       px,
       py,
-      3
+      5
     );
 
 const huntTargets =
@@ -2851,7 +2806,7 @@ const huntTargets =
     Number(pid),
     px,
     py,
-    3
+    5
   );
 
   /* =========================================
