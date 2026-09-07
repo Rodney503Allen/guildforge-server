@@ -13,6 +13,11 @@ import {
 } from "./services/dungeonProgressionService";
 
 import {
+  assertDungeonRestCompleteForPlayer,
+  getDungeonRestStateForPlayer,
+} from "./services/dungeonRestService";
+
+import {
   getDungeonLootForPlayer,
   submitDungeonLootChoice,
 } from "./services/dungeonLootService";
@@ -245,11 +250,50 @@ router.post("/active/wipe/retry", async (req: any, res) => {
   }
 });
 
+router.get("/active/rest", async (req: any, res) => {
+  try {
+    const rest =
+      await getDungeonRestStateForPlayer(
+        Number(req.session.playerId)
+      );
+
+    res.json({
+      ok: true,
+      rest,
+    });
+  } catch (err: any) {
+    console.error(
+      "GET /api/dungeons/active/rest failed:",
+      err
+    );
+
+    res.status(400).json({
+      ok: false,
+      error:
+        err?.message ||
+        "Unable to load dungeon rest state.",
+    });
+  }
+});
+
+
 router.post("/active/rest/advance", async (req: any, res) => {
   try {
+    const playerId =
+      Number(req.session.playerId);
+
+    /*
+     * Server-authoritative rest gate.
+     * This also applies any catch-up recovery ticks before allowing
+     * the leader to move the party into the next room.
+     */
+    await assertDungeonRestCompleteForPlayer(
+      playerId
+    );
+
     const result =
       await advanceDungeonAfterRestForPlayer(
-        Number(req.session.playerId)
+        playerId
       );
 
     res.json(result);
