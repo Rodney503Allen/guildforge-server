@@ -1,6 +1,7 @@
 // src/services/dungeonReadyCheckService.ts
 import { db } from "../db";
 import { getPartyByPlayer } from "../partyService";
+import { getEffectiveDungeonMinPartySize } from "./dungeonTestScaling";
 
 const READY_CHECK_SECONDS = 30;
 type DbConnection = any;
@@ -478,7 +479,8 @@ export async function startDungeonReadyCheck(
       }];
     }
 
-    const minPartySize = Number(dungeon.min_party_size ?? 1);
+    const configuredMinPartySize = Number(dungeon.min_party_size ?? 1);
+    const minPartySize = getEffectiveDungeonMinPartySize(configuredMinPartySize);
     const maxPartySize = Number(dungeon.max_party_size ?? 4);
     const minLevel = Number(dungeon.min_level ?? 1);
     const maxLevel = dungeon.max_level == null ? null : Number(dungeon.max_level);

@@ -1,6 +1,7 @@
 // src/services/dungeonService.ts
 import { db } from "../db";
 import { getPartyByPlayer } from "../partyService";
+import { getEffectiveDungeonMinPartySize } from "./dungeonTestScaling";
 
 export type DungeonPhase = "trash" | "boss" | "loot" | "rest" | "complete";
 export type DungeonStatus = "active" | "completed" | "failed" | "abandoned";
@@ -186,7 +187,8 @@ export async function createDungeonInstance(playerId: number, dungeonId: number)
     }];
   }
 
-  const minPartySize = Number(dungeon.min_party_size ?? 1);
+  const configuredMinPartySize = Number(dungeon.min_party_size ?? 1);
+  const minPartySize = getEffectiveDungeonMinPartySize(configuredMinPartySize);
   const maxPartySize = Number(dungeon.max_party_size ?? 4);
   if (members.length < minPartySize) {
     throw new Error(`This dungeon requires at least ${minPartySize} players.`);

@@ -9,6 +9,7 @@
 // allowing a dungeon session to own N simultaneous enemies.
 
 import { db } from "../db";
+import { getDungeonTestScale } from "./dungeonTestScaling";
 
 import {
   COMBAT_TIMING,
@@ -563,6 +564,7 @@ async function createDungeonEnemyState(
     DungeonRuntimeEnemy,
   participantIds:
     Iterable<number>,
+  attackScale = 1,
 ) {
   const enemy =
     createPartyCombatEnemy({
@@ -594,7 +596,13 @@ async function createDungeonEnemyState(
         runtimeEnemy.maxHp,
 
       attack:
-        runtimeEnemy.attack,
+        Math.max(
+          0,
+          Math.round(
+            runtimeEnemy.attack *
+            attackScale
+          ),
+        ),
 
       defense:
         runtimeEnemy.defense,
@@ -735,6 +743,11 @@ const participantIds =
       participant.playerId
   );
 
+  const dungeonScale =
+    getDungeonTestScale(
+      participantIds.length
+    );
+
   if (
     !participantIds.length
   ) {
@@ -795,6 +808,7 @@ const participantIds =
       await createDungeonEnemyState(
         runtimeEnemy,
         players.keys(),
+        dungeonScale.attack,
       );
 
     enemies.set(

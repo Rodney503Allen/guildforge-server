@@ -10,6 +10,7 @@
 //   - use the same collection model, normally containing one boss
 
 import { db } from "../db";
+import { getDungeonTestScale } from "./dungeonTestScaling";
 
 import {
   completeCurrentDungeonBoss,
@@ -319,6 +320,25 @@ export async function ensureDungeonEnemyQueue(
       };
     }
 
+    const [[memberCountRow]]: any =
+      await connection.query(
+        `
+          SELECT COUNT(*) AS total
+          FROM dungeon_instance_members
+          WHERE instance_id = ?
+            AND is_active = 1
+        `,
+        [instanceId],
+      );
+
+    const dungeonScale =
+      getDungeonTestScale(
+        Number(
+          memberCountRow?.total ??
+          1
+        ),
+      );
+
     let sequenceNumber =
       1;
 
@@ -435,8 +455,20 @@ export async function ensureDungeonEnemyQueue(
               creatureId,
               sequenceNumber,
               quantityIndex,
-              creature.maxHp,
-              creature.maxHp,
+              Math.max(
+                1,
+                Math.round(
+                  creature.maxHp *
+                  dungeonScale.hp
+                ),
+              ),
+              Math.max(
+                1,
+                Math.round(
+                  creature.maxHp *
+                  dungeonScale.hp
+                ),
+              ),
             ],
           );
 
@@ -504,8 +536,20 @@ export async function ensureDungeonEnemyQueue(
           roomId,
           waveNumber,
           bossCreatureId,
-          creature.maxHp,
-          creature.maxHp,
+          Math.max(
+            1,
+            Math.round(
+              creature.maxHp *
+              dungeonScale.hp
+            ),
+          ),
+          Math.max(
+            1,
+            Math.round(
+              creature.maxHp *
+              dungeonScale.hp
+            ),
+          ),
         ],
       );
 
