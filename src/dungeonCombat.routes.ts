@@ -684,22 +684,11 @@ router.get(
           req.session.playerId
         );
 
-      const state =
-        await getDungeonCombatEnemyForPlayer(
-          playerId
-        );
-
-      if (
-        !state ||
-        !state.enemies?.length
-      ) {
-        return res.status(400).json({
-          ok: false,
-          error:
-            "There is no active dungeon combat.",
-        });
-      }
-
+      /*
+       * Potion equipment belongs to the player, not to the current
+       * dungeon enemy/session. Allow this read during rest and room
+       * transitions so the client can keep its Q/E hotbar state in sync.
+       */
       const potions =
         await getEquippedCombatPotions(
           playerId

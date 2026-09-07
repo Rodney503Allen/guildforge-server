@@ -36,6 +36,14 @@ let dungeonPotionCooldownEnds = {
 let dungeonPotionCooldownTimer =
   null;
 
+/*
+ * Equipped potions live on the player, not on a dungeon room/session.
+ * Track the current combat room so we refresh them whenever a new
+ * room becomes active instead of relying only on initial page load.
+ */
+let dungeonPotionLoadedRoomKey =
+  null;
+
 let dungeonPendingSpell =
   null;
 
@@ -1402,6 +1410,32 @@ function renderSelectedDungeonRoomLog() {
 }
 
 
+function getDungeonPotionRoomKey() {
+  const instanceId =
+    Number(
+      dungeonActive?.instanceId ??
+      dungeonActive?.id ??
+      dungeonCombat?.instanceId ??
+      0
+    ) || 0;
+
+  const roomOrder =
+    Number(
+      dungeonEncounter?.roomOrder ??
+      0
+    ) || 0;
+
+  if (
+    !instanceId ||
+    !roomOrder
+  ) {
+    return null;
+  }
+
+  return `${instanceId}:${roomOrder}`;
+}
+
+
 /* =========================================================
    REFRESH
 ========================================================= */
@@ -1458,6 +1492,9 @@ async function refreshDungeonPage() {
     loadDungeonRoomLogs();
 
     if (!dungeonActive) {
+      dungeonPotionLoadedRoomKey =
+        null;
+
       stopDungeonPolling();
       stopSmoothDungeonTimers();
 
@@ -1495,6 +1532,29 @@ async function refreshDungeonPage() {
       phase === "boss"
     ) {
       await refreshDungeonCombat();
+
+      /*
+       * A dungeon combat session is recreated as the expedition
+       * moves into a new room. Equipped potion state is character
+       * state, so explicitly reload it once for each new room.
+       *
+       * This fixes the case where the UI still held null potion
+       * data from the previous rest/non-combat phase even though
+       * the potions remained equipped on the player.
+       */
+      const potionRoomKey =
+        getDungeonPotionRoomKey();
+
+      if (
+        potionRoomKey &&
+        potionRoomKey !==
+          dungeonPotionLoadedRoomKey
+      ) {
+        await loadDungeonCombatPotions();
+
+        dungeonPotionLoadedRoomKey =
+          potionRoomKey;
+      }
     } else {
       dungeonCombat =
         null;
