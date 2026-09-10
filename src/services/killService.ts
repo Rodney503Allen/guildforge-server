@@ -7,6 +7,37 @@ import { advanceQuestObjectives } from "./questService";
 import { generateLootForCreature } from "./lootGenerator";
 import { recordCreatureKill } from "./bestiaryService";
 import { advanceHuntObjective } from "../huntService";
+import { recordWorldEventProgress } from "./worldEventProgressService";
+
+
+/**
+ * Marks a physical event creature spawn as consumed by THIS player only.
+ *
+ * The global active_world_event_spawns row remains ACTIVE so other players
+ * can still encounter the same event creature location.
+ *
+ * Returns true only when this player consumed this spawn for the first time.
+ */
+async function consumeWorldEventCreatureSpawnForPlayer(
+  activeEventId: number,
+  playerId: number,
+  spawnId: number
+): Promise<boolean> {
+  const [result]: any = await db.query(
+    `
+      INSERT IGNORE INTO player_world_event_spawn_interactions (
+        active_event_id,
+        player_id,
+        spawn_id,
+        interacted_at
+      )
+      VALUES (?, ?, ?, NOW())
+    `,
+    [activeEventId, playerId, spawnId]
+  );
+
+  return Number(result?.affectedRows || 0) > 0;
+}
 
 
 async function getGuildRewardMultipliers(playerId: number) {
@@ -76,6 +107,8 @@ const [[row]]: any = await db.query(`
   SELECT
     pc.creature_id,
     pc.affix_id,
+    pc.map_x AS encounter_map_x,
+    pc.map_y AS encounter_map_y,
 
     c.name,
     c.exper,
@@ -118,6 +151,29 @@ const affixXpMult = Number(row.xp_mult ?? 1);
 const affixGoldMult = Number(row.gold_mult ?? 1);
 const affixLootMult = Number(row.loot_mult ?? 1);
 const regionName = row.region_name ? String(row.region_name).trim() : null;
+const encounterMapX = row.encounter_map_x == null ? null : Number(row.encounter_map_x);
+const encounterMapY = row.encounter_map_y == null ? null : Number(row.encounter_map_y);
+
+// Resolve the numeric region ID while the creature/player location is still available.
+// World events use region_id rather than the display region name.
+const [[regionRow]]: any = await db.query(
+  `
+    SELECT wm.region_id
+    FROM players p
+    LEFT JOIN world_map wm
+      ON wm.x = p.map_x
+     AND wm.y = p.map_y
+    WHERE p.id = ?
+    LIMIT 1
+  `,
+  [playerId]
+);
+
+const regionId =
+  regionRow?.region_id == null
+    ? null
+    : Number(regionRow.region_id);
+
 await recordCreatureKill(playerId, creatureId, Number(row.affix_id) || null);
   // BASE RANGE
   const base = (2 + (creatureLevel * 3)) * 2;
@@ -187,6 +243,93 @@ const goldGained = Math.max(
     playerId,
     killProg?.completedPlayerQuestIds ?? []
   );
+
+  /*
+   * World-event progress is intentionally isolated from normal combat
+   * rewards. A world-event failure must never invalidate a legitimate kill.
+   */
+  let worldEventProgress = null;
+  let worldEventResolution = null;
+  let worldEventSpawnConsumed = false;
+  let worldEventSpawnId: number | null = null;
+  let worldEventSpawnActiveEventId: number | null = null;
+
+  // Find the physical event combat spawn that produced this encounter.
+  if (encounterMapX != null && encounterMapY != null) {
+    try {
+      const [[eventSpawnRow]]: any = await db.query(
+        `
+          SELECT
+            aws.id,
+            aws.active_event_id
+          FROM active_world_event_spawns aws
+          JOIN active_world_events awe
+            ON awe.id = aws.active_event_id
+          WHERE aws.x = ?
+            AND aws.y = ?
+            AND aws.target_id = ?
+            AND aws.spawn_type IN ('CREATURE', 'BOSS')
+            AND aws.state = 'ACTIVE'
+            AND aws.removed_at IS NULL
+            AND awe.status = 'ACTIVE'
+          ORDER BY aws.id DESC
+          LIMIT 1
+        `,
+        [encounterMapX, encounterMapY, creatureId]
+      );
+
+      if (eventSpawnRow?.id) {
+        worldEventSpawnId = Number(eventSpawnRow.id);
+        worldEventSpawnActiveEventId =
+          Number(eventSpawnRow.active_event_id);
+      }
+    } catch (err) {
+      console.warn("World event spawn lookup failed", err);
+    }
+  }
+
+  /*
+   * Only a creature that came from a physical ACTIVE world-event spawn may
+   * advance an event KILL track.
+   *
+   * The per-player spawn interaction row is inserted BEFORE progress is
+   * awarded. That makes each physical event creature location worth at most
+   * one kill to this player, while leaving the global spawn ACTIVE for
+   * everybody else.
+   *
+   * Phase 1 no longer resolves here. Completing a personal track only adds
+   * influence. The event timer will choose the highest-influence outcome.
+   */
+  if (
+    regionId &&
+    worldEventSpawnId != null &&
+    worldEventSpawnActiveEventId != null
+  ) {
+    try {
+      worldEventSpawnConsumed =
+        await consumeWorldEventCreatureSpawnForPlayer(
+          worldEventSpawnActiveEventId,
+          playerId,
+          worldEventSpawnId
+        );
+
+      if (worldEventSpawnConsumed) {
+        worldEventProgress =
+          await recordWorldEventProgress({
+            playerId,
+            regionId,
+            type: "KILL",
+            targetId: creatureId,
+            amount: 1
+          });
+      }
+    } catch (err) {
+      console.warn(
+        "World event KILL progress failed",
+        err
+      );
+    }
+  }
 
   let huntProgress = null;
 
@@ -266,6 +409,13 @@ return {
     completedQuests
   },
 
-  huntProgress
+  huntProgress,
+
+  worldEventProgress,
+
+  worldEventSpawn: {
+    id: worldEventSpawnId,
+    consumedByPlayer: worldEventSpawnConsumed
+  }
 };
 }

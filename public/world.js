@@ -1439,10 +1439,54 @@ function updateNavHUD(data) {
 }
 
 function getWorldTileSize() {
+  /*
+   * Read the ACTUAL rendered tile width rather than the old root-level
+   * --tile value. The redesigned map sizes --tile locally on .grid-viewport
+   * so it can fill the center panel while still showing exactly 9 full cells.
+   */
+  const tile =
+    document.querySelector(
+      "#Grid .tile"
+    );
+
+  if (tile) {
+    const width =
+      tile.getBoundingClientRect()
+        .width;
+
+    if (
+      Number.isFinite(width) &&
+      width > 0
+    ) {
+      return width;
+    }
+  }
+
+  const viewport =
+    document.querySelector(
+      ".grid-viewport"
+    );
+
+  if (viewport) {
+    const width =
+      viewport.clientWidth /
+      WORLD_VIEW_SIZE;
+
+    if (
+      Number.isFinite(width) &&
+      width > 0
+    ) {
+      return width;
+    }
+  }
+
   return (
     parseFloat(
-      getComputedStyle(document.documentElement)
-        .getPropertyValue("--tile")
+      getComputedStyle(
+        document.documentElement
+      ).getPropertyValue(
+        "--tile"
+      )
     ) || 58
   );
 }
@@ -1485,26 +1529,141 @@ function setWorldPlayerMotion(dir, moving) {
   sprite.classList.toggle("is-moving", Boolean(moving));
 }
 
+function positionWorldPlayerSprite() {
+  const viewport =
+    document.querySelector(
+      ".grid-viewport"
+    );
+
+  const sprite =
+    document.getElementById(
+      "worldPlayerSprite"
+    );
+
+  const playerTile =
+    document.querySelector(
+      "#Grid .tile.player"
+    );
+
+  if (
+    !viewport ||
+    !sprite ||
+    !playerTile
+  ) {
+    return;
+  }
+
+  /*
+   * Anchor the visible player marker to the ACTUAL logical player tile,
+   * not to an assumed percentage of the viewport.
+   *
+   * This remains correct even when responsive/container-query sizing,
+   * browser zoom, borders, or fractional tile widths change the exact
+   * geometry of the 9x9 camera.
+   */
+  const viewportRect =
+    viewport.getBoundingClientRect();
+
+  const tileRect =
+    playerTile.getBoundingClientRect();
+
+  const centerX =
+    tileRect.left -
+    viewportRect.left +
+    tileRect.width / 2;
+
+  const centerY =
+    tileRect.top -
+    viewportRect.top +
+    tileRect.height / 2;
+
+  sprite.style.position =
+    "absolute";
+
+  sprite.style.left =
+    `${centerX}px`;
+
+  sprite.style.top =
+    `${centerY}px`;
+
+  sprite.style.margin =
+    "0";
+}
+
 function ensureWorldPlayerSprite() {
   const viewport = document.querySelector(".grid-viewport");
   if (!viewport) return null;
 
   let sprite = document.getElementById("worldPlayerSprite");
-  if (sprite) return sprite;
 
-  sprite = document.createElement("div");
-  sprite.id = "worldPlayerSprite";
-  sprite.className = "world-player-sprite";
-  sprite.dataset.direction = "south";
-  sprite.setAttribute("aria-hidden", "true");
-  sprite.innerHTML = `
-    <span class="world-player-sprite__shadow"></span>
-    <span class="world-player-sprite__body">◆</span>
-  `;
+  if (!sprite) {
+    sprite = document.createElement("div");
+    sprite.id = "worldPlayerSprite";
+    sprite.className = "world-player-sprite";
+    sprite.dataset.direction = "south";
+    sprite.setAttribute("aria-hidden", "true");
+    sprite.innerHTML = `
+      <span class="world-player-sprite__shadow"></span>
+      <span class="world-player-sprite__body">◆</span>
+    `;
 
-  viewport.appendChild(sprite);
+    viewport.appendChild(sprite);
+  } else if (sprite.parentElement !== viewport) {
+    viewport.appendChild(sprite);
+  }
+
+  positionWorldPlayerSprite();
+  ensureWorldPlayerResizeObserver();
+
   return sprite;
 }
+
+let worldPlayerResizeObserver = null;
+
+function ensureWorldPlayerResizeObserver() {
+  const viewport =
+    document.querySelector(
+      ".grid-viewport"
+    );
+
+  if (
+    !viewport ||
+    typeof ResizeObserver ===
+      "undefined"
+  ) {
+    return;
+  }
+
+  if (worldPlayerResizeObserver) {
+    worldPlayerResizeObserver.disconnect();
+  }
+
+  worldPlayerResizeObserver =
+    new ResizeObserver(() => {
+      /*
+       * Container-query sizing can settle one paint after the browser
+       * window changes. Re-center after layout has actually updated.
+       */
+      requestAnimationFrame(() => {
+        positionWorldPlayerSprite();
+      });
+    });
+
+  worldPlayerResizeObserver.observe(
+    viewport
+  );
+}
+
+window.addEventListener(
+  "resize",
+  () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        positionWorldPlayerSprite();
+      });
+    });
+  }
+);
 
 function resetWorldGridToBase() {
   const grid = document.getElementById("Grid");
@@ -2129,7 +2288,8 @@ function renderWorldFromData({
   worldObjects,
   resourceNodes,
   huntClues = [],
-  huntTargets = []
+  huntTargets = [],
+  worldEventMapSpawns = []
 }) {
   const tileMap = {};
 
@@ -2197,6 +2357,34 @@ function renderWorldFromData({
   }
 
 
+  const worldEventMap =
+    new Map();
+
+  for (
+    const spawn of
+    worldEventMapSpawns || []
+  ) {
+    const key =
+      `${Number(spawn.x)},${Number(spawn.y)}`;
+
+    /*
+     * Keep an array because multiple event objects are allowed to share a
+     * world tile. It is uncommon, but the renderer should not silently drop
+     * one if event seeding ever creates that situation.
+     */
+    if (!worldEventMap.has(key)) {
+      worldEventMap.set(
+        key,
+        []
+      );
+    }
+
+    worldEventMap
+      .get(key)
+      .push(spawn);
+  }
+
+
   const grid =
     document.getElementById(
       "Grid"
@@ -2238,6 +2426,11 @@ function renderWorldFromData({
         huntTargetMap.get(
           `${x},${y}`
         );
+
+      const worldEventSpawns =
+        worldEventMap.get(
+          `${x},${y}`
+        ) || [];
 
       const {
         replaceSprite,
@@ -2354,6 +2547,40 @@ function renderWorldFromData({
     `
     : "";
 
+      const worldEventMapHtml =
+        worldEventSpawns.length
+          ? `
+            <div
+              class="world-event-map-markers"
+              aria-hidden="true"
+            >
+              ${worldEventSpawns
+                .map(
+                  (spawn) => `
+                    <span
+                      class="world-event-map-marker world-event-map-marker--${escapeHtml(
+                        String(
+                          spawn.spawnType ||
+                          "INTERACT"
+                        ).toLowerCase()
+                      )}"
+                      title="${escapeHtml(
+                        spawn.name ||
+                        "World Event"
+                      )}"
+                    >
+                      ${escapeHtml(
+                        spawn.icon ||
+                        "❗"
+                      )}
+                    </span>
+                  `
+                )
+                .join("")}
+            </div>
+          `
+          : "";
+
       const overlayHtml = overlays.map(src => `
         <img class="tile-overlay" src="${escapeHtml(src)}" alt="">
       `).join("");
@@ -2392,6 +2619,7 @@ function renderWorldFromData({
           ${dungeonHtml}
           ${huntClueHtml}
           ${huntTargetHtml}
+          ${worldEventMapHtml}
         </div>
       `);
     }
@@ -2474,6 +2702,10 @@ async function refreshWorld() {
 
   renderWorldFromData(data);
   updateNavHUD(data);
+
+  if (window.GFWorldEvents?.syncFromCurrentRegion) {
+    await window.GFWorldEvents.syncFromCurrentRegion();
+  }
 
   // NEW
   await loadNearbyObjects();
@@ -3778,6 +4010,15 @@ async function moveWorld(dir) {
 
     if (data.regionData) {
       renderRegionHeader(data.regionData);
+
+      if (
+        window.GFWorldEvents?.setRegion &&
+        data.regionData.region_id != null
+      ) {
+        await window.GFWorldEvents.setRegion(
+          Number(data.regionData.region_id)
+        );
+      }
     }
 
     if (
@@ -3884,6 +4125,10 @@ function renderNearbyObjects(objects) {
         obj.object_type ===
         "hunt_target";
 
+      const isWorldEventInteract =
+        obj.object_type ===
+        "world_event_interact";
+
       const rangeText =
         obj.inRange
           ? `
@@ -3957,6 +4202,24 @@ function renderNearbyObjects(objects) {
     </button>
   `;
 
+} else if (isWorldEventInteract) {
+
+  btn = `
+    <button
+      class="
+        world-interact__btn
+        world-interact__btn--event
+      "
+      onclick="
+        interactWithWorldEvent(
+          ${Number(obj.id)}
+        )
+      "
+    >
+      Investigate
+    </button>
+  `;
+
 } else {
 
         btn = `
@@ -3979,10 +4242,12 @@ function renderNearbyObjects(objects) {
           ? "Hunt Clue"
           : isHuntTarget
             ? "Hunt Quarry"
-            : String(
-                obj.object_type ||
-                "object"
-              );
+            : isWorldEventInteract
+              ? "World Event"
+              : String(
+                  obj.object_type ||
+                  "object"
+                );
 
       return `
         <div
@@ -3994,6 +4259,10 @@ function renderNearbyObjects(objects) {
 
             ${isHuntTarget
               ? "world-interact__row--hunt-target"
+              : ""}
+
+            ${isWorldEventInteract
+              ? "world-interact__row--world-event"
               : ""}
           "
         >
@@ -4027,6 +4296,161 @@ function renderNearbyObjects(objects) {
     })
     .join("");
 }
+
+async function interactWithWorldEvent(
+  spawnId
+) {
+  if (isInCombat()) {
+    return;
+  }
+
+  try {
+    const res =
+      await fetch(
+        `/api/world-event/interact/${Number(spawnId)}`,
+        {
+          method: "POST",
+          credentials: "include"
+        }
+      );
+
+    const data =
+      await res.json();
+
+    if (
+      !res.ok ||
+      data.success === false
+    ) {
+      const error =
+        String(
+          data?.error ||
+          "Unable to interact with the event."
+        );
+
+      if (error === "too_far_away") {
+        showErrorToast(
+          "Move directly onto the event location before interacting.",
+          "World Event"
+        );
+        return;
+      }
+
+      if (
+        error ===
+        "world_event_interaction_not_found"
+      ) {
+        showErrorToast(
+          "That event interaction is no longer available.",
+          "World Event"
+        );
+
+        await loadNearbyObjects();
+        return;
+      }
+
+      if (
+        error ===
+        "world_event_objective_not_active"
+      ) {
+        showErrorToast(
+          "That objective is no longer active.",
+          "World Event"
+        );
+
+        await refreshWorld();
+        return;
+      }
+
+      throw new Error(error);
+    }
+
+    const updates =
+      Array.isArray(
+        data?.worldEventProgress?.updates
+      )
+        ? data.worldEventProgress.updates
+        : [];
+
+    const update =
+      updates[0] || null;
+
+    if (
+      update &&
+      window.GFToast?.show
+    ) {
+      GFToast.show(
+        update.objectiveJustCompleted
+          ? "World Event Objective Complete"
+          : "World Event Progress",
+
+        `${update.currentAmount}/${update.targetAmount} ${String(
+          update.objectiveKey || "Objective"
+        )
+          .replaceAll("_", " ")
+          .replace(/\b\w/g, c => c.toUpperCase())}`,
+
+        {
+          type: "success",
+          durationMs:
+            update.objectiveJustCompleted
+              ? 3600
+              : 2600
+        }
+      );
+    }
+
+    const resolution =
+      data?.worldEventResolution;
+
+    if (
+      resolution?.resolved &&
+      resolution?.outcome &&
+      window.GFToast?.show
+    ) {
+      setTimeout(
+        () => {
+          GFToast.show(
+            resolution.advancedPhase
+              ? "World Event Escalated"
+              : "World Event Resolved",
+
+            resolution.outcome.name ||
+              "The event has changed.",
+
+            {
+              type: "success",
+              durationMs: 4200
+            }
+          );
+        },
+        500
+      );
+    }
+
+    /*
+     * Refresh both the world buffer and Nearby list. A consumed event
+     * interaction should disappear immediately, and a resolved branch may
+     * have changed the active event phase/spawns.
+     */
+    await refreshWorld();
+
+  } catch (err) {
+    console.error(
+      "World Event interaction failed:",
+      err
+    );
+
+    showErrorToast(
+      err?.message ||
+        "Unable to interact with the event.",
+      "World Event"
+    );
+  }
+}
+
+window.interactWithWorldEvent =
+  interactWithWorldEvent;
+
 
 async function investigateHuntClue(
   clueId

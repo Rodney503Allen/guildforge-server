@@ -285,3 +285,188 @@ const weightedCandidates = candidates.map((creature: any) => {
     zoneMax
   };
 }
+
+/**
+ * Create a world-combat encounter for an exact creature selected by
+ * an active world-event spawn.
+ *
+ * Event creatures do not use the normal random candidate pool and do
+ * not roll creature affixes. This keeps the event definition authoritative.
+ *
+ * The eventSpawnId is returned to the client as encounter metadata. The
+ * persistent completion lookup can also use creature_id + map_x/map_y,
+ * so this does not require changing player_creatures yet.
+ */
+export async function spawnSpecificWorldEventEnemy(
+  playerId: number,
+  mapX: number,
+  mapY: number,
+  creatureId: number,
+  eventSpawnId: number
+) {
+  // Never replace an encounter the player already has.
+  const [[existing]]: any = await db.query(
+    `
+      SELECT id
+      FROM player_creatures
+      WHERE player_id = ?
+      LIMIT 1
+    `,
+    [playerId]
+  );
+
+  if (existing) {
+    return null;
+  }
+
+  // Validate that this exact active event spawn still exists on this tile
+  // and still points at the requested creature.
+  const [[eventSpawn]]: any = await db.query(
+    `
+      SELECT
+        aws.id,
+        aws.spawn_type,
+        aws.target_id
+      FROM active_world_event_spawns aws
+      JOIN active_world_events awe
+        ON awe.id = aws.active_event_id
+      WHERE aws.id = ?
+        AND aws.x = ?
+        AND aws.y = ?
+        AND aws.target_id = ?
+        AND aws.state = 'ACTIVE'
+        AND aws.removed_at IS NULL
+        AND awe.status = 'ACTIVE'
+      LIMIT 1
+    `,
+    [
+      eventSpawnId,
+      mapX,
+      mapY,
+      creatureId
+    ]
+  );
+
+  if (!eventSpawn) {
+    return null;
+  }
+
+  const spawnType =
+    String(eventSpawn.spawn_type || "")
+      .toUpperCase();
+
+  if (
+    spawnType !== "CREATURE" &&
+    spawnType !== "BOSS"
+  ) {
+    return null;
+  }
+
+  // Load the exact creature. base_spawn_chance is deliberately irrelevant.
+  const [[creature]]: any = await db.query(
+    `
+      SELECT
+        c.*,
+        ca.img AS archetype_img
+      FROM creatures c
+      LEFT JOIN creature_archetypes ca
+        ON ca.id = c.archetype_id
+      WHERE c.id = ?
+      LIMIT 1
+    `,
+    [creatureId]
+  );
+
+  if (!creature) {
+    console.warn(
+      "World-event spawn references missing creature:",
+      {
+        eventSpawnId,
+        creatureId
+      }
+    );
+
+    return null;
+  }
+
+  const spawnedHp =
+    Math.max(
+      1,
+      Number(creature.maxhp) || 1
+    );
+
+  // Event creatures intentionally receive no random affix.
+  await db.query(
+    `
+      INSERT INTO player_creatures
+        (
+          player_id,
+          creature_id,
+          affix_id,
+          hp,
+          map_x,
+          map_y
+        )
+      VALUES (?, ?, NULL, ?, ?, ?)
+    `,
+    [
+      playerId,
+      creatureId,
+      spawnedHp,
+      mapX,
+      mapY
+    ]
+  );
+
+  await recordCreatureSeen(
+    playerId,
+    creatureId,
+    null
+  );
+
+  return {
+    id: Number(creature.id),
+    name: String(creature.name),
+    baseName: String(creature.name),
+
+    affix: null,
+
+    level: Number(creature.level),
+    description:
+      creature.description ?? null,
+
+    hp: spawnedHp,
+    maxHP: spawnedHp,
+    maxhp: spawnedHp,
+
+    img:
+      creature.archetype_img ||
+      creature.creatureimage ||
+      creature.image ||
+      "/images/default_creature.png",
+
+    attack:
+      Number(creature.attack),
+
+    defense:
+      Number(creature.defense),
+
+    agility:
+      Number(creature.agility || 0),
+
+    crit:
+      Number(creature.crit || 0),
+
+    creatureId:
+      Number(creature.id),
+
+    affixId: null,
+
+    isWorldEventEncounter: true,
+    worldEventSpawnId:
+      Number(eventSpawnId),
+
+    worldEventSpawnType:
+      spawnType
+  };
+}

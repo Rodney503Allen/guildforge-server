@@ -1,7 +1,12 @@
 //world.routes.ts
 import express from "express";
 import { db } from "./db";
-import { trySpawnEnemy } from "./services/spawnService";
+import { trySpawnEnemy, spawnSpecificWorldEventEnemy } from "./services/spawnService";
+import {
+  getWorldEventSpawnAtTile,
+  recordPlayerWorldEventSpawnInteraction
+} from "./services/worldEventSpawnService";
+import { recordWorldEventProgress } from "./services/worldEventProgressService";
 import { applyInteractProgress, applyEnterAreaProgress, applyLocationProgress } from "./services/questService";
 import { maybeSpawnResourceNodeForPlayer } from "./services/gatheringSpawnService";
 import { advanceHuntObjective } from "./huntService";
@@ -264,6 +269,359 @@ async function getHuntTargetsInRange(
 }
 
 
+async function getWorldEventInteractSpawnsInRange(
+  playerId: number,
+  centerX: number,
+  centerY: number,
+  range = 5
+) {
+  const [rows]: any = await db.query(
+    `
+      SELECT
+        aws.id,
+        aws.active_event_id,
+        aws.spawn_definition_id,
+        aws.x,
+        aws.y,
+
+        ws.spawn_key,
+        ws.icon,
+        ws.target_id,
+
+        awe.region_id,
+
+        we.name AS event_name,
+        wep.name AS phase_name,
+
+        weo.description AS objective_description
+
+      FROM active_world_event_spawns aws
+
+      JOIN active_world_events awe
+        ON awe.id = aws.active_event_id
+
+      JOIN world_event_spawns ws
+        ON ws.id = aws.spawn_definition_id
+
+      JOIN world_event_phases wep
+        ON wep.id = awe.phase_id
+       AND wep.id = ws.phase_id
+
+      JOIN world_events we
+        ON we.id = awe.event_id
+
+      LEFT JOIN world_event_objectives weo
+        ON weo.phase_id = wep.id
+       AND UPPER(weo.objective_type) = 'INTERACT'
+       AND weo.target_id = ws.id
+
+      WHERE aws.spawn_type = 'INTERACT'
+        AND aws.state = 'ACTIVE'
+        AND aws.removed_at IS NULL
+        AND awe.status = 'ACTIVE'
+        AND awe.ends_at > NOW()
+
+        /* This physical spawn is reusable globally, but only once per player. */
+        AND NOT EXISTS (
+          SELECT 1
+          FROM player_world_event_spawn_interactions pwesi
+          WHERE pwesi.active_event_id = aws.active_event_id
+            AND pwesi.player_id = ?
+            AND pwesi.spawn_id = aws.id
+        )
+
+        /*
+         * Once the player commits to an outcome in THIS phase, all remaining
+         * contribution interactables disappear for that player. A later phase
+         * is unaffected because the chosen outcome belongs to the old phase.
+         */
+        AND NOT EXISTS (
+          SELECT 1
+          FROM player_world_event_state pwes
+          JOIN world_event_outcomes chosen_outcome
+            ON chosen_outcome.id = pwes.chosen_outcome_id
+          WHERE pwes.active_event_id = aws.active_event_id
+            AND pwes.player_id = ?
+            AND pwes.chosen_outcome_id IS NOT NULL
+            AND chosen_outcome.phase_id = awe.phase_id
+        )
+
+        AND aws.x BETWEEN ? AND ?
+        AND aws.y BETWEEN ? AND ?
+
+      ORDER BY aws.id ASC
+    `,
+    [
+      playerId,
+      playerId,
+      centerX - range,
+      centerX + range,
+      centerY - range,
+      centerY + range
+    ]
+  );
+
+  return (rows || []).map((row: any) => {
+    const x = Number(row.x);
+    const y = Number(row.y);
+
+    const distance =
+      Math.abs(centerX - x) +
+      Math.abs(centerY - y);
+
+    const spawnKey =
+      String(row.spawn_key || "");
+
+    const name =
+      spawnKey === "unstable_sigil_fragment"
+        ? "Unstable Sigil Fragment"
+        : spawnKey === "resonance_trace"
+          ? "Resonance Trace"
+          : "World Event Discovery";
+
+    return {
+      id: Number(row.id),
+      worldEventSpawnId: Number(row.id),
+      spawnDefinitionId: Number(row.spawn_definition_id),
+      activeEventId: Number(row.active_event_id),
+
+      name,
+      object_type: "world_event_interact",
+
+      eventName: String(row.event_name || "World Event"),
+      phaseName: String(row.phase_name || ""),
+      description: row.objective_description ?? null,
+
+      regionId: Number(row.region_id),
+
+      x,
+      y,
+
+      interaction_radius: 0,
+      distance,
+      inRange: distance === 0,
+
+      icon:
+        String(
+          row.icon ||
+          (
+            spawnKey === "unstable_sigil_fragment"
+              ? "💠"
+              : spawnKey === "resonance_trace"
+                ? "🌀"
+                : "❗"
+          )
+        ),
+
+      spawnKey
+    };
+  });
+}
+
+
+/*
+ * World-event MAP markers.
+ *
+ * This is intentionally separate from getWorldEventInteractSpawnsInRange().
+ * The interact helper feeds the Nearby panel and must contain only things the
+ * player can click. This helper feeds the tile renderer and includes event
+ * creatures/bosses as well as interactables.
+ */
+async function getWorldEventMapSpawnsInRange(
+  playerId: number,
+  centerX: number,
+  centerY: number,
+  range = 5
+) {
+  const [rows]: any = await db.query(
+    `
+      SELECT
+        aws.id,
+        aws.active_event_id,
+        aws.spawn_definition_id,
+        aws.spawn_type,
+        aws.x,
+        aws.y,
+
+        ws.spawn_key,
+        ws.icon,
+        ws.target_id,
+
+        awe.region_id,
+
+        we.name AS event_name,
+        wep.name AS phase_name,
+
+        c.name AS creature_name
+
+      FROM active_world_event_spawns aws
+
+      JOIN active_world_events awe
+        ON awe.id = aws.active_event_id
+
+      JOIN world_event_spawns ws
+        ON ws.id = aws.spawn_definition_id
+
+      JOIN world_event_phases wep
+        ON wep.id = awe.phase_id
+       AND wep.id = ws.phase_id
+
+      JOIN world_events we
+        ON we.id = awe.event_id
+
+      LEFT JOIN creatures c
+        ON c.id = ws.target_id
+       AND UPPER(aws.spawn_type) IN ('CREATURE', 'BOSS')
+
+      WHERE aws.state = 'ACTIVE'
+        AND aws.removed_at IS NULL
+        AND awe.status = 'ACTIVE'
+        AND awe.ends_at > NOW()
+
+        /*
+         * INTERACT spawns disappear for this player after that exact physical
+         * spawn has been used. Creature/Boss markers remain globally visible.
+         */
+        AND (
+          UPPER(aws.spawn_type) <> 'INTERACT'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM player_world_event_spawn_interactions pwesi
+            WHERE pwesi.active_event_id = aws.active_event_id
+              AND pwesi.player_id = ?
+              AND pwesi.spawn_id = aws.id
+          )
+        )
+
+        /*
+         * Once this player commits during the current phase, contribution
+         * markers disappear for them. This does not affect later phases.
+         */
+        AND NOT EXISTS (
+          SELECT 1
+          FROM player_world_event_state pwes
+          WHERE pwes.active_event_id = aws.active_event_id
+            AND pwes.player_id = ?
+            AND pwes.phase_id = awe.phase_id
+            AND (
+              pwes.chosen_outcome_id IS NOT NULL
+              OR pwes.committed_at IS NOT NULL
+            )
+        )
+
+        AND aws.x BETWEEN ? AND ?
+        AND aws.y BETWEEN ? AND ?
+
+      ORDER BY aws.id ASC
+    `,
+    [
+      playerId,
+      playerId,
+      centerX - range,
+      centerX + range,
+      centerY - range,
+      centerY + range
+    ]
+  );
+
+  return (rows || []).map((row: any) => {
+    const x = Number(row.x);
+    const y = Number(row.y);
+
+    const spawnType =
+      String(row.spawn_type || "")
+        .trim()
+        .toUpperCase();
+
+    const spawnKey =
+      String(row.spawn_key || "");
+
+    const fallbackName =
+      spawnKey
+        .split("_")
+        .filter(Boolean)
+        .map(
+          (part: string) =>
+            part.charAt(0).toUpperCase() +
+            part.slice(1)
+        )
+        .join(" ") ||
+      "World Event";
+
+    const name =
+      spawnType === "CREATURE" ||
+      spawnType === "BOSS"
+        ? String(
+            row.creature_name ||
+            fallbackName
+          )
+        : fallbackName;
+
+    const fallbackIcon =
+      spawnType === "BOSS"
+        ? "👹"
+        : spawnType === "CREATURE"
+          ? "🐗"
+          : spawnKey === "unstable_sigil_fragment"
+            ? "💠"
+            : spawnKey === "resonance_trace"
+              ? "🌀"
+              : "❗";
+
+    return {
+      id: Number(row.id),
+      worldEventSpawnId: Number(row.id),
+      spawnDefinitionId:
+        Number(row.spawn_definition_id),
+      activeEventId:
+        Number(row.active_event_id),
+
+      name,
+      spawnKey,
+      spawnType,
+
+      object_type:
+        spawnType === "CREATURE" ||
+        spawnType === "BOSS"
+          ? "world_event_creature"
+          : "world_event_interact",
+
+      icon:
+        String(
+          row.icon ||
+          fallbackIcon
+        ),
+
+      eventName:
+        String(
+          row.event_name ||
+          "World Event"
+        ),
+
+      phaseName:
+        String(
+          row.phase_name ||
+          ""
+        ),
+
+      regionId:
+        Number(row.region_id),
+
+      x,
+      y,
+
+      distance:
+        Math.abs(centerX - x) +
+        Math.abs(centerY - y),
+
+      inRange:
+        x === centerX &&
+        y === centerY
+    };
+  });
+}
+
+
 router.get("/world/current-region", async (req, res) => {
   const pid = (req.session as any).playerId;
   if (!pid) return res.status(401).json({ error: "Not logged in" });
@@ -442,6 +800,22 @@ router.get("/world", async (req, res) => {
     5
   );
 
+  const worldEventInteractSpawns =
+    await getWorldEventInteractSpawnsInRange(
+      Number(pid),
+      Number(player.map_x),
+      Number(player.map_y),
+      5
+    );
+
+  const worldEventMapSpawns =
+    await getWorldEventMapSpawnsInRange(
+      Number(pid),
+      Number(player.map_x),
+      Number(player.map_y),
+      5
+    );
+
   // Guild ownership
   const [guilds]: any = await db.query("SELECT id,name FROM guilds");
   const guildMap: any = {};
@@ -477,54 +851,173 @@ res.send(`
 </head>
 
 <body data-gf-terrain="${currentTerrain}">
-  <div class="world-frame">
-    <span class="frame-border main" aria-hidden="true"></span>
+  <main class="world-screen">
 
-    <!-- TOP: Zone Name -->
-    <header class="world-head">
-      <div class="world-head-inner">
-        <div class="world-head-copy">
-          <div id="world-title" class="world-title">World Map</div>
+    <!-- LEFT RAIL: player-facing / persistent utility information -->
+    <aside
+      class="world-rail world-rail--left frame-host"
+      aria-label="Adventurer information"
+    >
+      <span class="frame-border panel world-rail-frame" aria-hidden="true"></span>
 
-          <div class="coords">
-            Position: (${player.map_x}, ${player.map_y})
+
+      <section class="field-actions-card world-rail-card">
+        <div class="field-actions-grid field-actions-grid--rail">
+
+          <button
+            id="rest-btn"
+            class="field-action frame-host"
+            type="button"
+            onclick="openRest()"
+          >
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <span class="field-action__icon" aria-hidden="true">
+              🔥
+            </span>
+
+            <span class="field-action__copy">
+              <strong>Rest</strong>
+              <small>Recover health and spirit</small>
+            </span>
+
+            <span class="field-action__arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+
+          <button
+            id="partyQuickBtn"
+            class="field-action frame-host"
+            type="button"
+            onclick="openPartyQuickView()"
+          >
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <span class="field-action__icon" aria-hidden="true">
+              ⚔
+            </span>
+
+            <span class="field-action__copy">
+              <strong>Party</strong>
+              <small id="partyQuickStatus">
+                Checking company...
+              </small>
+            </span>
+
+            <span class="field-action__arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+
+        </div>
+      </section>
+
+      <!-- Tracked Quest -->
+      <aside
+        id="questTracker"
+        class="qtracker qtracker--sidebar world-rail-card frame-host hidden"
+        aria-label="Tracked quest"
+      >
+        <span class="frame-border sub" aria-hidden="true"></span>
+
+        <div class="qtrackerHead">
+          <div class="qtrackerTitle" id="qtTitle">
+            Tracking
+          </div>
+
+          <div class="qtrackerBtns">
+            <button
+              id="qtMinBtn"
+              class="qtrackerBtn"
+              type="button"
+              title="Minimize"
+              aria-label="Minimize quest tracker"
+            >
+              —
+            </button>
           </div>
         </div>
 
-      <div class="world-actions">
-        <button
-          id="enter-town-btn"
-          class="world-action-btn"
-          type="button"
-          hidden
-          onclick="enterTown()"
-        >
-          Enter Town
-        </button>
+        <div class="qtrackerBody" id="qtBody">—</div>
+      </aside>
 
-        <button
-          id="enter-dungeon-btn"
-          class="world-action-btn"
-          type="button"
-          hidden
-          onclick="enterDungeonFromWorld()"
-        >
-          Enter Dungeon
-        </button>
-      </div>
-      </div>
+      <section class="world-rail-card world-state-card frame-host">
+        <span class="frame-border sub" aria-hidden="true"></span>
 
-      <span class="world-head-divider" aria-hidden="true"></span>
-    </header>
+        <div class="world-rail-kicker">
+          World State
+        </div>
 
-    <!-- Responsive World Layout -->
-    <div class="world-layout">
-      <!-- LEFT: Tile Map -->
-      <section class="world-map-panel" aria-label="World map">
-        <span class="frame-border panel" aria-hidden="true"></span>
+        <div class="world-state-card__body">
+          <div class="world-state-card__row">
+            <span>Region Control</span>
+            <strong>Unclaimed</strong>
+          </div>
+
+          <div class="world-state-card__row">
+            <span>Sanctuary Standing</span>
+            <strong>Neutral</strong>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+
+    <!-- CENTER: the world itself -->
+    <section
+      class="world-center"
+      aria-label="World map"
+    >
+      <header class="world-head world-head--center">
+        <div class="world-head-copy">
+          <div class="world-center-kicker">
+            Current Region
+          </div>
+
+          <div
+            id="world-title"
+            class="world-title world-title--center"
+          >
+            World Map
+          </div>
+
+          <div class="world-center-meta">
+            <span class="coords">
+              Position: (${player.map_x}, ${player.map_y})
+            </span>
+          </div>
+        </div>
+
+        <div class="world-actions">
+          <button
+            id="enter-town-btn"
+            class="world-action-btn"
+            type="button"
+            hidden
+            onclick="enterTown()"
+          >
+            Enter Town
+          </button>
+
+          <button
+            id="enter-dungeon-btn"
+            class="world-action-btn"
+            type="button"
+            hidden
+            onclick="enterDungeonFromWorld()"
+          >
+            Enter Dungeon
+          </button>
+        </div>
+      </header>
+
+      <section class="world-map-panel frame-host">
+        <span class="frame-border main" aria-hidden="true"></span>
 
         <div class="map-stage">
-          <div class="map-wrapper">            <div class="grid-viewport">
+          <div class="map-wrapper">
+            <div class="grid-viewport">
               <div class="grid" id="Grid">
               ${
                 Array.from({ length: 11 }).map((_, r) => {
@@ -587,219 +1080,200 @@ res.send(`
         </div>
       </section>
 
-      <!-- RIGHT: Always-visible World Information -->
-      <aside
-        class="world-sidebar"
-        id="nav-hud"
-        aria-label="Nearby world information"
+      <div class="world-center-footer">
+        <span>
+          Move with WASD
+        </span>
+
+        <span aria-hidden="true">◆</span>
+
+        <span>
+          Explore • Gather • Hunt
+        </span>
+      </div>
+    </section>
+
+
+    <!-- RIGHT RAIL: things happening around the player -->
+    <aside
+      class="world-rail world-rail--right frame-host"
+      id="nav-hud"
+      aria-label="Nearby world information"
+    >
+      <span class="frame-border panel world-rail-frame" aria-hidden="true"></span>
+
+      <!-- Active Regional World Event -->
+      <section
+        id="worldEventPanel"
+        class="world-event-panel world-rail-card frame-host"
+        hidden
+        aria-live="polite"
       >
-<section class="field-actions-card world-sidebar-card">
-  <div class="field-actions-grid">
+        <span class="frame-border sub" aria-hidden="true"></span>
 
-    <button
-      id="rest-btn"
-      class="field-action frame-host"
-      type="button"
-      onclick="openRest()"
-    >
-      <span class="frame-border sub" aria-hidden="true"></span>
+        <div class="world-event-panel__header">
+          <div class="world-event-panel__heading">
+            <div class="world-event-panel__kicker">
+              Regional Event
+            </div>
 
-      <span class="field-action__icon" aria-hidden="true">
-        🔥
-      </span>
+            <div
+              id="worldEventName"
+              class="world-event-panel__name"
+            >
+              World Event
+            </div>
+          </div>
 
-      <span class="field-action__copy">
-        <strong>Rest</strong>
-        <small>Recover health and spirit</small>
-      </span>
+          <div
+            id="worldEventTimer"
+            class="world-event-panel__timer"
+            aria-label="World event time remaining"
+          >
+            --:--
+          </div>
+        </div>
 
-      <span class="field-action__arrow" aria-hidden="true">
-        ›
-      </span>
-    </button>
+        <div
+          id="worldEventPhase"
+          class="world-event-panel__phase"
+        ></div>
 
+        <div
+          id="worldEventDescription"
+          class="world-event-panel__description"
+        ></div>
 
-    <button
-      id="partyQuickBtn"
-      class="field-action frame-host"
-      type="button"
-      onclick="openPartyQuickView()"
-    >
-      <span class="frame-border sub" aria-hidden="true"></span>
+        <div
+          id="worldEventObjectives"
+          class="world-event-panel__objectives"
+        ></div>
 
-      <span class="field-action__icon" aria-hidden="true">
-        ⚔
-      </span>
-
-      <span class="field-action__copy">
-        <strong>Party</strong>
-
-        <small id="partyQuickStatus">
-          Checking company...
-        </small>
-      </span>
-
-      <span class="field-action__arrow" aria-hidden="true">
-        ›
-      </span>
-    </button>
-
-  </div>
-</section>
-
-        <!-- Field Actions -->
-
-        <!-- Current Resource -->
-        <!--
-          This panel is populated dynamically. Do not add a frame-border
-          child unless the rendering script preserves existing children.
-        -->
-        <section
-          id="currentResourcePanel"
-          class="resource-panel world-sidebar-card"
+        <div
+          id="worldEventState"
+          class="world-event-panel__state"
           hidden
-        ></section>
+        ></div>
+      </section>
 
-        <!-- Nearby -->
-<!-- Nearby -->
-<section class="nav-card nearby-card world-sidebar-card">
-  <span class="frame-border sub" aria-hidden="true"></span>
+      <!-- Current Resource -->
+      <section
+        id="currentResourcePanel"
+        class="resource-panel world-rail-card"
+        hidden
+      ></section>
 
-  <div class="nav-top">
-    <div class="nav-title">
-      <span class="nav-icon" aria-hidden="true">✦</span>
-      <span class="nav-label">Nearby</span>
-    </div>
+      <!-- Nearby -->
+      <section class="nav-card nearby-card world-rail-card frame-host">
+        <span class="frame-border sub" aria-hidden="true"></span>
 
-    <span class="nav-badge" id="nav-nearby-count">0</span>
-  </div>
+        <div class="nav-top">
+          <div class="nav-title">
+            <span class="nav-icon" aria-hidden="true">✦</span>
+            <span class="nav-label">Nearby</span>
+          </div>
 
-  <!-- Permanent navigation entries -->
-  <div class="nearby-destinations">
-    <div class="nearby-destination">
-      <span
-        class="nearby-destination__icon"
-        aria-hidden="true"
-      >
-        🏠
-      </span>
-
-      <div class="nearby-destination__details">
-        <div class="nearby-destination__label">
-          Nearest Haven
+          <span class="nav-badge" id="nav-nearby-count">0</span>
         </div>
 
-        <div
-          class="nearby-destination__name"
-          id="nav-haven-name"
-        >
-          —
+        <div class="nearby-destinations">
+          <div class="nearby-destination">
+            <span
+              class="nearby-destination__icon"
+              aria-hidden="true"
+            >
+              🏠
+            </span>
+
+            <div class="nearby-destination__details">
+              <div class="nearby-destination__label">
+                Nearest Haven
+              </div>
+
+              <div
+                class="nearby-destination__name"
+                id="nav-haven-name"
+              >
+                —
+              </div>
+            </div>
+
+            <div class="nearby-destination__location">
+              <span
+                class="nearby-destination__arrow"
+                id="nav-haven-arrow"
+                aria-hidden="true"
+              >
+                •
+              </span>
+
+              <span
+                class="nearby-destination__distance"
+                id="nav-haven-dist"
+              >
+                — tiles
+              </span>
+            </div>
+          </div>
+
+          <div class="nearby-destination">
+            <span
+              class="nearby-destination__icon"
+              aria-hidden="true"
+            >
+              🕳
+            </span>
+
+            <div class="nearby-destination__details">
+              <div class="nearby-destination__label">
+                Nearest Dungeon
+              </div>
+
+              <div
+                class="nearby-destination__name"
+                id="nav-dungeon-name"
+              >
+                —
+              </div>
+            </div>
+
+            <div class="nearby-destination__location">
+              <span
+                class="nearby-destination__arrow"
+                id="nav-dungeon-arrow"
+                aria-hidden="true"
+              >
+                •
+              </span>
+
+              <span
+                class="nearby-destination__distance"
+                id="nav-dungeon-dist"
+              >
+                —
+              </span>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div class="nearby-destination__location">
-        <span
-          class="nearby-destination__arrow"
-          id="nav-haven-arrow"
-          aria-hidden="true"
-        >
-          •
-        </span>
+        <div class="nearby-interactions">
+          <div class="nearby-interactions__heading">
+            Interactions
+          </div>
 
-        <span
-          class="nearby-destination__distance"
-          id="nav-haven-dist"
-        >
-          — tiles
-        </span>
-      </div>
-    </div>
-
-    <div class="nearby-destination">
-      <span
-        class="nearby-destination__icon"
-        aria-hidden="true"
-      >
-        🕳
-      </span>
-
-      <div class="nearby-destination__details">
-        <div class="nearby-destination__label">
-          Nearest Dungeon
+          <div
+            class="world-interact__list"
+            id="worldInteractList"
+          >
+            <div class="world-interact__empty">
+              Nothing to interact with nearby.
+            </div>
+          </div>
         </div>
+      </section>
+    </aside>
 
-        <div
-          class="nearby-destination__name"
-          id="nav-dungeon-name"
-        >
-          —
-        </div>
-      </div>
-
-      <div class="nearby-destination__location">
-        <span
-          class="nearby-destination__arrow"
-          id="nav-dungeon-arrow"
-          aria-hidden="true"
-        >
-          •
-        </span>
-
-        <span
-          class="nearby-destination__distance"
-          id="nav-dungeon-dist"
-        >
-          —
-        </span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Dynamic nearby objects -->
-  <div class="nearby-interactions">
-    <div class="nearby-interactions__heading">
-      Interactions
-    </div>
-
-    <div
-      class="world-interact__list"
-      id="worldInteractList"
-    >
-      <div class="world-interact__empty">
-        Nothing to interact with nearby.
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Tracked Quest -->
-<aside
-  id="questTracker"
-  class="qtracker qtracker--sidebar world-sidebar-card frame-host hidden"
-  aria-label="Tracked quest"
->
-  <span class="frame-border sub" aria-hidden="true"></span>
-
-  <div class="qtrackerHead">
-    <div class="qtrackerTitle" id="qtTitle">
-      Tracking
-    </div>
-
-    <div class="qtrackerBtns">
-      <button
-        id="qtMinBtn"
-        class="qtrackerBtn"
-        type="button"
-        title="Minimize"
-        aria-label="Minimize quest tracker"
-      >
-        —
-      </button>
-    </div>
-  </div>
-
-  <div class="qtrackerBody" id="qtBody">—</div>
-</aside>
+  </main>
 
   <!-- Keep these outside the world frame -->
   <div class="world-right">
@@ -1383,12 +1857,19 @@ res.send(`
 
   window.__HUNT_TARGETS__ =
     ${JSON.stringify(huntTargets)};
+
+  window.__WORLD_EVENT_INTERACTS__ =
+    ${JSON.stringify(worldEventInteractSpawns)};
+
+  window.__WORLD_EVENT_MAP_SPAWNS__ =
+    ${JSON.stringify(worldEventMapSpawns)};
 </script>
   <script src="/ui/toast.js"></script>
   <script src="/statpanel.js"></script>
   <script src="/world.page.js" defer></script>
   <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
+  <script src="/world-events.js"></script>
   <script src="/world.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/hunt-ready-check.js"></script>
@@ -1969,7 +2450,9 @@ const spawnedResourceNode =
 
 const [
   resourceNodes,
-  huntTargets
+  huntTargets,
+  worldEventInteractSpawns,
+  worldEventMapSpawns
 ] = await Promise.all([
   getResourceNodesInRange(
     pid,
@@ -1979,6 +2462,20 @@ const [
   ),
 
   getHuntTargetsInRange(
+    Number(pid),
+    newX,
+    newY,
+    5
+  ),
+
+  getWorldEventInteractSpawnsInRange(
+    Number(pid),
+    newX,
+    newY,
+    5
+  ),
+
+  getWorldEventMapSpawnsInRange(
     Number(pid),
     newX,
     newY,
@@ -2043,10 +2540,72 @@ stepsSince += 1;
 
 let enemy: any = null;
 
-if (stepsSince >= ENCOUNTER_GAP_STEPS) {
+/*
+ * WORLD EVENT ENCOUNTERS
+ *
+ * Event creatures take priority over ordinary random encounters.
+ * If the player steps directly onto an ACTIVE CREATURE/BOSS event
+ * spawn, create an encounter using that spawn's exact target_id.
+ *
+ * INTERACT event spawns are intentionally ignored here; they will
+ * be exposed through the nearby/interact flow separately.
+ */
+const eventSpawn =
+  await getWorldEventSpawnAtTile(
+    Number(pid),
+    newX,
+    newY
+  );
+
+if (
+  eventSpawn &&
+  (
+    eventSpawn.spawnType === "CREATURE" ||
+    eventSpawn.spawnType === "BOSS"
+  ) &&
+  eventSpawn.targetId != null
+) {
+  enemy =
+    await spawnSpecificWorldEventEnemy(
+      Number(pid),
+      newX,
+      newY,
+      Number(eventSpawn.targetId),
+      Number(eventSpawn.id)
+    );
+
+  if (enemy) {
+    stepsSince = 0;
+  }
+}
+
+/*
+ * Only roll a normal world encounter when there is no active
+ * event combat spawn on this tile.
+ */
+if (
+  !enemy &&
+  !(
+    eventSpawn &&
+    (
+      eventSpawn.spawnType === "CREATURE" ||
+      eventSpawn.spawnType === "BOSS"
+    )
+  ) &&
+  stepsSince >= ENCOUNTER_GAP_STEPS
+) {
   if (Math.random() < ENCOUNTER_CHANCE) {
-    enemy = await trySpawnEnemy(pid, newX, newY, tile.terrain);
-    if (enemy) stepsSince = 0;
+    enemy =
+      await trySpawnEnemy(
+        pid,
+        newX,
+        newY,
+        tile.terrain
+      );
+
+    if (enemy) {
+      stepsSince = 0;
+    }
   }
 }
 
@@ -2331,18 +2890,22 @@ world: {
   resourceNodes,
 
   huntClues: nearbyHuntClues,
-  huntTargets
+  huntTargets,
+  worldEventInteractSpawns,
+  worldEventMapSpawns
 },
 
     // Bundled — replaces separate /api/world/nearby-objects fetch
 nearbyObjects: [
   ...nearbyObjects,
   ...nearbyHuntClues,
-  ...huntTargets
+  ...huntTargets,
+  ...worldEventInteractSpawns
 ],
 
     // Bundled — replaces separate /world/current-region fetch
     regionData: tile.region_id ? {
+      region_id: Number(tile.region_id),
       region_name: regionName ?? "Unknown Region",
       level_min: levelMin,
       level_max: levelMax,
@@ -2648,6 +3211,14 @@ router.get("/api/world/nearby-objects", async (req, res) => {
     5
   );
 
+    const worldEventInteractSpawns =
+      await getWorldEventInteractSpawnsInRange(
+        Number(pid),
+        px,
+        py,
+        5
+      );
+
 
     /* =========================================
        RESPONSE
@@ -2664,7 +3235,8 @@ router.get("/api/world/nearby-objects", async (req, res) => {
       objects: [
       ...objects,
       ...huntClues,
-      ...huntTargets
+      ...huntTargets,
+      ...worldEventInteractSpawns
     ]
     });
 
@@ -2803,6 +3375,22 @@ router.get("/world/partial", async (req, res) => {
 
 const huntTargets =
   await getHuntTargetsInRange(
+    Number(pid),
+    px,
+    py,
+    5
+  );
+
+const worldEventInteractSpawns =
+  await getWorldEventInteractSpawnsInRange(
+    Number(pid),
+    px,
+    py,
+    5
+  );
+
+const worldEventMapSpawns =
+  await getWorldEventMapSpawnsInRange(
     Number(pid),
     px,
     py,
@@ -2953,9 +3541,188 @@ const huntTargets =
     worldObjects,
     resourceNodes,
     huntClues,
-    huntTargets
+    huntTargets,
+    worldEventInteractSpawns,
+    worldEventMapSpawns
   });
 });
+
+
+router.post("/api/world-event/interact/:spawnId", async (req, res) => {
+  try {
+    const pid =
+      (req.session as any)?.playerId;
+
+    if (!pid) {
+      return res.status(401).json({
+        error: "not_logged_in"
+      });
+    }
+
+    const spawnId =
+      Number(req.params.spawnId);
+
+    if (
+      !Number.isInteger(spawnId) ||
+      spawnId <= 0
+    ) {
+      return res.status(400).json({
+        error: "invalid_spawn_id"
+      });
+    }
+
+    const [[player]]: any =
+      await db.query(
+        `
+          SELECT
+            map_x,
+            map_y
+          FROM players
+          WHERE id = ?
+          LIMIT 1
+        `,
+        [pid]
+      );
+
+    if (!player) {
+      return res.status(404).json({
+        error: "player_not_found"
+      });
+    }
+
+    const [[spawn]]: any =
+      await db.query(
+        `
+          SELECT
+            aws.id,
+            aws.active_event_id,
+            aws.spawn_definition_id,
+            aws.x,
+            aws.y,
+            aws.spawn_type,
+
+            awe.region_id,
+
+            ws.spawn_key
+
+          FROM active_world_event_spawns aws
+
+          JOIN active_world_events awe
+            ON awe.id = aws.active_event_id
+
+          JOIN world_event_spawns ws
+            ON ws.id = aws.spawn_definition_id
+
+          WHERE aws.id = ?
+            AND aws.spawn_type = 'INTERACT'
+            AND aws.state = 'ACTIVE'
+            AND aws.removed_at IS NULL
+
+            AND awe.status = 'ACTIVE'
+            AND awe.ends_at > NOW()
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM player_world_event_spawn_interactions pwesi
+              WHERE pwesi.active_event_id = aws.active_event_id
+                AND pwesi.player_id = ?
+                AND pwesi.spawn_id = aws.id
+            )
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM player_world_event_state pwes
+              JOIN world_event_outcomes chosen_outcome
+                ON chosen_outcome.id = pwes.chosen_outcome_id
+              WHERE pwes.active_event_id = aws.active_event_id
+                AND pwes.player_id = ?
+                AND pwes.chosen_outcome_id IS NOT NULL
+                AND chosen_outcome.phase_id = awe.phase_id
+            )
+
+          LIMIT 1
+        `,
+        [spawnId, Number(pid), Number(pid)]
+      );
+
+    if (!spawn) {
+      return res.status(404).json({
+        error: "world_event_interaction_not_found"
+      });
+    }
+
+    const distance =
+      Math.abs(
+        Number(player.map_x) -
+        Number(spawn.x)
+      ) +
+      Math.abs(
+        Number(player.map_y) -
+        Number(spawn.y)
+      );
+
+    if (distance !== 0) {
+      return res.status(400).json({
+        error: "too_far_away"
+      });
+    }
+
+    /*
+     * Each INTERACT spawn definition is used as the objective target_id.
+     * This keeps Reinforce the Seal and Follow the Resonance independent
+     * instead of allowing one interaction to advance both objectives.
+     */
+    const progress =
+      await recordWorldEventProgress({
+        playerId: Number(pid),
+        regionId: Number(spawn.region_id),
+        type: "INTERACT",
+        targetId: Number(spawn.spawn_definition_id),
+        amount: 1
+      });
+
+    if (!progress.matched) {
+      return res.status(409).json({
+        error: "world_event_objective_not_active"
+      });
+    }
+
+    /*
+     * Consume this spawn for THIS PLAYER only. The physical spawn remains
+     * ACTIVE globally so other players can still use the same event object.
+     */
+    const completed =
+      await recordPlayerWorldEventSpawnInteraction(
+        Number(spawn.active_event_id),
+        Number(pid),
+        Number(spawn.id)
+      );
+
+
+    return res.json({
+      success: true,
+
+      interaction: {
+        spawnId: Number(spawn.id),
+        spawnKey: String(spawn.spawn_key),
+        completed
+      },
+
+      worldEventProgress: progress
+    });
+
+  } catch (err) {
+    console.error(
+      "POST /api/world-event/interact/:spawnId ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      error: "server_error"
+    });
+  }
+});
+
 
 router.post("/api/world/interact/:objectId", async (req, res) => {
   try {

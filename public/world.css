@@ -394,6 +394,21 @@ body::before{
 .castle   { background:url("/images/map_tiles/castle.webp") center/cover; }
 .desert   { background:url("/images/map_tiles/desert.webp") center/cover; }
 .road     { background:url("/images/map_tiles/road.webp") center/cover; }
+.snow {
+  background: url("/images/map_tiles/snow.webp") center/cover;
+}
+
+.snow_forest {
+  background: url("/images/map_tiles/snow_forest.webp") center/cover;
+}
+
+.snow_mountain {
+  background: url("/images/map_tiles/snow_mountain.webp") center/cover;
+}
+
+.ice {
+  background: url("/images/map_tiles/ice.webp") center/cover;
+}
 
 /* Move buttons */
 .move-btn{
@@ -4621,4 +4636,2382 @@ body::before{
   background-position: center;
   background-repeat: no-repeat;
   background-color: #168fa1;
+}
+
+
+/* =========================================================
+   WORLD EVENT SIDEBAR
+========================================================= */
+
+.world-event-panel{
+  position:relative;
+  isolation:isolate;
+  padding:14px;
+  overflow:visible;
+  border:0;
+  background:
+    radial-gradient(420px 180px at 16% 0%, rgba(122,30,30,.16), transparent 62%),
+    radial-gradient(360px 160px at 88% 0%, rgba(200,163,75,.08), transparent 66%),
+    linear-gradient(180deg, rgba(255,255,255,.026), rgba(0,0,0,.20)),
+    rgba(0,0,0,.24);
+  box-shadow:
+    0 14px 34px rgba(0,0,0,.34),
+    inset 0 1px 0 rgba(255,255,255,.045);
+}
+
+.world-event-panel[hidden]{
+  display:none !important;
+}
+
+.world-event-panel__header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.world-event-panel__heading{
+  min-width:0;
+}
+
+.world-event-panel__kicker{
+  color:rgba(200,163,75,.84);
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:1.25px;
+  text-transform:uppercase;
+}
+
+.world-event-panel__name{
+  margin-top:4px;
+  color:var(--bone);
+  font-family:Cinzel, Georgia, serif;
+  font-size:15px;
+  font-weight:800;
+  letter-spacing:.55px;
+  line-height:1.25;
+  text-transform:uppercase;
+}
+
+.world-event-panel__timer{
+  flex-shrink:0;
+  min-width:58px;
+  padding:6px 8px;
+  border:1px solid rgba(200,163,75,.22);
+  background:rgba(0,0,0,.28);
+  color:#e6ca78;
+  font-size:12px;
+  font-weight:900;
+  font-variant-numeric:tabular-nums;
+  text-align:center;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+}
+
+.world-event-panel__phase{
+  margin-top:8px;
+  color:rgba(215,219,226,.76);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.55px;
+  text-transform:uppercase;
+}
+
+.world-event-panel__description{
+  margin-top:9px;
+  color:rgba(215,219,226,.84);
+  font-size:11px;
+  line-height:1.45;
+}
+
+.world-event-panel__objectives{
+  display:grid;
+  gap:10px;
+  margin-top:13px;
+  padding-top:12px;
+  border-top:1px solid rgba(200,163,75,.12);
+}
+
+.world-event-objective{
+  display:grid;
+  gap:6px;
+}
+
+.world-event-objective__top{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.world-event-objective__name{
+  min-width:0;
+  color:rgba(235,225,206,.90);
+  font-size:10px;
+  line-height:1.3;
+}
+
+.world-event-objective__count{
+  flex-shrink:0;
+  color:rgba(215,219,226,.66);
+  font-size:10px;
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+}
+
+.world-event-objective__track{
+  height:7px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.06);
+  background:rgba(0,0,0,.36);
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.55);
+}
+
+.world-event-objective__fill{
+  height:100%;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(122,30,30,.90),
+      rgba(182,75,46,.92),
+      rgba(200,163,75,.78)
+    );
+  box-shadow:0 0 8px rgba(182,75,46,.18);
+  transition:width .24s ease;
+}
+
+.world-event-objective.is-complete
+.world-event-objective__name{
+  color:#dbe8d9;
+}
+
+.world-event-objective.is-complete
+.world-event-objective__fill{
+  background:
+    linear-gradient(
+      90deg,
+      rgba(62,110,70,.90),
+      rgba(94,151,101,.90)
+    );
+}
+
+.world-event-objective--empty{
+  color:var(--muted);
+  font-size:10px;
+  font-style:italic;
+}
+
+.world-event-panel--phase-two{
+  background:
+    radial-gradient(420px 180px at 18% 0%, rgba(122,30,30,.24), transparent 62%),
+    radial-gradient(360px 180px at 90% 0%, rgba(145,92,185,.12), transparent 66%),
+    linear-gradient(180deg, rgba(255,255,255,.028), rgba(0,0,0,.24)),
+    rgba(0,0,0,.28);
+}
+
+.world-event-panel--phase-two
+.world-event-panel__kicker{
+  color:rgba(214,142,130,.90);
+}
+
+.world-event-panel--phase-two
+.world-event-panel__timer{
+  border-color:rgba(182,75,46,.34);
+  color:#efb0a5;
+}
+
+.world-event-panel--urgent{
+  animation:worldEventUrgentPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes worldEventUrgentPulse{
+  0%,100%{
+    box-shadow:
+      0 14px 34px rgba(0,0,0,.34),
+      inset 0 1px 0 rgba(255,255,255,.045);
+  }
+
+  50%{
+    box-shadow:
+      0 14px 34px rgba(0,0,0,.34),
+      0 0 20px rgba(182,75,46,.12),
+      inset 0 1px 0 rgba(255,255,255,.045);
+  }
+}
+
+.world-interact__row--world-event{
+  border-color:rgba(200,163,75,.22);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(200,163,75,.055),
+      rgba(122,30,30,.08)
+    ),
+    rgba(0,0,0,.18);
+}
+
+.world-interact__btn--event{
+  border-color:rgba(200,163,75,.46);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(200,163,75,.22),
+      rgba(122,30,30,.20)
+    );
+}
+
+@media (prefers-reduced-motion: reduce){
+  .world-event-panel--urgent{
+    animation:none;
+  }
+
+  .world-event-objective__fill{
+    transition:none;
+  }
+}
+
+
+/* =========================================================
+   WORLD EVENT — PERSONAL PATH + REGIONAL INFLUENCE
+   Added for the personal-track / influence event model.
+========================================================= */
+
+.world-event-personal{
+  display:grid;
+  gap:10px;
+}
+
+.world-event-personal__title,
+.world-event-influence__title{
+  color:rgba(200,163,75,.84);
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:1.15px;
+  text-transform:uppercase;
+}
+
+.world-event-personal__chosen{
+  margin-top:-2px;
+  padding:9px 10px;
+
+  border:1px solid rgba(200,163,75,.24);
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(200,163,75,.08),
+      rgba(122,30,30,.08)
+    ),
+    rgba(0,0,0,.20);
+
+  color:#ead9bb;
+
+  font-family:
+    Cinzel,
+    Georgia,
+    serif;
+
+  font-size:11px;
+  font-weight:800;
+
+  letter-spacing:.45px;
+  text-transform:uppercase;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.035);
+}
+
+.world-event-personal__objectives{
+  display:grid;
+  gap:10px;
+}
+
+.world-event-objective{
+  padding:9px 10px;
+
+  border:1px solid rgba(200,163,75,.10);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.018),
+      rgba(0,0,0,.16)
+    ),
+    rgba(0,0,0,.12);
+}
+
+.world-event-objective.is-complete{
+  border-color:rgba(94,151,101,.26);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(94,151,101,.06),
+      rgba(0,0,0,.18)
+    ),
+    rgba(0,0,0,.12);
+}
+
+.world-event-objective__commit{
+  margin-top:1px;
+
+  color:#9bc9a1;
+
+  font-size:9px;
+  font-weight:900;
+
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.world-event-personal__locked{
+  padding:8px 9px;
+
+  border-left:2px solid rgba(200,163,75,.50);
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(200,163,75,.07),
+      transparent
+    );
+
+  color:rgba(215,219,226,.68);
+
+  font-size:10px;
+  line-height:1.4;
+}
+
+/* Regional vote / influence block */
+
+.world-event-influence{
+  display:grid;
+  gap:8px;
+
+  margin-top:2px;
+  padding-top:11px;
+
+  border-top:1px solid rgba(200,163,75,.12);
+}
+
+.world-event-influence__list{
+  display:grid;
+  gap:6px;
+}
+
+.world-event-influence__row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  gap:10px;
+
+  min-height:30px;
+
+  padding:6px 8px;
+
+  border:1px solid rgba(255,255,255,.055);
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(200,163,75,.045),
+      rgba(0,0,0,.10)
+    ),
+    rgba(0,0,0,.14);
+}
+
+.world-event-influence__name{
+  min-width:0;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+
+  color:rgba(235,225,206,.82);
+
+  font-size:9px;
+  font-weight:800;
+
+  letter-spacing:.25px;
+}
+
+.world-event-influence__value{
+  flex-shrink:0;
+
+  min-width:30px;
+  height:22px;
+
+  display:grid;
+  place-items:center;
+
+  padding:0 7px;
+
+  border:1px solid rgba(200,163,75,.24);
+
+  background:rgba(0,0,0,.30);
+
+  color:#e6ca78;
+
+  font-size:10px;
+  font-weight:900;
+
+  font-variant-numeric:tabular-nums;
+}
+
+/* Give the committed track a stronger "locked in" state. */
+
+.world-event-personal:has(.world-event-objective__commit)
+.world-event-personal__chosen{
+  border-color:rgba(94,151,101,.28);
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(94,151,101,.08),
+      rgba(0,0,0,.16)
+    );
+
+  color:#dbe8d9;
+}
+
+/* Phase two keeps the same layout, but uses the existing danger palette. */
+
+.world-event-panel--phase-two
+.world-event-personal__title,
+
+.world-event-panel--phase-two
+.world-event-influence__title{
+  color:rgba(214,142,130,.90);
+}
+
+.world-event-panel--phase-two
+.world-event-influence__value{
+  border-color:rgba(182,75,46,.30);
+  color:#efb0a5;
+}
+
+/* Compact sidebar behavior */
+
+@media (min-width:981px){
+  .world-event-panel{
+    max-height:360px;
+    overflow-y:auto;
+    overflow-x:hidden;
+
+    scrollbar-width:thin;
+    scrollbar-color:
+      rgba(200,163,75,.42)
+      rgba(0,0,0,.16);
+  }
+
+  .world-event-panel::-webkit-scrollbar{
+    width:6px;
+  }
+
+  .world-event-panel::-webkit-scrollbar-thumb{
+    background:rgba(200,163,75,.42);
+    border-radius:999px;
+  }
+
+  .world-event-panel::-webkit-scrollbar-track{
+    background:rgba(0,0,0,.16);
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3 — FULL VIEWPORT THREE-COLUMN WORLD SHELL
+   This is the authoritative desktop layout.
+   ========================================================== */
+
+:root{
+  --world-rail-left: clamp(245px, 15vw, 290px);
+  --world-rail-right: clamp(300px, 18vw, 360px);
+  --world-shell-gap: clamp(10px, .9vw, 16px);
+
+  /*
+   * Size the nine visible cells from BOTH available height and width.
+   * The min/max guard rails keep the world readable on laptops while
+   * allowing the map to become the visual center on large displays.
+   */
+  --tile: clamp(
+    54px,
+    min(
+      calc((100vh - 188px) / 9),
+      calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 74px) / 9)
+    ),
+    98px
+  );
+}
+
+html,
+body{
+  width:100%;
+  min-height:100%;
+}
+
+body{
+  overflow:hidden;
+}
+
+.world-frame{
+  display:none !important;
+}
+
+/* Entire playable surface */
+.world-screen{
+  width:100vw;
+  height:100vh;
+
+  display:grid;
+  grid-template-columns:
+    var(--world-rail-left)
+    minmax(0, 1fr)
+    var(--world-rail-right);
+
+  gap:var(--world-shell-gap);
+
+  padding:
+    clamp(62px, 7vh, 78px)
+    clamp(12px, 1vw, 20px)
+    clamp(12px, 1vw, 18px);
+
+  overflow:hidden;
+}
+
+/* Shared rails */
+.world-rail{
+  min-width:0;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  padding:2px 4px 8px 2px;
+
+  scrollbar-width:thin;
+  scrollbar-color:
+    rgba(200,163,75,.42)
+    rgba(0,0,0,.16);
+}
+
+.world-rail::-webkit-scrollbar{
+  width:6px;
+}
+
+.world-rail::-webkit-scrollbar-thumb{
+  background:rgba(200,163,75,.42);
+  border-radius:999px;
+}
+
+.world-rail::-webkit-scrollbar-track{
+  background:rgba(0,0,0,.16);
+}
+
+.world-rail-card{
+  position:relative;
+  isolation:isolate;
+
+  width:100%;
+  min-width:0;
+
+  flex:0 0 auto;
+
+  border:0;
+  border-radius:0;
+
+  background:
+    radial-gradient(
+      420px 170px at 16% 0%,
+      rgba(182,75,46,.085),
+      transparent 62%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.026),
+      rgba(0,0,0,.18)
+    ),
+    rgba(6,9,13,.82);
+
+  box-shadow:
+    0 12px 28px rgba(0,0,0,.30),
+    inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+/* Left location card */
+.world-location-card{
+  padding:16px 16px 15px;
+}
+
+.world-rail-kicker,
+.world-center-kicker{
+  color:rgba(200,163,75,.76);
+
+  font-size:9px;
+  font-weight:900;
+
+  letter-spacing:1.35px;
+  text-transform:uppercase;
+}
+
+.world-title--rail{
+  margin-top:6px;
+
+  font-size:clamp(16px, 1.15vw, 20px);
+  line-height:1.25;
+
+  text-align:left;
+}
+
+.world-location-card .coords{
+  margin-top:7px;
+  white-space:normal;
+}
+
+/* Field controls are vertical in the narrow left rail */
+.field-actions-grid--rail{
+  grid-template-columns:1fr;
+}
+
+.world-rail .field-action{
+  min-height:68px;
+}
+
+/* Quest fills useful leftover left-rail space */
+#questTracker.qtracker--sidebar{
+  min-height:0;
+  max-height:none;
+
+  flex:1 1 auto;
+
+  display:flex;
+  flex-direction:column;
+}
+
+#questTracker.qtracker--sidebar.hidden{
+  display:none !important;
+}
+
+#questTracker.qtracker--sidebar .qtrackerBody{
+  min-height:0;
+  flex:1 1 auto;
+  overflow-y:auto;
+}
+
+/* Center world */
+.world-center{
+  min-width:0;
+  min-height:0;
+
+  display:grid;
+  grid-template-rows:auto minmax(0, 1fr) auto;
+
+  gap:10px;
+
+  overflow:hidden;
+}
+
+.world-head--center{
+  min-width:0;
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  gap:18px;
+
+  margin:0;
+  padding:3px 8px 7px;
+
+  border:0;
+  background:none;
+}
+
+.world-head--center::before,
+.world-head--center::after,
+.world-head--center .world-head-divider{
+  display:none;
+}
+
+.world-center-title{
+  margin-top:2px;
+
+  color:rgba(232,221,199,.92);
+
+  font-family:
+    Cinzel,
+    Georgia,
+    serif;
+
+  font-size:clamp(15px, 1.3vw, 20px);
+  font-weight:800;
+
+  letter-spacing:1.5px;
+  text-transform:uppercase;
+}
+
+.world-head--center .world-actions{
+  width:auto;
+  margin:0;
+
+  justify-content:flex-end;
+  flex-wrap:nowrap;
+}
+
+.world-head--center .world-action-btn{
+  min-width:128px;
+  padding:8px 11px;
+}
+
+/* Map becomes the strongest surface in the page */
+.world-map-panel{
+  position:relative;
+  isolation:isolate;
+
+  min-width:0;
+  min-height:0;
+
+  display:grid;
+  place-items:center;
+
+  overflow:hidden;
+
+  border:0;
+  border-radius:0;
+
+  background:
+    radial-gradient(
+      900px 420px at 50% 44%,
+      rgba(200,163,75,.055),
+      transparent 70%
+    ),
+    radial-gradient(
+      720px 340px at 20% 0%,
+      rgba(182,75,46,.08),
+      transparent 62%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.02),
+      rgba(0,0,0,.16)
+    ),
+    rgba(3,6,9,.72);
+
+  box-shadow:
+    0 20px 55px rgba(0,0,0,.48),
+    inset 0 1px 0 rgba(255,255,255,.03);
+}
+
+.world-map-panel .map-stage{
+  width:100%;
+  height:100%;
+
+  min-width:0;
+  min-height:0;
+
+  display:grid;
+  place-items:center;
+
+  padding:12px;
+}
+
+.world-map-panel .map-wrapper{
+  display:grid;
+  place-items:center;
+
+  padding:0;
+  max-width:100%;
+}
+
+.grid-viewport{
+  width:calc(var(--tile) * 9);
+  height:calc(var(--tile) * 9);
+
+  max-width:100%;
+  max-height:100%;
+
+  border:1px solid rgba(200,163,75,.20);
+  border-radius:2px;
+
+  box-shadow:
+    0 26px 65px rgba(0,0,0,.72),
+    0 0 0 1px rgba(0,0,0,.48),
+    0 0 26px rgba(200,163,75,.045);
+}
+
+.world-center-footer{
+  min-height:20px;
+
+  display:flex;
+  justify-content:center;
+  align-items:center;
+
+  gap:10px;
+
+  color:rgba(154,163,175,.55);
+
+  font-size:9px;
+  font-weight:700;
+
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.world-center-footer span:nth-child(2){
+  color:rgba(200,163,75,.42);
+  font-size:6px;
+}
+
+/* Right rail */
+.world-rail--right .world-event-panel{
+  width:100%;
+  max-height:none;
+
+  overflow:visible;
+}
+
+.world-rail--right .resource-panel{
+  margin:0;
+}
+
+.world-rail--right .nearby-card{
+  min-height:0;
+  height:auto !important;
+  max-height:none !important;
+
+  display:flex;
+  flex-direction:column;
+
+  flex:1 1 auto;
+
+  padding:14px;
+
+  overflow:hidden !important;
+}
+
+.world-rail--right .nearby-destinations{
+  grid-template-columns:1fr;
+  flex:0 0 auto;
+}
+
+.world-rail--right .nearby-interactions{
+  min-height:120px;
+
+  flex:1 1 auto;
+
+  display:flex;
+  flex-direction:column;
+
+  overflow:hidden !important;
+}
+
+.world-rail--right .world-interact__list{
+  min-height:0 !important;
+  height:auto !important;
+  max-height:none !important;
+
+  flex:1 1 auto;
+
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+
+  padding-right:4px;
+}
+
+.world-rail--right .world-interact__row{
+  flex-direction:column;
+  align-items:stretch;
+  gap:8px;
+}
+
+.world-rail--right .world-interact__actions{
+  justify-content:space-between;
+}
+
+/*
+ * The old desktop 650px world-layout contract no longer participates in
+ * the page. These reset the previous layout selectors in case legacy rules
+ * remain earlier in world.css.
+ */
+.world-layout,
+.world-sidebar{
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+}
+
+/* Decorative frame priority */
+.world-map-panel > .frame-border.main{
+  filter:
+    brightness(.96)
+    drop-shadow(0 18px 42px rgba(0,0,0,.58));
+}
+
+.world-rail-card > .frame-border.sub{
+  filter:
+    brightness(.80)
+    drop-shadow(0 6px 14px rgba(0,0,0,.28));
+}
+
+/* Laptop / compact desktop */
+@media (max-width:1280px){
+  :root{
+    --world-rail-left:230px;
+    --world-rail-right:300px;
+    --world-shell-gap:10px;
+
+    --tile:clamp(
+      50px,
+      min(
+        calc((100vh - 184px) / 9),
+        calc((100vw - 570px) / 9)
+      ),
+      78px
+    );
+  }
+
+  .world-screen{
+    padding-left:10px;
+    padding-right:10px;
+  }
+
+  .field-action{
+    grid-template-columns:34px minmax(0,1fr) auto;
+    padding:11px;
+  }
+
+  .field-action__icon{
+    width:34px;
+    height:34px;
+    font-size:18px;
+  }
+
+  .world-rail--right .nearby-destination{
+    padding:8px;
+  }
+}
+
+/* Tablet / narrow desktop: map remains first, rails move below */
+@media (max-width:980px){
+  body{
+    overflow:auto;
+  }
+
+  :root{
+    --tile:clamp(
+      44px,
+      calc((100vw - 42px) / 9),
+      74px
+    );
+  }
+
+  .world-screen{
+    width:100%;
+    height:auto;
+    min-height:100vh;
+
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "center"
+      "left"
+      "right";
+
+    padding:
+      62px 12px 20px;
+
+    overflow:visible;
+  }
+
+  .world-center{
+    grid-area:center;
+    min-height:auto;
+    overflow:visible;
+  }
+
+  .world-rail--left{
+    grid-area:left;
+  }
+
+  .world-rail--right{
+    grid-area:right;
+  }
+
+  .world-rail{
+    overflow:visible;
+  }
+
+  .world-map-panel{
+    min-height:calc(var(--tile) * 9 + 28px);
+  }
+
+  .world-rail--right .nearby-card{
+    flex:none;
+  }
+
+  .world-rail--right .world-interact__list{
+    max-height:320px !important;
+  }
+
+  #questTracker.qtracker--sidebar{
+    flex:none;
+  }
+}
+
+/* Phone */
+@media (max-width:560px){
+  :root{
+    --tile:clamp(
+      34px,
+      calc((100vw - 26px) / 9),
+      54px
+    );
+  }
+
+  .world-screen{
+    padding:
+      58px 8px 16px;
+  }
+
+  .world-head--center{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+
+  .world-head--center .world-actions{
+    width:100%;
+    justify-content:flex-start;
+    flex-wrap:wrap;
+  }
+
+  .world-map-panel .map-stage{
+    padding:8px;
+  }
+
+  .world-center-footer{
+    display:none;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.1 — MAP SCALE + CENTER REGION HEADER + LEFT RAIL
+   ========================================================== */
+
+/*
+ * Use more of the center column. On 1080p-class screens the map should
+ * visually dominate the page instead of floating inside a large dark field.
+ */
+:root{
+  --tile: clamp(
+    62px,
+    min(
+      calc((100vh - 154px) / 9),
+      calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 58px) / 9)
+    ),
+    94px
+  );
+}
+
+.world-center{
+  gap:8px;
+}
+
+.world-head--center{
+  min-height:58px;
+  padding:0 8px 8px;
+}
+
+.world-title--center{
+  margin-top:3px;
+  padding:0;
+
+  font-size:clamp(18px, 1.55vw, 24px);
+  line-height:1.15;
+
+  text-align:left;
+}
+
+.world-center-meta{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:5px;
+}
+
+.world-center-meta .coords{
+  font-size:10px;
+  color:rgba(154,163,175,.76);
+}
+
+.world-map-panel .map-stage{
+  padding:8px;
+}
+
+/*
+ * Keep the ornamental center frame visually close to the actual world.
+ * The center panel still fills the column, but the perceived empty margin
+ * is reduced by enlarging the viewport and softening the surrounding field.
+ */
+.world-map-panel{
+  background:
+    radial-gradient(
+      760px 460px at 50% 50%,
+      rgba(200,163,75,.055),
+      transparent 72%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.012),
+      rgba(0,0,0,.10)
+    ),
+    rgba(2,5,8,.54);
+}
+
+.grid-viewport{
+  border-color:rgba(200,163,75,.24);
+  box-shadow:
+    0 28px 72px rgba(0,0,0,.74),
+    0 0 0 1px rgba(0,0,0,.54),
+    0 0 30px rgba(200,163,75,.055);
+}
+
+/* Left rail: compact controls, natural-height quest, intentional spare space. */
+.world-rail--left{
+  align-content:start;
+}
+
+.world-rail--left .field-actions-card{
+  padding:0;
+}
+
+.world-rail--left .field-actions-grid--rail{
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:8px;
+}
+
+.world-rail--left .field-action{
+  min-height:64px;
+  grid-template-columns:30px minmax(0,1fr);
+  gap:7px;
+  padding:10px;
+}
+
+.world-rail--left .field-action__icon{
+  width:30px;
+  height:30px;
+  font-size:17px;
+}
+
+.world-rail--left .field-action__copy strong{
+  font-size:10px;
+}
+
+.world-rail--left .field-action__copy small{
+  font-size:9px;
+  line-height:1.25;
+}
+
+.world-rail--left .field-action__arrow{
+  display:none;
+}
+
+#questTracker.qtracker--sidebar{
+  flex:0 0 auto;
+  max-height:340px;
+}
+
+#questTracker.qtracker--sidebar .qtrackerBody{
+  flex:0 1 auto;
+  max-height:280px;
+}
+
+.world-state-card{
+  padding:14px;
+}
+
+.world-state-card__body{
+  display:grid;
+  gap:8px;
+  margin-top:10px;
+}
+
+.world-state-card__row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+
+  padding:8px 9px;
+
+  border:1px solid rgba(200,163,75,.10);
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(200,163,75,.035),
+      rgba(0,0,0,.12)
+    );
+}
+
+.world-state-card__row span{
+  color:rgba(215,219,226,.58);
+  font-size:9px;
+  text-transform:uppercase;
+  letter-spacing:.55px;
+}
+
+.world-state-card__row strong{
+  color:rgba(235,225,206,.84);
+  font-size:9px;
+  font-weight:800;
+}
+
+/* Right rail keeps priority but gives Nearby more breathing room. */
+.world-rail--right .world-event-panel{
+  flex:0 0 auto;
+}
+
+.world-rail--right .nearby-card{
+  min-height:0;
+}
+
+/* Compact desktop */
+@media (max-width:1280px){
+  :root{
+    --tile:clamp(
+      54px,
+      min(
+        calc((100vh - 150px) / 9),
+        calc((100vw - 555px) / 9)
+      ),
+      80px
+    );
+  }
+
+  .world-rail--left .field-actions-grid--rail{
+    grid-template-columns:1fr;
+  }
+
+  .world-rail--left .field-action{
+    grid-template-columns:32px minmax(0,1fr);
+  }
+}
+
+@media (max-width:980px){
+  .world-rail--left .field-actions-grid--rail{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+
+  #questTracker.qtracker--sidebar{
+    max-height:none;
+  }
+
+  #questTracker.qtracker--sidebar .qtrackerBody{
+    max-height:none;
+  }
+}
+
+@media (max-width:560px){
+  .world-rail--left .field-actions-grid--rail{
+    grid-template-columns:1fr;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.2 — VIEWPORT FIT + MAIN SECTION FRAMES
+   ========================================================== */
+
+/*
+ * The global Guildforge header already occupies the top of the browser.
+ * Treat the world shell as the space BELOW that header instead of making
+ * another 100vh surface with large internal top padding.
+ */
+body{
+  overflow:hidden;
+}
+
+.world-screen{
+  width:100%;
+  height:calc(100vh - 122px);
+
+  margin-top:122px;
+
+  padding:
+    12px
+    clamp(12px, 1vw, 20px)
+    14px;
+
+  box-sizing:border-box;
+
+  overflow:hidden;
+}
+
+/*
+ * Recalculate map scale against the ACTUAL playable vertical area.
+ * This keeps all nine visible rows fully on-screen, including the
+ * center header/footer and frame padding.
+ */
+:root{
+  --tile:clamp(
+    58px,
+    min(
+      calc((100vh - 230px) / 9),
+      calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 58px) / 9)
+    ),
+    90px
+  );
+}
+
+/* Main three sections get their own clear Guildforge frame hierarchy. */
+.world-rail,
+.world-map-panel{
+  position:relative;
+  isolation:isolate;
+}
+
+.world-rail{
+  padding:
+    14px
+    12px
+    14px;
+
+  background:
+    radial-gradient(
+      420px 240px at 18% 0%,
+      rgba(182,75,46,.055),
+      transparent 68%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.016),
+      rgba(0,0,0,.10)
+    ),
+    rgba(3,6,9,.54);
+
+  box-shadow:
+    0 18px 42px rgba(0,0,0,.30),
+    inset 0 1px 0 rgba(255,255,255,.025);
+
+  overflow-y:auto;
+  overflow-x:hidden;
+}
+
+.world-rail-frame{
+  z-index:0 !important;
+  filter:
+    brightness(.88)
+    drop-shadow(0 12px 26px rgba(0,0,0,.40));
+}
+
+/* Keep rail content above its outer decorative frame. */
+.world-rail > *:not(.world-rail-frame){
+  position:relative;
+  z-index:1;
+}
+
+/*
+ * Give the map frame a little inset breathing room while keeping
+ * the terrain visually dominant.
+ */
+.world-map-panel{
+  padding:10px;
+}
+
+.world-map-panel .map-stage{
+  padding:0;
+}
+
+.world-map-panel > .frame-border.main{
+  inset:0;
+}
+
+/* Side cards now sit inside a clearly-framed rail instead of floating. */
+.world-rail-card{
+  box-shadow:
+    0 8px 20px rgba(0,0,0,.24),
+    inset 0 1px 0 rgba(255,255,255,.035);
+}
+
+/*
+ * Avoid the left quest/world-state stack creating a clipped rail.
+ * Each rail scrolls internally if content ever exceeds the viewport.
+ */
+.world-rail--left,
+.world-rail--right{
+  min-height:0;
+  max-height:100%;
+}
+
+/* Right Nearby consumes remaining space without pushing below viewport. */
+.world-rail--right .nearby-card{
+  flex:1 1 auto;
+  min-height:180px;
+}
+
+.world-rail--right .nearby-interactions{
+  min-height:0;
+}
+
+/* Center region header is tighter to free more map height. */
+.world-head--center{
+  min-height:52px;
+  padding:0 8px 4px;
+}
+
+.world-center-footer{
+  min-height:16px;
+}
+
+/* Compact desktop / laptop height */
+@media (max-height:820px) and (min-width:981px){
+  .world-screen{
+    height:calc(100vh - 112px);
+    margin-top:112px;
+    padding-top:8px;
+    padding-bottom:10px;
+  }
+
+  :root{
+    --tile:clamp(
+      50px,
+      min(
+        calc((100vh - 205px) / 9),
+        calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 52px) / 9)
+      ),
+      76px
+    );
+  }
+
+  .world-rail{
+    padding:10px;
+  }
+
+  .world-map-panel{
+    padding:8px;
+  }
+}
+
+/*
+ * At narrower sizes we return to document flow and allow page scrolling.
+ */
+@media (max-width:980px){
+  body{
+    overflow:auto;
+  }
+
+  .world-screen{
+    width:100%;
+    height:auto;
+    min-height:calc(100vh - 112px);
+
+    margin-top:112px;
+
+    padding:
+      12px
+      12px
+      24px;
+
+    overflow:visible;
+  }
+
+  .world-rail{
+    overflow:visible;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.3 — TIGHT TOP SPACING
+   Pull the full world UI closer to the Guildforge stat/header
+   and reclaim that vertical space for the map.
+   Keep this block LAST so it overrides prior V3.2 spacing.
+   ========================================================== */
+
+.world-screen{
+  width:100%;
+  height:calc(100vh - 78px);
+
+  margin-top:0;
+
+  padding:
+    8px
+    clamp(12px, 1vw, 20px)
+    10px;
+
+  box-sizing:border-box;
+  overflow:hidden;
+}
+
+/*
+ * Reclaim the space that was previously reserved above the page.
+ * The 9x9 viewport can now stay larger without being clipped below.
+ */
+:root{
+  --tile:clamp(
+    58px,
+    min(
+      calc((100vh - 155px) / 9),
+      calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 58px) / 9)
+    ),
+    94px
+  );
+}
+
+/*
+ * Keep a small visual gap below the global Guildforge UI rather
+ * than a second header-sized blank area.
+ */
+.world-screen{
+  padding-top:6px;
+}
+
+/* Compact desktop / laptop heights must NOT reintroduce the old 112px gap. */
+@media (max-height:820px) and (min-width:981px){
+  .world-screen{
+    height:calc(100vh - 74px);
+    margin-top:0;
+
+    padding:
+      5px
+      10px
+      8px;
+  }
+
+  :root{
+    --tile:clamp(
+      50px,
+      min(
+        calc((100vh - 140px) / 9),
+        calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 48px) / 9)
+      ),
+      82px
+    );
+  }
+}
+
+/* Tablet / stacked layout returns to natural document flow. */
+@media (max-width:980px){
+  body{
+    overflow:auto;
+  }
+
+  .world-screen{
+    width:100%;
+    height:auto;
+    min-height:calc(100vh - 74px);
+
+    margin-top:0;
+
+    padding:
+      8px
+      12px
+      24px;
+
+    overflow:visible;
+  }
+}
+
+/* Phone */
+@media (max-width:560px){
+  .world-screen{
+    padding:
+      6px
+      8px
+      16px;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.4 — 90VH DESKTOP SHELL
+   Keep this block LAST so it overrides prior viewport sizing.
+   ========================================================== */
+
+.world-screen{
+  width:100%;
+  height:90vh;
+
+  margin:0;
+
+  padding:
+    6px
+    clamp(12px, 1vw, 20px)
+    8px;
+
+  box-sizing:border-box;
+  overflow:hidden;
+}
+
+:root{
+  --tile:clamp(
+    56px,
+    min(
+      calc((90vh - 80px) / 9),
+      calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 58px) / 9)
+    ),
+    90px
+  );
+}
+
+/* Do not let older compact-height rules override the 90vh shell. */
+@media (max-height:820px) and (min-width:981px){
+  .world-screen{
+    width:100%;
+    height:90vh;
+
+    margin:0;
+
+    padding:
+      5px
+      10px
+      7px;
+
+    overflow:hidden;
+  }
+
+  :root{
+    --tile:clamp(
+      48px,
+      min(
+        calc((90vh - 72px) / 9),
+        calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 48px) / 9)
+      ),
+      80px
+    );
+  }
+}
+
+/* Stacked layouts should use natural document height instead. */
+@media (max-width:980px){
+  body{
+    overflow:auto;
+  }
+
+  .world-screen{
+    width:100%;
+    height:auto;
+    min-height:90vh;
+
+    margin:0;
+
+    padding:
+      8px
+      12px
+      24px;
+
+    overflow:visible;
+  }
+}
+
+@media (max-width:560px){
+  .world-screen{
+    padding:
+      6px
+      8px
+      16px;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.5 — 80VH SHELL + SLIGHT TOP OFFSET
+   Keep this block LAST so it overrides prior viewport sizing.
+   ========================================================== */
+
+.world-screen{
+  width:100%;
+  height:80vh;
+
+  margin:0;
+
+  padding:
+    14px
+    clamp(12px, 1vw, 20px)
+    8px;
+
+  box-sizing:border-box;
+  overflow:hidden;
+}
+
+:root{
+  --tile:clamp(
+    50px,
+    min(
+      calc((80vh - 82px) / 9),
+      calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 58px) / 9)
+    ),
+    82px
+  );
+}
+
+/* Keep shorter desktop screens on the same 80vh contract. */
+@media (max-height:820px) and (min-width:981px){
+  .world-screen{
+    width:100%;
+    height:80vh;
+
+    margin:0;
+
+    padding:
+      12px
+      10px
+      7px;
+
+    overflow:hidden;
+  }
+
+  :root{
+    --tile:clamp(
+      44px,
+      min(
+        calc((80vh - 76px) / 9),
+        calc((100vw - var(--world-rail-left) - var(--world-rail-right) - 48px) / 9)
+      ),
+      72px
+    );
+  }
+}
+
+/* Stacked layouts return to natural document height. */
+@media (max-width:980px){
+  body{
+    overflow:auto;
+  }
+
+  .world-screen{
+    width:100%;
+    height:auto;
+    min-height:80vh;
+
+    margin:0;
+
+    padding:
+      12px
+      12px
+      24px;
+
+    overflow:visible;
+  }
+}
+
+@media (max-width:560px){
+  .world-screen{
+    padding:
+      10px
+      8px
+      16px;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.6 — TRIPLE TOP PADDING
+   ========================================================== */
+
+.world-screen{
+  padding-top:42px;
+}
+
+@media (max-height:820px) and (min-width:981px){
+  .world-screen{
+    padding-top:36px;
+  }
+}
+
+@media (max-width:980px){
+  .world-screen{
+    padding-top:36px;
+  }
+}
+
+@media (max-width:560px){
+  .world-screen{
+    padding-top:30px;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.7 — EQUAL SIDE RAILS
+   ========================================================== */
+
+:root{
+  --world-rail-left: clamp(280px, 17vw, 330px);
+  --world-rail-right: var(--world-rail-left);
+}
+
+@media (max-width:1280px){
+  :root{
+    --world-rail-left: 280px;
+    --world-rail-right: 280px;
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.8 — FIXED CENTER PLAYER SPRITE
+   Keep the visible player mathematically centered in the
+   9x9 viewport at every tile size and screen size.
+   ========================================================== */
+
+.world-player-sprite{
+  position:absolute;
+
+  left:50%;
+  top:50%;
+
+  width:calc(var(--tile) * .58);
+  height:calc(var(--tile) * .72);
+
+  transform:translate(-50%, -50%);
+
+  z-index:50;
+  pointer-events:none;
+
+  display:grid;
+  place-items:center;
+
+  transform-origin:center;
+  will-change:transform;
+}
+
+/*
+ * Keep the walk bob centered too.
+ * The old animation used -58% on Y, which visually pulled the
+ * player upward and made the offset more noticeable at larger
+ * responsive tile sizes.
+ */
+@keyframes gfWorldWalkBob{
+  0%,
+  100%{
+    transform:
+      translate(-50%, -50%)
+      translateY(0);
+  }
+
+  25%{
+    transform:
+      translate(-50%, -50%)
+      translateY(-2px)
+      rotate(-1.5deg);
+  }
+
+  50%{
+    transform:
+      translate(-50%, -50%)
+      translateY(0);
+  }
+
+  75%{
+    transform:
+      translate(-50%, -50%)
+      translateY(-2px)
+      rotate(1.5deg);
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V3.9 — TRUE CAMERA-CENTERED PLAYER MARKER
+   The visible player marker is an overlay attached directly to
+   .grid-viewport. The 11x11 #Grid moves underneath it.
+   ========================================================== */
+
+.grid-viewport{
+  position:relative;
+}
+
+/*
+ * Zero-size anchor fixed to the exact center of the visible 9x9 camera.
+ * This prevents responsive tile sizing from shifting the marker.
+ */
+.world-player-sprite{
+  position:absolute;
+
+  left:50%;
+  top:50%;
+
+  width:0;
+  height:0;
+
+  transform:translate(-50%, -50%);
+
+  z-index:100;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  pointer-events:none;
+
+  transform-origin:center;
+  will-change:transform;
+}
+
+/* The visible player circle/diamond itself. */
+.world-player-sprite__body{
+  position:absolute;
+
+  left:50%;
+  top:50%;
+
+  width:26px;
+  height:26px;
+
+  transform:translate(-50%, -50%);
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  border-radius:50%;
+
+  box-sizing:border-box;
+
+  z-index:2;
+}
+
+/* Keep the player shadow centered beneath the marker. */
+.world-player-sprite__shadow{
+  position:absolute;
+
+  left:50%;
+  top:50%;
+
+  width:20px;
+  height:7px;
+
+  transform:
+    translate(-50%, -50%)
+    translateY(9px);
+
+  border-radius:50%;
+
+  pointer-events:none;
+
+  z-index:1;
+}
+
+/*
+ * The walking animation now bobs the zero-size camera anchor itself while
+ * preserving its 50% / 50% center point.
+ */
+@keyframes gfWorldWalkBob{
+  0%,
+  100%{
+    transform:
+      translate(-50%, -50%)
+      translateY(0);
+  }
+
+  25%{
+    transform:
+      translate(-50%, -50%)
+      translateY(-2px)
+      rotate(-1.5deg);
+  }
+
+  50%{
+    transform:
+      translate(-50%, -50%)
+      translateY(0);
+  }
+
+  75%{
+    transform:
+      translate(-50%, -50%)
+      translateY(-2px)
+      rotate(1.5deg);
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V4.0 — FITTED 9x9 MAP
+   Fill the center map panel as much as possible while keeping
+   the visible camera locked to EXACTLY nine complete tiles.
+   ========================================================== */
+
+/*
+ * Make the map panel the sizing container for the visible world.
+ * The camera can now size from the space it actually has rather
+ * than from rough viewport/header estimates.
+ */
+.world-map-panel{
+  container-type:size;
+}
+
+/*
+ * IMPORTANT:
+ * The visible camera content must always equal exactly 9 × 9 tiles.
+ *
+ * Global box-sizing is border-box, so explicitly use content-box here:
+ * the decorative border sits OUTSIDE the 9-tile content area instead
+ * of stealing pixels from the final row/column.
+ */
+.grid-viewport{
+  --tile:clamp(
+    54px,
+    min(
+      calc((100cqw - 24px) / 9),
+      calc((100cqh - 24px) / 9)
+    ),
+    96px
+  );
+
+  box-sizing:content-box;
+
+  width:calc(var(--tile) * 9);
+  height:calc(var(--tile) * 9);
+
+  max-width:none;
+  max-height:none;
+
+  overflow:hidden;
+
+  flex:none;
+  aspect-ratio:1 / 1;
+}
+
+/*
+ * The hidden movement buffer remains 11 × 11 and uses the SAME
+ * local --tile value as the camera. One whole hidden tile remains
+ * outside every edge for seamless WASD scrolling.
+ */
+.grid-viewport .grid{
+  grid-template-columns:
+    repeat(11, var(--tile));
+
+  grid-template-rows:
+    repeat(11, var(--tile));
+
+  width:calc(var(--tile) * 11);
+  height:calc(var(--tile) * 11);
+
+  transform:
+    translate(
+      calc(-1 * var(--tile)),
+      calc(-1 * var(--tile))
+    );
+}
+
+.grid-viewport .tile{
+  width:var(--tile);
+  height:var(--tile);
+
+  min-width:var(--tile);
+  min-height:var(--tile);
+
+  flex:none;
+}
+
+/* Remove excess dead space around the fitted camera. */
+.world-map-panel{
+  place-items:center;
+}
+
+.world-map-panel .map-stage{
+  width:100%;
+  height:100%;
+
+  padding:8px;
+
+  display:grid;
+  place-items:center;
+
+  overflow:hidden;
+}
+
+.world-map-panel .map-wrapper{
+  width:auto;
+  height:auto;
+
+  max-width:none;
+  max-height:none;
+
+  padding:0;
+
+  display:block;
+}
+
+/*
+ * If container query units are unavailable, retain a conservative
+ * exact-nine-tile fallback rather than allowing a partially clipped grid.
+ */
+@supports not (width: 1cqw){
+  .grid-viewport{
+    --tile:clamp(
+      52px,
+      min(
+        calc((80vh - 92px) / 9),
+        calc(
+          (
+            100vw -
+            var(--world-rail-left) -
+            var(--world-rail-right) -
+            76px
+          ) / 9
+        )
+      ),
+      88px
+    );
+  }
+}
+
+
+/* ==========================================================
+   WORLD PAGE V4.1 — WEST-FACING PLAYER CENTER FIX
+   Preserve the marker's centering transform when flipping it
+   horizontally to face west.
+   ========================================================== */
+
+.world-player-sprite[data-direction="west"]
+.world-player-sprite__body{
+  transform:
+    translate(-50%, -50%)
+    scaleX(-1);
+}
+
+
+/* =========================================
+   WORLD EVENT MAP MARKERS
+   Emoji markers for active regional-event
+   creatures, bosses, and interactables.
+========================================= */
+.world-event-map-markers{
+  position:absolute;
+  inset:0;
+  z-index:12;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:2px;
+
+  pointer-events:none;
+  user-select:none;
+}
+
+.world-event-map-marker{
+  display:inline-grid;
+  place-items:center;
+
+  min-width:30px;
+  min-height:30px;
+
+  font-size:30px;
+  line-height:1;
+
+  filter:
+    drop-shadow(0 0 6px rgba(190,120,255,.90))
+    drop-shadow(0 2px 3px rgba(0,0,0,.95));
+
+  animation:
+    worldEventMarkerPulse
+    1.8s ease-in-out infinite;
+
+  transform-origin:center;
+}
+
+.world-event-map-marker--creature{
+  filter:
+    drop-shadow(0 0 6px rgba(214,92,72,.88))
+    drop-shadow(0 2px 3px rgba(0,0,0,.95));
+}
+
+.world-event-map-marker--boss{
+  font-size:34px;
+
+  filter:
+    drop-shadow(0 0 8px rgba(235,84,68,.95))
+    drop-shadow(0 2px 4px rgba(0,0,0,.98));
+}
+
+.world-event-map-marker--interact{
+  filter:
+    drop-shadow(0 0 7px rgba(190,120,255,.95))
+    drop-shadow(0 2px 3px rgba(0,0,0,.95));
+}
+
+@keyframes worldEventMarkerPulse{
+  0%,
+  100%{
+    transform:scale(.94);
+  }
+
+  50%{
+    transform:scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .world-event-map-marker{
+    animation:none;
+  }
+}
+
+
+/* =========================================
+   WORLD EVENT REWARDS
+========================================= */
+.world-event-rewards{
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px solid rgba(255,255,255,.08);
+}
+
+.world-event-rewards__title{
+  margin-bottom:9px;
+  color:rgba(201,184,154,.95);
+  font-family:Cinzel, ui-serif, Georgia, "Times New Roman", serif;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:1px;
+  text-transform:uppercase;
+}
+
+.world-event-rewards__list{
+  display:flex;
+  flex-direction:column;
+  gap:9px;
+}
+
+.world-event-reward{
+  padding:11px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:10px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.18)),
+    rgba(0,0,0,.20);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.04),
+    0 8px 18px rgba(0,0,0,.18);
+}
+
+.world-event-reward--personal{
+  border-color:rgba(200,163,75,.28);
+}
+
+.world-event-reward--outcome{
+  border-color:rgba(120,103,180,.30);
+}
+
+.world-event-reward__head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.world-event-reward__source{
+  color:rgba(154,163,175,.96);
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.world-event-reward__outcome{
+  margin-top:3px;
+  color:var(--bone, #c9b89a);
+  font-family:Cinzel, ui-serif, Georgia, "Times New Roman", serif;
+  font-size:12px;
+  font-weight:800;
+  line-height:1.25;
+}
+
+.world-event-reward__badge{
+  width:24px;
+  height:24px;
+  flex:0 0 24px;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  border:1px solid rgba(200,163,75,.25);
+  background:rgba(0,0,0,.24);
+  color:rgba(225,197,116,.95);
+  font-size:11px;
+}
+
+.world-event-reward__description{
+  margin-top:7px;
+  color:rgba(154,163,175,.92);
+  font-size:10px;
+  line-height:1.4;
+}
+
+.world-event-reward__loot{
+  margin-top:9px;
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+
+.world-event-reward__loot-row{
+  display:grid;
+  grid-template-columns:20px 1fr auto;
+  align-items:center;
+  gap:6px;
+  min-height:27px;
+  padding:4px 7px;
+  border:1px solid rgba(255,255,255,.055);
+  border-radius:7px;
+  background:rgba(0,0,0,.17);
+}
+
+.world-event-reward__loot-icon{
+  text-align:center;
+  font-size:13px;
+}
+
+.world-event-reward__loot-name{
+  color:rgba(215,219,226,.90);
+  font-size:10px;
+  letter-spacing:.25px;
+}
+
+.world-event-reward__loot-amount{
+  color:rgba(225,197,116,.98);
+  font-size:10px;
+}
+
+.world-event-reward__empty{
+  margin-top:8px;
+  color:rgba(154,163,175,.85);
+  font-size:10px;
+  font-style:italic;
+}
+
+.world-event-reward__claim{
+  width:100%;
+  margin-top:10px;
+  padding:8px 10px;
+  border:1px solid rgba(182,75,46,.45);
+  border-radius:8px;
+  background:
+    linear-gradient(180deg, rgba(182,75,46,.30), rgba(122,30,30,.24)),
+    rgba(0,0,0,.18);
+  color:#f3e7db;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.75px;
+  text-transform:uppercase;
+  cursor:pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 7px 15px rgba(0,0,0,.18);
+}
+
+.world-event-reward__claim:hover:not(:disabled){
+  filter:brightness(1.08);
+}
+
+.world-event-reward__claim:disabled{
+  opacity:.50;
+  cursor:not-allowed;
 }

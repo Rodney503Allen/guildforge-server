@@ -39,6 +39,10 @@ import { initializeSocketServer } from "./socketServer";
 import dungeonRoutes from "./dungeon.routes";
 import dungeonCombatRoutes from "./dungeonCombat.routes";
 import dungeonPageRoutes from "./dungeonPage.routes";
+import worldEventRoutes from "./worldEvent.routes";
+import {
+  startWorldEventScheduler
+} from "./services/worldEventSchedulerService";
 
 const app = express();
 const server = createServer(app);
@@ -159,6 +163,7 @@ app.use("/api",tradeRoutes);
 app.use("/api/dungeons", dungeonRoutes);
 app.use("/api/dungeon-combat",dungeonCombatRoutes);
 app.use("/", dungeonPageRoutes);
+app.use(worldEventRoutes);
 
 // =======================
 // MAIN PAGE
@@ -236,7 +241,11 @@ app.get("/logout", (req, res) => {
 // =======================
 // START
 // =======================
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Guildforge engine running on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(
+    `Guildforge engine running on port ${PORT}`
+  );
+
   startStatusHeartbeat();
+  startWorldEventScheduler();
 });
