@@ -3956,44 +3956,185 @@ async function moveWorld(dir) {
 
   if (!dir || isInCombat() || moveLock) return;
 
+  const moveStartedAt = performance.now();
+
   moveLock = true;
   lastMoveDir = dir;
   lastMoveAt = Date.now();
 
+  console.log(`[MOVE ${dir}] start`);
+
   // Begin visual travel immediately. The network request runs in parallel,
-  // so the character/world starts moving on the very frame the key is pressed.
-  const visualStepPromise = animateWorldTravelStep(dir);
+  // so the world starts moving on the same frame the key is pressed.
+  const animationStartedAt = performance.now();
+
+  const visualStepPromise =
+    animateWorldTravelStep(dir).then(() => {
+      console.log(
+        `[MOVE ${dir}] animation finished: ${Math.round(
+          performance.now() - animationStartedAt
+        )}ms`
+      );
+    });
+
+  let movementReleased = false;
+
+  /*
+   * Release the movement lock as soon as the server-confirmed world buffer
+   * has been installed. Non-critical UI/network work is allowed to finish
+   * afterward so held WASD does not pause on every tile boundary.
+   */
+  function releaseMovementForNextStep() {
+    if (movementReleased) return;
+
+    movementReleased = true;
+    moveLock = false;
+
+    console.log(
+      `[MOVE ${dir}] movement unlocked: ${Math.round(
+        performance.now() - moveStartedAt
+      )}ms`
+    );
+
+    if (!isInCombat() && heldWorldDirections.size) {
+      /*
+       * Do NOT wait for another requestAnimationFrame here.
+       * The previous animation has already completed at a tile boundary, so
+       * starting the next step immediately removes the extra frame-sized gap.
+       */
+      console.log(
+        `[MOVE ${dir}] next held step requested immediately`
+      );
+
+      continueHeldWorldMovement();
+    } else {
+      setWorldPlayerMotion(
+        lastMoveDir || dir,
+        false
+      );
+    }
+  }
 
   try {
-    const responsePromise = fetch(`/world/move/${dir}`, {
-      credentials: "include",
-      cache: "no-store"
-    }).then(async res => ({
-      res,
-      data: await res.json()
-    }));
+    const requestStartedAt =
+      performance.now();
 
-    const [responseResult] = await Promise.all([
-      responsePromise,
-      visualStepPromise
-    ]);
+    const responsePromise =
+      fetch(`/world/move/${dir}`, {
+        credentials: "include",
+        cache: "no-store"
+      }).then(async res => {
+        const responseReceivedAt =
+          performance.now();
 
-    const { res, data } = responseResult;
+        const data =
+          await res.json();
+
+        console.log(
+          `[MOVE ${dir}] server + JSON: ${Math.round(
+            performance.now() - requestStartedAt
+          )}ms`,
+          `(response headers: ${Math.round(
+            responseReceivedAt - requestStartedAt
+          )}ms)`
+        );
+
+        return {
+          res,
+          data
+        };
+      });
+
+    const waitStartedAt =
+      performance.now();
+
+    const [responseResult] =
+      await Promise.all([
+        responsePromise,
+        visualStepPromise
+      ]);
+
+    console.log(
+      `[MOVE ${dir}] animation + server barrier: ${Math.round(
+        performance.now() - waitStartedAt
+      )}ms`,
+      `(total: ${Math.round(
+        performance.now() - moveStartedAt
+      )}ms)`
+    );
+
+    const { res, data } =
+      responseResult;
 
     if (!res.ok || !data?.success) {
+      const rollbackStartedAt =
+        performance.now();
+
       await animateWorldRollback(dir);
+
+      console.log(
+        `[MOVE ${dir}] rollback: ${Math.round(
+          performance.now() - rollbackStartedAt
+        )}ms`
+      );
+
       return;
     }
 
-    // Swapping to the newly-centered 11x11 buffer is visually seamless here:
-    // the old grid's completed transform and the new grid's base transform
-    // expose the same nine world rows/columns at this exact frame.
+    // Install the newly-centered 11x11 buffer immediately at the tile boundary.
+    const renderStartedAt =
+      performance.now();
+
     if (data.world) {
-      renderWorldFromData(data.world);
+      renderWorldFromData(
+        data.world
+      );
     } else {
       resetWorldGridToBase();
     }
 
+    console.log(
+      `[MOVE ${dir}] world render: ${Math.round(
+        performance.now() - renderStartedAt
+      )}ms`
+    );
+
+    /*
+     * Combat must be handled BEFORE unlocking movement. If this step triggered
+     * an encounter, held movement is cleared and no next tile step may start.
+     */
+    if (
+      data.inCombat &&
+      data.enemy
+    ) {
+      heldWorldDirections.clear();
+      mostRecentWorldDirection =
+        null;
+
+      setWorldPlayerMotion(
+        dir,
+        false
+      );
+
+      pendingCombatEnemy =
+        data.enemy;
+
+      queueCombatOpen();
+    }
+
+    /*
+     * This is the important smoothing change:
+     * once the authoritative position and visual buffer agree, movement is
+     * free to continue. Everything below is presentation/support work.
+     */
+    releaseMovementForNextStep();
+
+    const postMoveStartedAt =
+      performance.now();
+
+    /*
+     * None of these should block the next tile animation.
+     */
     syncWorldAudio(
       data.region,
       data.terrain
@@ -4005,56 +4146,155 @@ async function moveWorld(dir) {
     });
 
     if (data.nearbyObjects) {
-      renderNearbyObjects(data.nearbyObjects);
+      const nearbyStartedAt =
+        performance.now();
+
+      renderNearbyObjects(
+        data.nearbyObjects
+      );
+
+      console.log(
+        `[MOVE ${dir}] nearby objects render: ${Math.round(
+          performance.now() - nearbyStartedAt
+        )}ms`
+      );
     }
 
     if (data.regionData) {
-      renderRegionHeader(data.regionData);
+      const regionHeaderStartedAt =
+        performance.now();
+
+      renderRegionHeader(
+        data.regionData
+      );
+
+      console.log(
+        `[MOVE ${dir}] region header render: ${Math.round(
+          performance.now() - regionHeaderStartedAt
+        )}ms`
+      );
 
       if (
         window.GFWorldEvents?.setRegion &&
         data.regionData.region_id != null
       ) {
-        await window.GFWorldEvents.setRegion(
-          Number(data.regionData.region_id)
-        );
+        const eventSyncStartedAt =
+          performance.now();
+
+        /*
+         * Fire-and-forget. World Event panel synchronization is not movement
+         * critical and should never hold the player at a tile center.
+         */
+        Promise.resolve(
+          window.GFWorldEvents.setRegion(
+            Number(
+              data.regionData.region_id
+            )
+          )
+        )
+          .then(() => {
+            console.log(
+              `[MOVE ${dir}] world-event region sync: ${Math.round(
+                performance.now() - eventSyncStartedAt
+              )}ms`
+            );
+          })
+          .catch(err => {
+            console.warn(
+              "Unable to sync World Event region after movement:",
+              err
+            );
+          });
       }
     }
 
     if (
-      String(data.terrain || "").toLowerCase() === "dungeon"
+      String(
+        data.terrain || ""
+      ).toLowerCase() ===
+      "dungeon"
     ) {
-      await renderDungeonWorldHeaderIfNeeded(data.terrain);
+      const dungeonHeaderStartedAt =
+        performance.now();
+
+      /*
+       * Dungeon header lookup is also presentation-only. Do not block travel.
+       */
+      Promise.resolve(
+        renderDungeonWorldHeaderIfNeeded(
+          data.terrain
+        )
+      )
+        .then(() => {
+          console.log(
+            `[MOVE ${dir}] dungeon header sync: ${Math.round(
+              performance.now() - dungeonHeaderStartedAt
+            )}ms`
+          );
+        })
+        .catch(err => {
+          console.warn(
+            "Unable to sync Dungeon world header:",
+            err
+          );
+        });
     }
+
+    const hudStartedAt =
+      performance.now();
 
     updateNavHUD(data);
 
-    if (data.huntProgress?.advanced) {
-      showHuntProgress(data.huntProgress);
+    console.log(
+      `[MOVE ${dir}] HUD update: ${Math.round(
+        performance.now() - hudStartedAt
+      )}ms`
+    );
+
+    if (
+      data.huntProgress?.advanced
+    ) {
+      showHuntProgress(
+        data.huntProgress
+      );
     }
 
-    if (data.inCombat && data.enemy) {
-      heldWorldDirections.clear();
-      mostRecentWorldDirection = null;
-      setWorldPlayerMotion(dir, false);
+    console.log(
+      `[MOVE ${dir}] post-move work dispatched: ${Math.round(
+        performance.now() - postMoveStartedAt
+      )}ms`
+    );
 
-      pendingCombatEnemy = data.enemy;
-      queueCombatOpen();
-    }
+    console.log(
+      `[MOVE ${dir}] TOTAL function path: ${Math.round(
+        performance.now() - moveStartedAt
+      )}ms`
+    );
   } catch (err) {
-    console.error("World movement failed", err);
-    await animateWorldRollback(dir);
-  } finally {
-    moveLock = false;
+    console.error(
+      "World movement failed",
+      err
+    );
 
-    if (!isInCombat() && heldWorldDirections.size) {
-      // Start the next cell on the next paint frame. No artificial cooldown or
-      // interval gap means held WASD reads as one continuous walk.
-      requestAnimationFrame(() => {
-        continueHeldWorldMovement();
-      });
-    } else {
-      setWorldPlayerMotion(lastMoveDir || dir, false);
+    const rollbackStartedAt =
+      performance.now();
+
+    await animateWorldRollback(
+      dir
+    );
+
+    console.log(
+      `[MOVE ${dir}] error rollback: ${Math.round(
+        performance.now() - rollbackStartedAt
+      )}ms`
+    );
+  } finally {
+    /*
+     * Success releases movement early above. This fallback only handles
+     * failed/rejected/error paths so the movement lock can never get stuck.
+     */
+    if (!movementReleased) {
+      releaseMovementForNextStep();
     }
   }
 }
