@@ -1,0 +1,195 @@
+/* Guildforge Global Tooltip System
+   public/ui/tooltip.css */
+
+.gf-tooltip {
+  position: fixed;
+  width: min(320px, calc(100vw - 24px));
+  padding: 11px 12px;
+  z-index: 100000;
+
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+
+  border: 1px solid rgba(43,52,64,.95);
+  border-radius: 12px;
+
+  background:
+    linear-gradient(180deg, rgba(15,19,25,.985), rgba(7,10,14,.985));
+  color: rgba(215,219,226,.94);
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,.85),
+    inset 0 1px 0 rgba(255,255,255,.06);
+
+  backdrop-filter: blur(4px);
+  font: 12px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+
+  transition:
+    opacity .12s ease,
+    transform .12s ease;
+}
+
+.gf-tooltip.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.gf-tooltip .t-name {
+  margin-bottom: 5px;
+  color: #c9cfd9;
+  font-weight: 900;
+  font-size: 13px;
+  letter-spacing: .35px;
+}
+
+.gf-tooltip .t-name.gf-base { color: #c9cfd9; }
+.gf-tooltip .t-name.gf-common { color: #c9cfd9; }
+.gf-tooltip .t-name.gf-dormant { color: #50c878; }
+.gf-tooltip .t-name.gf-uncommon { color: #50c878; }
+.gf-tooltip .t-name.gf-awakened { color: #78c8ff; }
+.gf-tooltip .t-name.gf-rare { color: #78c8ff; }
+.gf-tooltip .t-name.gf-empowered { color: #d38cff; }
+.gf-tooltip .t-name.gf-epic { color: #d38cff; }
+.gf-tooltip .t-name.gf-transcendent { color: #ffb84a; }
+.gf-tooltip .t-name.gf-legendary { color: #ffb84a; }
+
+.gf-tooltip .t-name.gf-skill {
+  color: #e6c57a;
+}
+
+.gf-tooltip .t-name.gf-system {
+  color: #c9b89a;
+}
+
+.gf-base, .gf-common { color: #c9cfd9; }
+.gf-dormant, .gf-uncommon { color: #50c878; }
+.gf-awakened, .gf-rare { color: #78c8ff; }
+.gf-empowered, .gf-epic { color: #d38cff; }
+.gf-transcendent, .gf-legendary { color: #ffb84a; }
+
+.gf-tooltip .t-sub {
+  margin-bottom: 8px;
+  color: rgba(154,163,175,.95);
+  font-size: 10.5px;
+  letter-spacing: .35px;
+}
+
+.gf-tooltip .t-desc {
+  margin: 7px 0 9px;
+  color: rgba(174,181,191,.96);
+  font-style: italic;
+}
+
+.gf-tooltip .t-section {
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(43,52,64,.65);
+}
+
+.gf-tooltip .t-cost-section {
+  margin-top: 7px;
+}
+
+.gf-tooltip .t-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(43,52,64,.42);
+}
+
+.gf-tooltip .t-row:first-child {
+  border-top: 0;
+}
+
+.gf-tooltip .t-k {
+  color: rgba(154,163,175,.95);
+  font-size: 10.5px;
+  letter-spacing: .35px;
+}
+
+.gf-tooltip .t-v {
+  color: rgba(225,229,235,.96);
+  font-weight: 900;
+  text-align: right;
+}
+
+.gf-tooltip .t-v.t-damage {
+  color: #e39a87;
+}
+
+.gf-tooltip .t-v.t-heal,
+.gf-tooltip .t-v.t-positive {
+  color: #7ed7a7;
+}
+
+.gf-tooltip .t-v.t-negative {
+  color: #df8f8f;
+}
+
+.gf-tooltip .t-v.t-mana {
+  color: #8db9ef;
+}
+
+.gf-tooltip .t-v.t-total {
+  color: #e6c57a;
+}
+
+.gf-tooltip .t-stats {
+  margin-top: 8px;
+  color: rgba(215,219,226,.92);
+  line-height: 1.45;
+}
+
+.gf-tooltip .t-stats div {
+  margin-bottom: 2px;
+}
+
+.gf-tooltip .t-meta {
+  margin-bottom: 2px;
+  color: rgba(154,163,175,.9);
+  font-size: 11px;
+  letter-spacing: .4px;
+}
+
+.gf-tooltip .t-type {
+  margin-bottom: 8px;
+  color: rgba(126,136,150,.9);
+  font-size: 11px;
+}
+
+.gf-tooltip .t-base {
+  color: rgba(230,235,242,.96);
+  font-weight: 700;
+}
+
+.gf-tooltip .t-bonus {
+  color: #e6c57a;
+}
+
+.gf-tooltip .t-divider {
+  height: 1px;
+  margin: 8px 0 7px;
+  background: rgba(43,52,64,.7);
+}
+
+.gf-tooltip .t-bonus div {
+  margin-bottom: 2px;
+}
+
+.gf-tooltip .t-affix-resonant {
+  font-weight: 700;
+}
+
+.gf-tooltip .t-resonant-tag {
+  opacity: .95;
+  font-style: italic;
+}
+
+@media (max-width: 520px) {
+  .gf-tooltip {
+    width: min(300px, calc(100vw - 20px));
+  }
+}

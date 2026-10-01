@@ -2,6 +2,7 @@
 import express from "express";
 import { db } from "./db";
 import { getAvailableRumorQuests } from "./services/tavernService";
+import { getActiveHavenReports } from "./services/havenReportService";
 
 const router = express.Router();
 
@@ -18,6 +19,20 @@ function escapeHtml(value: any) {
 
 function stripPublicPath(path: string) {
   return path.startsWith("/public/") ? path.replace("/public/", "/") : path;
+}
+
+function havenBackground(name: any) {
+  const normalized = String(name || "")
+    .trim()
+    .toLowerCase();
+
+const backgrounds: Record<string, string> = {
+  "port haven": "/images/backgrounds/porthaven.webp",
+  "val anash": "/images/backgrounds/valanash.webp",
+  "stonehelm hold": "/images/backgrounds/stonehelmhold.webp"
+};
+
+  return backgrounds[normalized] || "";
 }
 
 function renderServiceIcon(icon: any) {
@@ -142,6 +157,33 @@ router.get("/api/town/:townId/gossip", async (req, res) => {
 });
 
 // =======================
+// HAVEN REPORTS
+// =======================
+router.get("/api/town/reports", async (req, res) => {
+  const pid = Number((req.session as any)?.playerId);
+
+  if (!pid) {
+    return res.status(401).json({
+      error: "not_logged_in"
+    });
+  }
+
+  try {
+    const reports = await getActiveHavenReports(20);
+
+    return res.json({
+      reports
+    });
+  } catch (err: any) {
+    console.error("haven reports failed:", err?.message);
+
+    return res.status(500).json({
+      error: "server_error"
+    });
+  }
+});
+
+// =======================
 // TOWN UI
 // =======================
 router.get("/town", async (req, res) => {
@@ -211,6 +253,8 @@ const hasAvailableSkillPoints =
     "A guarded haven where travelers trade stories, mend wounds, and prepare for the wilds."
   );
 
+  const townBackground = havenBackground(town.name);
+
 
   res.send(`
 <!doctype html>
@@ -237,7 +281,11 @@ const hasAvailableSkillPoints =
       <div class="town-layout">
         <!-- LEFT COLUMN -->
         <div class="town-main">
-          <section class="town-hero">
+          <section class="town-hero"${
+            townBackground
+              ? ` style="--haven-background: url('${escapeHtml(townBackground)}')"`
+              : ""
+          }>
             <div class="town-hero__shade"></div>
             <div class="town-hero__content">
               <div class="town-kicker">
@@ -282,9 +330,6 @@ const hasAvailableSkillPoints =
               `).join("")}
             </div>
 
-            <div class="town-note">
-              ⓘ Some services may be expanded later: parties, bulletin board, trade offers, and town reputation.
-            </div>
           </section>
         </div>
 
@@ -307,14 +352,19 @@ const hasAvailableSkillPoints =
               <div id="town-gossip-meta" class="ledger-meta"></div>
             </div>
 
-            <div class="ledger-card">
-              <div class="ledger-card__top">
-                <h3>Haven Reports</h3>
-                <span>World Activity</span>
-              </div>
-              <textarea id="world-feed" class="world-feed-box" readonly></textarea>
-            </div>
+<div class="ledger-card haven-reports-card">
+  <div class="ledger-card__top">
+    <h3>Haven Reports</h3>
+    <span>World Activity</span>
+  </div>
 
+  <div class="haven-reports" id="world-feed">
+    <div class="haven-reports__loading">
+      <span class="report-loading-mark">◆</span>
+      Gathering reports from across the realm…
+    </div>
+  </div>
+</div>
             <div class="venture-card">
               <div class="venture-copy">
                 <div class="venture-icon">⛰</div>

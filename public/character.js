@@ -237,6 +237,30 @@ function escapeSkillHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function buildSpellTooltipAttrs(skill) {
+  return `
+    data-tooltip="spell"
+    data-name="${escapeSkillHtml(skill?.name || "Unknown Skill")}"
+    data-desc="${escapeSkillHtml(skill?.description || "")}"
+    data-discipline="${escapeSkillHtml(getSkillDisciplineName(skill))}"
+    data-spell-type="${escapeSkillHtml(skill?.type || "")}"
+    data-level="${Number(skill?.level || 1)}"
+    data-mana-cost="${Number(skill?.manaCost ?? skill?.mana_cost ?? 0)}"
+    data-cooldown="${Number(skill?.cooldown || 0)}"
+    data-damage="${Number(skill?.damage || 0)}"
+    data-heal="${Number(skill?.heal || 0)}"
+    data-dot-damage="${Number(skill?.dot_damage ?? skill?.dotDamage ?? 0)}"
+    data-dot-duration="${Number(skill?.dot_duration ?? skill?.dotDuration ?? 0)}"
+    data-dot-tick-rate="${Number(skill?.dot_tick_rate ?? skill?.dotTickRate ?? 0)}"
+    data-buff-stat="${escapeSkillHtml(skill?.buff_stat ?? skill?.buffStat ?? "")}"
+    data-buff-value="${Number(skill?.buff_value ?? skill?.buffValue ?? 0)}"
+    data-buff-duration="${Number(skill?.buff_duration ?? skill?.buffDuration ?? 0)}"
+    data-debuff-stat="${escapeSkillHtml(skill?.debuff_stat ?? skill?.debuffStat ?? "")}"
+    data-debuff-value="${Number(skill?.debuff_value ?? skill?.debuffValue ?? 0)}"
+    data-debuff-duration="${Number(skill?.debuff_duration ?? skill?.debuffDuration ?? 0)}"
+  `.trim();
+}
+
 async function readJsonResponse(response) {
   const rawText = await response.text();
 
@@ -764,14 +788,7 @@ function renderLearnedSkillCard(
         ${isEquipped ? "equipped" : ""}
       "
       data-skill-id="${skillId}"
-      data-tooltip="item"
-      data-rarity="skill"
-      data-name="${escapeSkillHtml(
-        skill.name
-      )}"
-      data-desc="${escapeSkillHtml(
-        skill.description || ""
-      )}"
+      ${buildSpellTooltipAttrs(skill)}
       draggable="true"
       tabindex="0"
       role="button"
@@ -908,12 +925,7 @@ function renderSkillHotbar() {
               ? `
                   <div
                     class="skill-slot-content tooltip-parent"
-                    data-tooltip="item"
-                    data-rarity="skill"
-                    data-name="${escapeSkillHtml(spell.name)}"
-                    data-desc="${escapeSkillHtml(
-                      spell.description || ""
-                    )}"
+                    ${buildSpellTooltipAttrs(spell)}
                   >
                     ${
                       icon

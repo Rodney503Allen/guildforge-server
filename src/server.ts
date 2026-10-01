@@ -43,6 +43,9 @@ import worldEventRoutes from "./worldEvent.routes";
 import {
   startWorldEventScheduler
 } from "./services/worldEventSchedulerService";
+import {
+  deleteExpiredHavenReports
+} from "./services/havenReportService";
 
 const app = express();
 const server = createServer(app);
@@ -240,6 +243,40 @@ app.get("/logout", (req, res) => {
 
 
 // =======================
+// HAVEN REPORT CLEANUP
+// =======================
+const HAVEN_REPORT_CLEANUP_INTERVAL_MS =
+  60 * 60 * 1000;
+
+async function cleanupHavenReports() {
+  try {
+    const deleted =
+      await deleteExpiredHavenReports();
+
+    if (deleted > 0) {
+      console.log(
+        `[Haven Reports] Deleted ${deleted} expired report(s).`
+      );
+    }
+  } catch (err) {
+    console.error(
+      "[Haven Reports] Cleanup failed:",
+      err
+    );
+  }
+}
+
+function startHavenReportCleanup() {
+  // Clean stale reports immediately on server startup.
+  void cleanupHavenReports();
+
+  // Then keep the table clean once per hour.
+  setInterval(() => {
+    void cleanupHavenReports();
+  }, HAVEN_REPORT_CLEANUP_INTERVAL_MS);
+}
+
+// =======================
 // START
 // =======================
 server.listen(PORT, "0.0.0.0", () => {
@@ -249,4 +286,5 @@ server.listen(PORT, "0.0.0.0", () => {
 
   startStatusHeartbeat();
   startWorldEventScheduler();
+  startHavenReportCleanup();
 });

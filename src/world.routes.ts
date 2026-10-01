@@ -373,11 +373,16 @@ async function getWorldEventInteractSpawnsInRange(
       String(row.spawn_key || "");
 
     const name =
-      spawnKey === "unstable_sigil_fragment"
-        ? "Unstable Sigil Fragment"
-        : spawnKey === "resonance_trace"
-          ? "Resonance Trace"
-          : "World Event Discovery";
+      spawnKey
+        .split("_")
+        .filter(Boolean)
+        .map(
+          (part: string) =>
+            part.charAt(0).toUpperCase() +
+            part.slice(1)
+        )
+        .join(" ") ||
+      "World Event Discovery";
 
     return {
       id: Number(row.id),
@@ -961,6 +966,29 @@ res.send(`
           </div>
         </div>
       </section>
+
+      <!-- Unclaimed Loot -->
+      <button
+        id="pendingChestBtn"
+        class="pending-chest pending-chest--rail world-rail-card frame-host hidden"
+        type="button"
+        title="You have unclaimed loot"
+        aria-label="Open unclaimed loot"
+      >
+        <span class="frame-border sub" aria-hidden="true"></span>
+
+        <span class="pending-chest__icon" aria-hidden="true">
+          <img src="/images/chest.png" alt="" />
+          <span class="pending-chest-dot"></span>
+        </span>
+
+        <span class="pending-chest__copy">
+          <strong>Unclaimed Loot</strong>
+          <small>Rewards are waiting to be collected</small>
+        </span>
+
+        <span class="pending-chest__arrow" aria-hidden="true">›</span>
+      </button>
     </aside>
 
 
@@ -1829,18 +1857,6 @@ res.send(`
       </div>
     </div>
   </div>
-
-  <!-- Pending Chest Indicator -->
-  <button
-    id="pendingChestBtn"
-    class="pending-chest hidden"
-    type="button"
-    title="You have unclaimed loot"
-    aria-label="Open unclaimed loot"
-  >
-    <img src="/images/chest.png" alt="" aria-hidden="true" />
-    <span class="pending-chest-dot" aria-hidden="true"></span>
-  </button>
 
   <link rel="stylesheet" href="/statpanel.css" />
   <link rel="stylesheet" href="/ui/toast.css" />

@@ -7015,3 +7015,1224 @@ body{
   opacity:.50;
   cursor:not-allowed;
 }
+
+/* ==========================================================
+   WORLD PAGE V4.2 — COMPACT MAP SHELL
+   Tightens the center frame around the actual 9x9 world map
+   and pulls both side rails inward.
+   ========================================================== */
+
+@media (min-width:981px){
+
+  :root{
+    --world-rail-left: clamp(235px, 14vw, 280px);
+    --world-rail-right: var(--world-rail-left);
+    --world-shell-gap: clamp(8px, .65vw, 12px);
+  }
+
+  /*
+   * The whole World UI is now a centered composition instead of
+   * stretching its center column across the entire browser width.
+   */
+  .world-screen{
+    width:max-content;
+    max-width:calc(100vw - 24px);
+    height:90vh;
+
+    margin:0 auto;
+
+    grid-template-columns:
+      var(--world-rail-left)
+      max-content
+      var(--world-rail-right);
+
+    justify-content:center;
+    align-items:stretch;
+
+    gap:var(--world-shell-gap);
+
+    padding:
+      36px
+      0
+      10px;
+  }
+
+  /*
+   * Center column only needs to be as wide as the 9x9 camera
+   * plus the map frame/padding.
+   */
+  .world-center{
+    width:max-content;
+    min-width:0;
+    max-width:none;
+
+    justify-self:center;
+  }
+
+  .world-head--center{
+    width:calc((var(--tile) * 9) + 18px);
+    max-width:100%;
+    box-sizing:border-box;
+  }
+
+  /*
+   * IMPORTANT:
+   * This is the change that removes the giant empty black wings.
+   * The decorative main frame now hugs the actual world camera.
+   */
+  .world-map-panel{
+    width:calc((var(--tile) * 9) + 18px);
+    height:calc((var(--tile) * 9) + 18px);
+
+    min-width:0;
+    min-height:0;
+
+    justify-self:center;
+    align-self:center;
+
+    padding:8px;
+
+    container-type:normal;
+
+    overflow:visible;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(255,255,255,.018),
+        rgba(0,0,0,.12)
+      ),
+      rgba(3,6,9,.68);
+  }
+
+  .world-map-panel .map-stage{
+    width:auto;
+    height:auto;
+
+    min-width:0;
+    min-height:0;
+
+    padding:0;
+
+    display:block;
+    overflow:visible;
+  }
+
+  .world-map-panel .map-wrapper{
+    width:auto;
+    height:auto;
+
+    display:block;
+
+    padding:0;
+    margin:0;
+  }
+
+  /*
+   * Keep the camera exactly 9x9.
+   * Tile size is now calculated from available viewport height
+   * and total compact three-column width.
+   */
+  .grid-viewport{
+    --tile:clamp(
+      52px,
+      min(
+        calc((90vh - 126px) / 9),
+        calc(
+          (
+            100vw -
+            var(--world-rail-left) -
+            var(--world-rail-right) -
+            (var(--world-shell-gap) * 2) -
+            54px
+          ) / 9
+        )
+      ),
+      94px
+    );
+
+    width:calc(var(--tile) * 9);
+    height:calc(var(--tile) * 9);
+
+    max-width:none;
+    max-height:none;
+  }
+
+  .world-center-footer{
+    width:calc((var(--tile) * 9) + 18px);
+    max-width:100%;
+    justify-self:center;
+  }
+
+  /*
+   * Rails now sit immediately beside the fitted map rather than
+   * being pinned to the far edges of the browser.
+   */
+  .world-rail{
+    width:var(--world-rail-left);
+    min-width:0;
+    max-width:var(--world-rail-left);
+  }
+
+  .world-rail--left{
+    justify-self:end;
+  }
+
+  .world-rail--right{
+    justify-self:start;
+  }
+}
+
+/* Slightly tighter rails on common laptop widths. */
+@media (min-width:981px) and (max-width:1400px){
+  :root{
+    --world-rail-left:230px;
+    --world-rail-right:230px;
+    --world-shell-gap:8px;
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V4.3 — WIDER RAILS + TRUE MAP FRAME
+   ========================================================== */
+
+@media (min-width:981px){
+
+  :root{
+    --world-rail-left: clamp(285px, 16vw, 310px);
+    --world-rail-right: var(--world-rail-left);
+    --world-shell-gap: clamp(10px, .8vw, 14px);
+    --world-map-frame-pad: 10px;
+  }
+
+  .world-screen{
+    grid-template-columns:
+      var(--world-rail-left)
+      max-content
+      var(--world-rail-right);
+
+    gap:var(--world-shell-gap);
+  }
+
+  .world-rail{
+    width:var(--world-rail-left);
+    max-width:var(--world-rail-left);
+  }
+
+  /*
+   * Let the camera determine the center panel size.
+   * The panel adds padding OUTSIDE the camera for the frame artwork.
+   */
+  .world-map-panel{
+    width:calc(
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2)
+    );
+
+    height:calc(
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2)
+    );
+
+    box-sizing:border-box;
+
+    padding:var(--world-map-frame-pad);
+
+    position:relative;
+    overflow:visible;
+  }
+
+  .world-map-panel .map-stage,
+  .world-map-panel .map-wrapper{
+    width:calc(var(--tile) * 9);
+    height:calc(var(--tile) * 9);
+
+    min-width:calc(var(--tile) * 9);
+    min-height:calc(var(--tile) * 9);
+
+    max-width:calc(var(--tile) * 9);
+    max-height:calc(var(--tile) * 9);
+
+    padding:0;
+    margin:0;
+
+    overflow:hidden;
+  }
+
+  .grid-viewport{
+    --tile:clamp(
+      50px,
+      min(
+        calc((90vh - 132px) / 9),
+        calc(
+          (
+            100vw -
+            var(--world-rail-left) -
+            var(--world-rail-right) -
+            (var(--world-shell-gap) * 2) -
+            64px
+          ) / 9
+        )
+      ),
+      94px
+    );
+
+    width:calc(var(--tile) * 9);
+    height:calc(var(--tile) * 9);
+
+    min-width:calc(var(--tile) * 9);
+    min-height:calc(var(--tile) * 9);
+
+    max-width:calc(var(--tile) * 9);
+    max-height:calc(var(--tile) * 9);
+  }
+
+  /*
+   * Override older frame positioning.
+   * The decorative frame now traces the OUTER EDGE of the map panel.
+   */
+  .world-map-panel > .frame-border.main{
+    position:absolute !important;
+    inset:0 !important;
+
+    width:100% !important;
+    height:100% !important;
+
+    box-sizing:border-box;
+
+    pointer-events:none;
+    z-index:5;
+  }
+
+  .world-head--center,
+  .world-center-footer{
+    width:calc(
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2)
+    );
+
+    max-width:none;
+  }
+}
+
+@media (min-width:981px) and (max-width:1400px){
+  :root{
+    --world-rail-left:270px;
+    --world-rail-right:270px;
+    --world-shell-gap:9px;
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V4.4 — MAP BUMPER RAIL HEIGHT
+   Rails rise beside the map header and end just below the map.
+   ========================================================== */
+
+@media (min-width:981px){
+
+  /*
+   * Instead of filling the full World shell height, the rails act as
+   * left/right bumpers around the center map composition.
+   *
+   * Negative top margin lifts them beside the Current Region header.
+   * Height carries them only slightly below the framed 9x9 map.
+   */
+  .world-rail{
+    align-self:start;
+
+    margin-top:-58px;
+
+    height:calc(
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      76px
+    );
+
+    min-height:0;
+    max-height:none;
+  }
+
+  .world-rail--left,
+  .world-rail--right{
+    align-self:start;
+  }
+}
+
+/* Slightly reduce the lift on tighter laptop-height layouts. */
+@media (min-width:981px) and (max-height:820px){
+  .world-rail{
+    margin-top:-48px;
+
+    height:calc(
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      66px
+    );
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V4.5 — TRUE HEADER + MAP BUMPER RAILS
+   Final override for desktop rail vertical geometry.
+   ========================================================== */
+
+@media (min-width:981px){
+
+  /*
+   * Undo V4.4's negative lift.
+   * Rails begin naturally at the top of the World composition,
+   * beside the Current Region / World Map heading.
+   */
+  .world-rail,
+  .world-rail--left,
+  .world-rail--right{
+    margin-top:0 !important;
+    align-self:start !important;
+  }
+
+  /*
+   * Center composition:
+   * ~82px header area
+   * + framed 9x9 map
+   * + ~26px lower bumper
+   *
+   * This makes each rail visually bookend the header + map without
+   * extending far down the page.
+   */
+  .world-rail{
+    height:calc(
+      82px +
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      26px
+    ) !important;
+
+    min-height:0 !important;
+    max-height:none !important;
+  }
+
+  /*
+   * Keep the center heading compact so the map begins at a predictable
+   * distance beneath it and the rail tops read as header bumpers.
+   */
+  .world-head--center{
+    min-height:82px;
+    height:82px;
+    box-sizing:border-box;
+  }
+
+  /*
+   * Footer remains below the map but does not influence rail height.
+   */
+  .world-center-footer{
+    min-height:20px;
+  }
+}
+
+/* On shorter desktops, trim only the header allowance slightly. */
+@media (min-width:981px) and (max-height:820px){
+  .world-rail{
+    margin-top:0 !important;
+
+    height:calc(
+      72px +
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      22px
+    ) !important;
+  }
+
+  .world-head--center{
+    min-height:72px;
+    height:72px;
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V4.6 — TIGHTER MAP HEADER GAP
+   ========================================================== */
+
+@media (min-width:981px){
+
+  /*
+   * Pull the map upward by reducing the dedicated center-header
+   * footprint. The title still has breathing room, but no longer
+   * leaves the large empty band visible in V4.5.
+   */
+  .world-head--center{
+    min-height:54px !important;
+    height:54px !important;
+    padding-bottom:4px !important;
+  }
+
+  /*
+   * Rail height follows the same reduced header allowance so their
+   * lower edges remain only slightly below the map.
+   */
+  .world-rail{
+    height:calc(
+      54px +
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      26px
+    ) !important;
+  }
+}
+
+@media (min-width:981px) and (max-height:820px){
+  .world-head--center{
+    min-height:48px !important;
+    height:48px !important;
+    padding-bottom:2px !important;
+  }
+
+  .world-rail{
+    height:calc(
+      48px +
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      22px
+    ) !important;
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V4.7 — FIX CENTER VERTICAL FLOW
+   Removes the flexible 1fr map row that was creating the large
+   empty gap between the World Map heading and the actual map.
+   ========================================================== */
+
+@media (min-width:981px){
+
+  .world-center{
+    display:grid !important;
+
+    /* Header -> map -> footer, all natural height. */
+    grid-template-rows:auto auto auto !important;
+
+    /* Keep the map close to the heading. */
+    row-gap:10px !important;
+
+    align-content:start !important;
+    justify-content:center !important;
+
+    height:auto !important;
+    min-height:0 !important;
+    overflow:visible !important;
+  }
+
+  .world-head--center{
+    height:auto !important;
+    min-height:0 !important;
+
+    margin:0 !important;
+    padding:0 8px 4px !important;
+
+    align-self:start !important;
+  }
+
+  .world-map-panel{
+    /* Critical: do not center inside a flexible grid track. */
+    align-self:start !important;
+    justify-self:center !important;
+
+    margin:0 !important;
+  }
+
+  .world-center-footer{
+    align-self:start !important;
+    margin:0 !important;
+  }
+
+  /*
+   * Rails bookend the complete header + map composition and extend
+   * only slightly below the map.
+   */
+  .world-rail{
+    height:calc(
+      50px +
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      26px
+    ) !important;
+
+    margin-top:0 !important;
+    align-self:start !important;
+  }
+}
+
+@media (min-width:981px) and (max-height:820px){
+  .world-center{
+    row-gap:8px !important;
+  }
+
+  .world-rail{
+    height:calc(
+      46px +
+      (var(--tile) * 9) +
+      (var(--world-map-frame-pad) * 2) +
+      22px
+    ) !important;
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V4.8 — AMBIENT GUILDFORGE BACKDROP
+   ========================================================== */
+
+/*
+ * Keep the base page dark. The artwork is its own visible layer above
+ * the body background and below the World interface.
+ */
+body{
+  position:relative;
+  isolation:isolate;
+}
+
+/*
+ * Large Guildforge environmental backdrop.
+ * Fades at the left, right and bottom so it dissolves into the page.
+ */
+body::before{
+  content:"";
+
+  position:fixed;
+  z-index:0;
+
+  top:82px;
+  left:50%;
+
+  width:92vw;
+  max-width:2200px;
+  height:min(820px, 78vh);
+
+  transform:translateX(-50%);
+
+  pointer-events:none;
+
+  border-radius:34px;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(4,7,10,.12) 0%,
+      rgba(4,7,10,.16) 48%,
+      rgba(4,7,10,.62) 78%,
+      #05070a 100%
+    ),
+    url("/images/backgrounds/background_main.webp")
+      center top / cover no-repeat;
+
+  opacity:.88;
+
+  -webkit-mask-image:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      #000 6%,
+      #000 94%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      #000 0%,
+      #000 68%,
+      transparent 100%
+    );
+
+  -webkit-mask-composite:source-in;
+
+  mask-image:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      #000 6%,
+      #000 94%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      #000 0%,
+      #000 68%,
+      transparent 100%
+    );
+
+  mask-composite:intersect;
+
+  box-shadow:
+    inset 0 -90px 110px #05070a,
+    0 24px 80px rgba(0,0,0,.42);
+}
+
+/*
+ * Remove the old grit/line overlay. We want the artwork itself clean.
+ */
+body::after{
+  display:none !important;
+  content:none !important;
+}
+
+/*
+ * Put the complete World interface above the ambient artwork.
+ * The artwork remains visible in the newly-created space around the
+ * compact map and rails.
+ */
+.world-screen{
+  position:relative;
+  z-index:1;
+}
+
+/*
+ * The global Guildforge header/stats should also remain above the art.
+ * These broad selectors cover the existing header implementations
+ * without changing their layout.
+ */
+header,
+.site-header,
+.game-header,
+.topbar,
+.top-bar,
+#header{
+  position:relative;
+  z-index:2;
+}
+
+@media (max-width:980px){
+  body::before{
+    top:76px;
+    width:96vw;
+    height:70vh;
+    border-radius:24px;
+    opacity:.72;
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V4.9 — DIRECT PAGE BACKGROUND
+   No pseudo-element / z-index dependency.
+   ========================================================== */
+
+html{
+  min-height:100%;
+
+  background:
+    linear-gradient(
+      90deg,
+      #07090c 0%,
+      rgba(7,9,12,.18) 8%,
+      rgba(7,9,12,.08) 50%,
+      rgba(7,9,12,.18) 92%,
+      #07090c 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(7,9,12,.08) 0%,
+      rgba(7,9,12,.12) 54%,
+      rgba(7,9,12,.82) 82%,
+      #07090c 100%
+    ),
+    url("/images/backgrounds/background_main.webp")
+      center 82px / 92vw auto no-repeat,
+    #07090c !important;
+
+  background-attachment:fixed;
+}
+
+/*
+ * The original html,body rule paints an opaque gradient over html.
+ * Make body transparent so the html artwork is actually visible.
+ */
+body{
+  background:transparent !important;
+  background-color:transparent !important;
+
+  position:relative;
+  isolation:auto !important;
+}
+
+/* Disable every old body texture/backdrop pseudo-element. */
+body::before,
+body::after{
+  display:none !important;
+  content:none !important;
+  background:none !important;
+}
+
+/* UI remains naturally above the page background. */
+.world-screen{
+  position:relative;
+  z-index:auto !important;
+}
+
+/* ==========================================================
+   WORLD PAGE V5.0 — TRUE TOWN-STYLE BACKGROUND FADE
+   Uses a dedicated html layer so the mask fades the artwork itself.
+   ========================================================== */
+
+html{
+  min-height:100%;
+  position:relative;
+
+  /* Plain Guildforge base only; artwork moves to ::before. */
+  background:#07090c !important;
+}
+
+/*
+ * Dedicated artwork layer.
+ * Because BODY is transparent, this layer remains visible.
+ */
+html::before{
+  content:"";
+
+  position:fixed;
+  z-index:0;
+
+  top:82px;
+  left:50%;
+
+  width:92vw;
+  max-width:2200px;
+  height:min(820px, 78vh);
+
+  transform:translateX(-50%);
+
+  pointer-events:none;
+
+  border-radius:34px;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(5,7,10,.05) 0%,
+      rgba(5,7,10,.10) 55%,
+      rgba(5,7,10,.28) 76%,
+      rgba(5,7,10,.65) 100%
+    ),
+    url("/images/backgrounds/background_main.webp")
+      center top / cover no-repeat;
+
+  /*
+   * Actual image-edge fade:
+   * horizontal mask fades left/right;
+   * vertical mask fades only the bottom.
+   */
+  -webkit-mask-image:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      #000 7%,
+      #000 93%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      #000 0%,
+      #000 66%,
+      transparent 100%
+    );
+
+  -webkit-mask-composite:source-in;
+
+  mask-image:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      #000 7%,
+      #000 93%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      #000 0%,
+      #000 66%,
+      transparent 100%
+    );
+
+  mask-composite:intersect;
+}
+
+/*
+ * Body stays transparent so html::before is visible.
+ * Establish body as the UI layer above the artwork.
+ */
+body{
+  min-height:100%;
+  position:relative;
+  z-index:1;
+
+  background:transparent !important;
+  background-color:transparent !important;
+
+  isolation:auto !important;
+}
+
+/*
+ * Keep the old BODY pseudo-elements disabled.
+ */
+body::before,
+body::after{
+  display:none !important;
+  content:none !important;
+}
+
+/*
+ * Do not let an older html pseudo-element interfere.
+ */
+html::after{
+  display:none !important;
+  content:none !important;
+}
+
+.world-screen{
+  position:relative;
+  z-index:1;
+}
+
+@media (max-width:980px){
+  html::before{
+    top:76px;
+    width:96vw;
+    height:72vh;
+    border-radius:24px;
+
+    -webkit-mask-image:
+      linear-gradient(
+        90deg,
+        transparent 0%,
+        #000 4%,
+        #000 96%,
+        transparent 100%
+      ),
+      linear-gradient(
+        180deg,
+        #000 0%,
+        #000 70%,
+        transparent 100%
+      );
+
+    mask-image:
+      linear-gradient(
+        90deg,
+        transparent 0%,
+        #000 4%,
+        #000 96%,
+        transparent 100%
+      ),
+      linear-gradient(
+        180deg,
+        #000 0%,
+        #000 70%,
+        transparent 100%
+      );
+  }
+}
+
+/* ==========================================================
+   WORLD PAGE V5.1 — READABILITY / SOLID UI PASS
+   ========================================================== */
+
+/* Main left/right panels are now opaque over the world artwork. */
+.world-rail{
+  background:
+    radial-gradient(
+      420px 240px at 18% 0%,
+      rgba(182,75,46,.055),
+      transparent 68%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.018),
+      rgba(0,0,0,.10)
+    ),
+    #080b0f !important;
+
+  box-shadow:
+    0 18px 42px rgba(0,0,0,.52),
+    inset 0 1px 0 rgba(255,255,255,.035) !important;
+}
+
+/* Internal rail cards should also stop showing the page artwork through them. */
+.world-rail-card{
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.018),
+      rgba(0,0,0,.10)
+    ),
+    #0a0d12 !important;
+}
+
+/*
+ * RIGHT PANEL:
+ * Nearby is already inside the framed right rail, so remove its second
+ * card/frame treatment. It now behaves as content of the outer rail.
+ */
+.world-rail--right .nearby-card{
+  background:transparent !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+
+  padding:4px 2px 2px !important;
+}
+
+/* Hide the decorative inner frame that made Nearby look double-boxed. */
+.world-rail--right .nearby-card > .frame-border,
+.world-rail--right .nearby-card > .frame-border.sub{
+  display:none !important;
+}
+
+/*
+ * Flatten the interactions wrapper as well. Keep its content and scrolling,
+ * but remove the visible "div inside a div" treatment.
+ */
+.world-rail--right .nearby-interactions{
+  background:transparent !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+
+  padding-left:0 !important;
+  padding-right:0 !important;
+}
+
+/* Give the center heading a solid readable plate over the artwork. */
+.world-head--center{
+  background:
+    linear-gradient(
+      180deg,
+      rgba(16,20,26,.98),
+      rgba(8,11,15,.98)
+    ) !important;
+
+  border:1px solid rgba(200,163,75,.20) !important;
+  border-radius:4px !important;
+
+  padding:8px 12px !important;
+
+  box-shadow:
+    0 10px 24px rgba(0,0,0,.42),
+    inset 0 1px 0 rgba(255,255,255,.035) !important;
+}
+
+.world-center-kicker{
+  color:rgba(215,178,84,.92) !important;
+}
+
+.world-title--center,
+.world-center-title{
+  text-shadow:0 2px 5px rgba(0,0,0,.90);
+}
+
+.world-center-meta,
+.world-center-meta .coords{
+  color:rgba(220,224,230,.82) !important;
+}
+
+/*
+ * Enter Town / destination actions need to read as foreground controls,
+ * not translucent overlays on the new artwork.
+ */
+.world-rail--right .nearby-destination,
+.world-rail--right .nearby-destination a,
+.world-rail--right .nearby-destination button,
+.world-rail--right .nearby-destination .btn,
+.world-rail--right .nearby-destination .enter-town-btn{
+  background-color:#11161d !important;
+}
+
+.world-rail--right .nearby-destination{
+  border-color:rgba(200,163,75,.26) !important;
+  box-shadow:
+    0 8px 18px rgba(0,0,0,.34),
+    inset 0 1px 0 rgba(255,255,255,.035) !important;
+}
+
+/* General Enter Town button fallbacks used by older world markup. */
+.enter-town-btn,
+.enterTownBtn,
+a[href="/town"].world-action-btn,
+a[href="/town"].btn{
+  background:
+    linear-gradient(
+      180deg,
+      #5a3025,
+      #3d201a
+    ) !important;
+
+  color:#f3e6ce !important;
+
+  border:1px solid rgba(210,170,80,.50) !important;
+
+  box-shadow:
+    0 7px 18px rgba(0,0,0,.42),
+    inset 0 1px 0 rgba(255,255,255,.08) !important;
+
+  text-shadow:0 1px 2px rgba(0,0,0,.85);
+}
+
+/* ==========================================================
+   WORLD PAGE — UNCLAIMED LOOT LEFT-RAIL CARD
+   Append this block AFTER the existing pending-chest styles.
+   It overrides the old fixed bottom-right button positioning
+   while preserving chest rarity classes and lootChest.js behavior.
+   ========================================================== */
+
+#pendingChestBtn.pending-chest.pending-chest--rail{
+  position:relative;
+  inset:auto;
+  right:auto;
+  bottom:auto;
+
+  width:100%;
+  height:auto;
+  min-height:58px;
+  margin:0;
+
+  display:grid;
+  grid-template-columns:42px minmax(0, 1fr) 18px;
+  align-items:center;
+  gap:10px;
+
+  padding:9px 10px;
+
+  border-radius:10px;
+  border:1px solid rgba(200,163,75,.22);
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.18)),
+    rgba(7,10,14,.72);
+
+  color:rgba(235,225,206,.92);
+  text-align:left;
+  font:inherit;
+
+  cursor:pointer;
+  z-index:1;
+
+  box-shadow:
+    0 8px 20px rgba(0,0,0,.24),
+    inset 0 1px 0 rgba(255,255,255,.035);
+
+  transition:
+    transform .15s ease,
+    border-color .15s ease,
+    background .15s ease,
+    box-shadow .15s ease,
+    filter .15s ease;
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail.hidden{
+  display:none !important;
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail:hover{
+  transform:translateY(-1px);
+  border-color:rgba(200,163,75,.46);
+  background:
+    linear-gradient(180deg, rgba(200,163,75,.075), rgba(0,0,0,.18)),
+    rgba(7,10,14,.82);
+  filter:brightness(1.06);
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail .pending-chest__icon{
+  position:relative;
+  width:42px;
+  height:42px;
+
+  display:grid;
+  place-items:center;
+
+  border-radius:8px;
+  background:rgba(0,0,0,.20);
+  border:1px solid rgba(255,255,255,.06);
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail .pending-chest__icon img{
+  width:34px;
+  height:34px;
+  object-fit:contain;
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail .pending-chest-dot{
+  position:absolute;
+  top:3px;
+  right:3px;
+
+  width:8px;
+  height:8px;
+
+  border-radius:50%;
+  background:#ffcc66;
+
+  box-shadow:
+    0 0 0 2px rgba(0,0,0,.60),
+    0 0 8px rgba(255,204,102,.50);
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail .pending-chest__copy{
+  min-width:0;
+
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail .pending-chest__copy strong{
+  color:rgba(235,225,206,.94);
+
+  font-size:10px;
+  font-weight:800;
+  line-height:1.2;
+
+  text-transform:uppercase;
+  letter-spacing:.55px;
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail .pending-chest__copy small{
+  color:rgba(215,219,226,.56);
+
+  font-size:9px;
+  line-height:1.3;
+  letter-spacing:.1px;
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail .pending-chest__arrow{
+  color:rgba(200,163,75,.72);
+  font-size:20px;
+  line-height:1;
+  text-align:right;
+
+  transition:transform .15s ease, color .15s ease;
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail:hover .pending-chest__arrow{
+  color:rgba(224,190,102,.96);
+  transform:translateX(2px);
+}
+
+/* Keep rarity signaling, but tune the old floating-button glow for the rail. */
+#pendingChestBtn.pending-chest.pending-chest--rail.chest-rarity-base{
+  border-color:rgba(201,207,217,.30);
+  box-shadow:0 8px 20px rgba(0,0,0,.24), 0 0 14px rgba(201,207,217,.10);
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail.chest-rarity-dormant{
+  border-color:rgba(80,200,120,.42);
+  box-shadow:0 8px 20px rgba(0,0,0,.24), 0 0 16px rgba(80,200,120,.15);
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail.chest-rarity-awakened{
+  border-color:rgba(120,200,255,.48);
+  box-shadow:0 8px 20px rgba(0,0,0,.24), 0 0 17px rgba(120,200,255,.18);
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail.chest-rarity-empowered{
+  border-color:rgba(211,140,255,.52);
+  box-shadow:0 8px 20px rgba(0,0,0,.24), 0 0 18px rgba(211,140,255,.20);
+}
+
+#pendingChestBtn.pending-chest.pending-chest--rail.chest-rarity-transcendent{
+  border-color:rgba(255,184,74,.62);
+  box-shadow:0 8px 20px rgba(0,0,0,.24), 0 0 20px rgba(255,184,74,.24);
+}

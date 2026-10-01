@@ -61,15 +61,16 @@ export async function trySpawnEnemy(
   // their final spawn weight below.
 const [candidates]: any = await db.query(
   `
-  SELECT
-    c.*,
-    ca.img AS img
-  FROM creatures c
-  LEFT JOIN creature_archetypes ca
-    ON ca.id = c.archetype_id
-  WHERE (c.terrain = ? OR c.terrain = 'any')
-    AND c.level BETWEEN ? AND ?
-    AND c.spawn_context IN ('world', 'both')
+    SELECT
+      c.*,
+      ca.img AS img
+    FROM creatures c
+    LEFT JOIN creature_archetypes ca
+      ON ca.id = c.archetype_id
+    WHERE (c.terrain = ? OR c.terrain = 'any')
+      AND c.level BETWEEN ? AND ?
+      AND c.spawn_context IN ('world', 'both')
+      AND COALESCE(c.base_spawn_chance, 0) > 0
   `,
   [terrain, zoneMin, zoneMax]
 );
@@ -136,10 +137,12 @@ function getLevelWeight(creatureLevel: number) {
 const QUEST_SPAWN_MULTIPLIER = 1.5;
 
 const weightedCandidates = candidates.map((creature: any) => {
-  const baseWeight = Math.max(
-    0.01,
-    Number(creature.base_spawn_chance) || 0.1
-  );
+  const rawSpawnChance = Number(creature.base_spawn_chance);
+
+  const baseWeight =
+    Number.isFinite(rawSpawnChance) && rawSpawnChance > 0
+      ? rawSpawnChance
+      : 0;
 
   const levelWeight = getLevelWeight(Number(creature.level));
 

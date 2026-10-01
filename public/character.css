@@ -897,8 +897,7 @@ body::before{
   grid-row:3;
 }
 
-.paperdoll .pd-slot > .tooltip-parent,
-.paperdoll .pd-slot > .tooltip-container{
+.paperdoll .pd-slot > [data-tooltip]{
   width:100%;
   height:100%;
   margin:0;
@@ -1792,113 +1791,18 @@ body.avatar-selector-open{
   text-align:center;
 }
 
-/* =========================================
-   TOOLTIPS
-========================================= */
-
-.tooltip-container,
-.tooltip-parent{
-  position:relative;
+/* Global tooltip targets on Character */
+[data-tooltip]{
   cursor:help;
-  z-index:1;
 }
 
-.tooltip-container:hover,
-.tooltip-parent:hover{
-  z-index:9999;
-}
-
-.tooltip-container:hover > .tooltip,
-.tooltip-parent:hover > .tooltip,
-.tooltip-container:hover .tooltip,
-.tooltip-parent:hover .tooltip{
-  display:block;
-}
-
-.tooltip{
-  position:absolute;
-  top:calc(100% + 10px);
-  left:50%;
-  z-index:10000;
-
-  display:none;
-
-  min-width:220px;
-  max-width:320px;
-  padding:10px;
-
-  transform:translateX(-50%);
-
-  border:1px solid rgba(255,255,255,.10);
-  border-radius:12px;
-
-  background:rgba(9,12,16,.97);
-  color:rgba(215,219,226,.92);
-
-  box-shadow:0 22px 60px rgba(0,0,0,.85);
-
-  font:12px/1.4 system-ui,sans-serif;
-  text-align:left;
-
-  pointer-events:none;
-}
-
-.tooltip strong{
-  display:block;
-  margin-bottom:6px;
-  color:var(--bone);
-}
-
-.tooltip .rarity{
-  margin-bottom:6px;
-  color:var(--muted);
-  font-size:11px;
-  text-transform:uppercase;
-}
-
-.tooltip hr{
-  height:1px;
-  margin:8px 0;
-  border:0;
-  background:
-    linear-gradient(
-      90deg,
-      transparent,
-      var(--class-color),
-      transparent
-    );
-}
-
-.tooltip.common{
-  border-color:rgba(201,207,217,.55);
-}
-
-.tooltip.uncommon{
-  border-color:rgba(119,242,154,.55);
-}
-
-.tooltip.rare{
-  border-color:rgba(120,200,255,.55);
-}
-
-.tooltip.epic{
-  border-color:rgba(211,140,255,.55);
-}
-
-.tooltip.legendary{
-  border-color:rgba(255,184,74,.65);
-}
-
-.inv-grid .inv-item:nth-child(1) .tooltip,
-.inv-grid .inv-item:nth-child(2) .tooltip{
-  left:0;
-  transform:none;
-}
-
-.inv-grid .inv-item:nth-child(5n) .tooltip{
-  right:0;
-  left:auto;
-  transform:none;
+.inv-item[data-tooltip],
+.learned-skill-card[data-tooltip],
+.skill-hotbar-slot [data-tooltip],
+.potion-inner[data-tooltip],
+.tool-inner[data-tooltip],
+.paperdoll [data-tooltip]{
+  cursor:pointer;
 }
 
 /* =========================================

@@ -1,5 +1,6 @@
 // services/lootGenerator.ts
 import { db } from "../db";
+import { createHavenReport } from "./havenReportService";
 
 type Creature = {
   id: number;
@@ -263,6 +264,41 @@ const saved = await saveItemInstance(
 );
 
   results.push(saved);
+
+  if (saved.rarity === "transcendent") {
+    try {
+      const [playerRows]: any = await db.query(
+        `
+          SELECT name
+          FROM players
+          WHERE id = ?
+          LIMIT 1
+        `,
+        [player.id]
+      );
+
+      const playerName =
+        String(playerRows?.[0]?.name || "An adventurer");
+
+      await createHavenReport({
+        type: "RARE_DROP",
+        title: "An Extraordinary Discovery",
+        message:
+          `${playerName} has discovered ${saved.name}, ` +
+          `a Transcendent piece of equipment.`,
+        playerId: player.id,
+        entityType: "player_item",
+        entityId: saved.playerItemId,
+        importance: 3
+      });
+    } catch (err: any) {
+      console.error(
+        "Failed to create Transcendent Haven Report:",
+        err?.message || err
+      );
+    }
+  }
+
   return results;
 }
 

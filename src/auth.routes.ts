@@ -3,6 +3,7 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
+import { generateLootFromBaseItem } from "./services/lootGenerator";
 
 const router = express.Router();
 
@@ -144,7 +145,7 @@ router.post("/register", async (req, res) => {
           ?, ?, ?, 1, 0,
           ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?,
-          100, 1, ?, ?, 'Crocania'
+          100, 1, ?, ?, 'Port Haven'
         )
       `,
       [
@@ -185,6 +186,67 @@ router.post("/register", async (req, res) => {
         WHERE id = ?
       `,
       [p.maxhp, p.maxspoints, playerId]
+    );
+
+    // =======================
+    // STARTER KIT
+    // =======================
+    // Give every new player a claimed, unequipped level-1 Base
+    // Primitive Hatchet. Using the normal loot generator keeps
+    // starter equipment in the same player_items format as all
+    // other generated equipment.
+    const starterWeapon = await generateLootFromBaseItem({
+      playerId,
+      baseItemId: 61,       // Primitive Hatchet
+      itemLevel: 1,
+      sourceType: "starter",
+      sourceId: null,
+      isClaimed: true,
+      rarityOverride: "base"
+    });
+
+    if (!starterWeapon) {
+      throw new Error("Failed to create starter Primitive Hatchet");
+    }
+
+    // Link the generated Primitive Hatchet into the player's inventory.
+    // Generated equipment uses player_item_id rather than item_id.
+    // Keep it unequipped so the tutorial can teach equipment assignment.
+    await db.query(
+      `
+        INSERT INTO inventory (
+          player_id,
+          item_id,
+          player_item_id,
+          quantity,
+          equipped
+        )
+        VALUES (?, NULL, ?, 1, 0)
+      `,
+      [
+        playerId,
+        starterWeapon.playerItemId
+      ]
+    );
+
+    // Give the player five Small Health Potions.
+    // They intentionally begin unequipped so the tutorial can
+    // teach the player how to assign/equip a potion.
+    await db.query(
+      `
+        INSERT INTO inventory (
+          player_id,
+          item_id,
+          quantity,
+          equipped
+        )
+        VALUES (?, ?, ?, 0)
+      `,
+      [
+        playerId,
+        1, // Small Health Potion
+        5
+      ]
     );
 
     res.json({ success: true });

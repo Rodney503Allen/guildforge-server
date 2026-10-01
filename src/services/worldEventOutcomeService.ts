@@ -11,6 +11,8 @@ import {
   prepareWorldEventOutcomeRewards
 } from "./worldEventRewardService";
 
+import { createHavenReport } from "./havenReportService";
+
 async function query<T = any>(
   sql: string,
   params: any[] = []
@@ -304,10 +306,34 @@ export async function resolveWorldEventOutcome(
     [activeEventId, outcome.outcomeId]
   );
 
+  const eventBeforeCompletion =
+    await getActiveWorldEvent(activeEventId);
+
   await completeWorldEvent(
     activeEventId,
     outcome.outcomeId
   );
+
+  if (eventBeforeCompletion) {
+    try {
+      await createHavenReport({
+        type: "WORLD_EVENT",
+        title: outcome.name,
+        message:
+          outcome.description ||
+          `The events unfolding in ${eventBeforeCompletion.regionName} have reached their conclusion.`,
+        regionId: eventBeforeCompletion.regionId,
+        entityType: "world_event",
+        entityId: eventBeforeCompletion.eventId,
+        importance: 2
+      });
+    } catch (err) {
+      console.error(
+        "Failed to publish completed world event Haven Report:",
+        err
+      );
+    }
+  }
 
   return {
     resolved: true,

@@ -177,19 +177,22 @@ async function loadTool(pid: number, invId: number | null, expectedType: string)
 }
 
 const renderToolSlot = (label: string, tool: any, slot: string) => `
-  <div class="tool-slot tooltip-container">
+  <div class="tool-slot">
     <div class="tool-title">${label}</div>
 
     ${
       tool
         ? `
-          <div class="tool-inner" ondblclick="unequipTool('${slot}')">
+          <div
+            class="tool-inner"
+            data-tooltip="tool"
+            data-name="${escapeHtml(tool.name)}"
+            data-sub="Equipped Tool"
+            data-slot="${escapeHtml(label)}"
+            data-desc="${escapeHtml(tool.description || "")}"
+            ondblclick="unequipTool('${slot}')"
+          >
             <img class="tool-img" src="${resolveIcon(tool.icon)}" onerror="this.style.display='none'">
-            <div class="tooltip">
-              <strong>${escapeHtml(tool.name)}</strong>
-              <div class="rarity">EQUIPPED TOOL</div>
-              <div>${escapeHtml(tool.description || "")}</div>
-            </div>
           </div>
         `
         : `<div class="tool-empty">Empty</div>`
@@ -730,7 +733,7 @@ router.get("/character", requireLogin, async (req, res) => {
       <div class="pd-slot ${slotName}"
            ondragover="event.preventDefault()"
            ondrop="dropEquip(event, '${slotName}')">
-        <div class="tooltip-parent"
+        <div class="equipment-tooltip-target"
              ${buildTooltipAttrs(item)}
              draggable="true"
              data-id="${item.instance_id}"
@@ -753,13 +756,13 @@ router.get("/character", requireLogin, async (req, res) => {
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/statpanel.css">
   <link rel="stylesheet" href="/ui/toast.css">
-  <link rel="stylesheet" href="/ui/itemTooltip.css">
+  <link rel="stylesheet" href="/ui/tooltip.css">
   <link rel="stylesheet" href="/character.css">
 
   <script src="/ui/toast.js"></script>
-  <script defer src="/ui/itemTooltip.js"></script>
+  <script defer src="/ui/tooltip.js"></script>
   <script defer src="/statpanel.js"></script>
-  <script defer src="/character.js?v=6"></script>
+  <script defer src="/character.js?v=7"></script>
 </head>
 
 <body>
@@ -868,13 +871,12 @@ router.get("/character", requireLogin, async (req, res) => {
             <div class="summary-row">
               <span>Health</span>
 
-              <strong class="tooltip-container">
+              <strong
+                data-tooltip="info"
+                data-name="Maximum Health"
+                data-desc="Your maximum health after base stats, equipment, and active buffs."
+              >
                 ${p.hpoints} / ${p.maxhp}
-
-                <span class="tooltip">
-                  <strong>Maximum Health</strong>
-                  Base + Gear + Buffs
-                </span>
               </strong>
             </div>
 
@@ -891,13 +893,12 @@ router.get("/character", requireLogin, async (req, res) => {
             <div class="summary-row">
               <span>Dodge Chance</span>
 
-              <strong class="tooltip-container">
+              <strong
+                data-tooltip="info"
+                data-name="Dodge Chance"
+                data-desc="Chance to completely avoid an incoming attack."
+              >
                 ${(p.dodgeChance * 100).toFixed(1)}%
-
-                <span class="tooltip">
-                  <strong>Dodge Chance</strong>
-                  Chance to completely avoid an incoming attack.
-                </span>
               </strong>
             </div>
           </div>
@@ -926,21 +927,16 @@ router.get("/character", requireLogin, async (req, res) => {
                     </span>
 
                     <span
-                      class="stat-value tooltip-container"
+                      class="stat-value"
                       id="${stat}"
+                      data-tooltip="stat"
+                      data-name="${stat.charAt(0).toUpperCase() + stat.slice(1)}"
+                      data-base="${statBreakdown[stat].base}"
+                      data-gear="${statBreakdown[stat].gear}"
+                      data-buffs="${statBreakdown[stat].buff}"
+                      data-total="${statBreakdown[stat].total}"
                     >
                       ${(p as any)[stat]}
-
-                      <span class="tooltip">
-                        <strong>${stat.toUpperCase()}</strong>
-                        <div>Base: ${statBreakdown[stat].base}</div>
-                        <div>Gear: +${statBreakdown[stat].gear}</div>
-                        <div>Buffs: +${statBreakdown[stat].buff}</div>
-                        <hr>
-                        <div>
-                          <b>Total: ${statBreakdown[stat].total}</b>
-                        </div>
-                      </span>
                     </span>
 
                     ${
@@ -989,7 +985,7 @@ router.get("/character", requireLogin, async (req, res) => {
           </div>
 
           <div class="quickbelt">
-            <div class="potion-slot tooltip-container">
+            <div class="potion-slot">
               <div class="potion-title">Health</div>
 
               ${
@@ -997,6 +993,10 @@ router.get("/character", requireLogin, async (req, res) => {
                   ? `
                     <div
                       class="potion-inner"
+                      data-tooltip="potion"
+                      data-name="${escapeHtml(hpPotion.name)}"
+                      data-sub="Equipped Potion"
+                      data-slot="Health"
                       ondblclick="unequipPotion('health')"
                     >
                       <img
@@ -1007,12 +1007,6 @@ router.get("/character", requireLogin, async (req, res) => {
                       >
 
                       <div class="stack-count">${hpPotion.qty}</div>
-
-                      <div class="tooltip">
-                        <strong>${hpPotion.name}</strong>
-                        <div class="rarity">Equipped</div>
-                        <div>Slot: Health</div>
-                      </div>
                     </div>
                   `
                   : `<div class="potion-empty">Empty</div>`
@@ -1023,7 +1017,7 @@ router.get("/character", requireLogin, async (req, res) => {
             ${renderToolSlot("Herbalism", herbalismTool, "herbalism")}
             ${renderToolSlot("Woodcutting", woodcuttingTool, "woodcutting")}
 
-            <div class="potion-slot tooltip-container">
+            <div class="potion-slot">
               <div class="potion-title">Mana</div>
 
               ${
@@ -1031,6 +1025,10 @@ router.get("/character", requireLogin, async (req, res) => {
                   ? `
                     <div
                       class="potion-inner"
+                      data-tooltip="potion"
+                      data-name="${escapeHtml(spPotion.name)}"
+                      data-sub="Equipped Potion"
+                      data-slot="Mana"
                       ondblclick="unequipPotion('mana')"
                     >
                       <img
@@ -1041,12 +1039,6 @@ router.get("/character", requireLogin, async (req, res) => {
                       >
 
                       <div class="stack-count">${spPotion.qty}</div>
-
-                      <div class="tooltip">
-                        <strong>${spPotion.name}</strong>
-                        <div class="rarity">Equipped</div>
-                        <div>Slot: Mana</div>
-                      </div>
                     </div>
                   `
                   : `<div class="potion-empty">Empty</div>`

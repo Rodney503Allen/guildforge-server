@@ -5,6 +5,7 @@ import {
   removeWorldEventPhaseSpawns,
   removeAllWorldEventSpawns
 } from "./worldEventSpawnService";
+import { createHavenReport } from "./havenReportService";
 
 /**
  * Promise wrapper matching the existing Guildforge service pattern.
@@ -22,6 +23,7 @@ export type ActiveWorldEvent = {
   eventId: number;
   phaseId: number;
   regionId: number;
+  regionName: string;
   status: string;
   startedAt: Date | string;
   endsAt: Date | string;
@@ -73,6 +75,7 @@ export async function getActiveEventForRegion(
 
         we.name AS event_name,
         we.description AS event_description,
+        r.name AS region_name,
 
         wep.phase_number,
         wep.name AS phase_name,
@@ -83,6 +86,9 @@ export async function getActiveEventForRegion(
 
       JOIN world_events we
         ON we.id = awe.event_id
+
+      JOIN regions r
+        ON r.id = awe.region_id
 
       JOIN world_event_phases wep
         ON wep.id = awe.phase_id
@@ -130,6 +136,7 @@ export async function getActiveWorldEvent(
 
         we.name AS event_name,
         we.description AS event_description,
+        r.name AS region_name,
 
         wep.phase_number,
         wep.name AS phase_name,
@@ -140,6 +147,9 @@ export async function getActiveWorldEvent(
 
       JOIN world_events we
         ON we.id = awe.event_id
+
+      JOIN regions r
+        ON r.id = awe.region_id
 
       JOIN world_event_phases wep
         ON wep.id = awe.phase_id
@@ -247,6 +257,9 @@ async function buildActiveEvent(
 
     regionId:
       Number(row.region_id),
+
+    regionName:
+      String(row.region_name || "Unknown Region"),
 
     status:
       String(row.status),
@@ -375,6 +388,28 @@ export async function createActiveOutcomeInfluenceRows(
       phaseId
     ]
   );
+}
+
+async function publishWorldEventReport(input: {
+  title: string;
+  message: string;
+  regionId: number;
+  eventId: number;
+  importance?: number;
+}): Promise<void> {
+  try {
+    await createHavenReport({
+      type: "WORLD_EVENT",
+      title: input.title,
+      message: input.message,
+      regionId: input.regionId,
+      entityType: "world_event",
+      entityId: input.eventId,
+      importance: input.importance ?? 2
+    });
+  } catch (err) {
+    console.error("Failed to publish world event Haven Report:", err);
+  }
 }
 
 /* =========================================================
@@ -581,6 +616,14 @@ export async function startWorldEvent(
     );
   }
 
+  await publishWorldEventReport({
+    title: activeEvent.phaseName || activeEvent.eventName,
+    message: `Disturbing activity has been reported in ${activeEvent.regionName}. Adventurers are being called to investigate.`,
+    regionId: activeEvent.regionId,
+    eventId: activeEvent.eventId,
+    importance: 2
+  });
+
   return activeEvent;
 }
 
@@ -730,6 +773,14 @@ export async function advanceWorldEventPhase(
       "World event phase advanced but could not be loaded."
     );
   }
+
+  await publishWorldEventReport({
+    title: activeEvent.phaseName,
+    message: `The struggle in ${activeEvent.regionName} has taken a dangerous turn. ${activeEvent.phaseName} has begun.`,
+    regionId: activeEvent.regionId,
+    eventId: activeEvent.eventId,
+    importance: 3
+  });
 
   return activeEvent;
 }

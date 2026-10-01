@@ -24,6 +24,42 @@ router.post("/quests/:questId/accept", async (req, res) => {
     if (!Number.isFinite(questId)) return res.status(400).json({ error: "Invalid questId" });
 
     const out = await acceptQuest(pid, questId, "tavern");
+
+    /*
+     * Automatically track every newly accepted quest.
+     *
+     * We resolve the player_quests row here instead of depending on the
+     * return shape of acceptQuest(), which keeps this route compatible
+     * with the existing quest service.
+     *
+     * INSERT IGNORE preserves the current multi-track behavior and also
+     * makes this safe if the quest was already tracked elsewhere.
+     */
+    const [[acceptedPlayerQuest]]: any = await db.query(
+      `
+        SELECT id
+        FROM player_quests
+        WHERE player_id = ?
+          AND quest_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `,
+      [pid, questId]
+    );
+
+    if (acceptedPlayerQuest?.id) {
+      await db.query(
+        `
+          INSERT IGNORE INTO player_tracked_quests (
+            player_id,
+            player_quest_id
+          )
+          VALUES (?, ?)
+        `,
+        [pid, Number(acceptedPlayerQuest.id)]
+      );
+    }
+
     res.json(out);
   } catch (err: any) {
     // duplicate accept (unique constraint)
