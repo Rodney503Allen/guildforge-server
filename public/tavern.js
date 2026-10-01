@@ -132,6 +132,12 @@ async function listenForRumors() {
     if (!res.ok) throw new Error(data?.error || "rumor_error");
 
     renderRumorStack(data?.quests || []);
+
+    // The Accept Quest buttons are created dynamically after listening.
+    // Refresh the tutorial so its highlight moves from Listen to Accept Quest.
+    if (window.GFTutorial?.refresh) {
+      await window.GFTutorial.refresh();
+    }
   } catch (e) {
     console.error("listenForRumors failed:", e);
     currentRumorQuestId = null;
@@ -166,6 +172,13 @@ async function acceptRumorQuest(questId, button) {
 
     const card = button.closest(".rumor-card");
     if (card) card.classList.add("accepted");
+
+    // Quest acceptance advances the tutorial on the server. Refresh any
+    // tutorial UI loaded on this page immediately instead of waiting for
+    // another navigation/reload.
+    if (window.GFTutorial?.refresh) {
+      await window.GFTutorial.refresh();
+    }
 
     await loadTurnins();
   } catch (e) {

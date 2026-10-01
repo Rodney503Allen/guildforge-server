@@ -8236,3 +8236,38 @@ a[href="/town"].btn{
   border-color:rgba(255,184,74,.62);
   box-shadow:0 8px 20px rgba(0,0,0,.24), 0 0 20px rgba(255,184,74,.24);
 }
+
+
+/* =========================================================
+   WORLD EVENT + NEARBY SIDEBAR ACCESSIBILITY
+   Keep large active events from pushing Nearby Interactables
+   out of practical reach on desktop.
+========================================================= */
+
+@media (min-width: 981px) {
+  #worldEventPanel.world-event-panel {
+    flex: 0 1 auto;
+    max-height: 330px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color:
+      rgba(200, 163, 75, 0.46)
+      rgba(0, 0, 0, 0.18);
+  }
+
+  #worldEventPanel.world-event-panel::-webkit-scrollbar {
+    width: 7px;
+  }
+
+  #worldEventPanel.world-event-panel::-webkit-scrollbar-thumb {
+    background: rgba(200, 163, 75, 0.46);
+    border-radius: 999px;
+  }
+
+  #worldEventPanel.world-event-panel::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 999px;
+  }
+}

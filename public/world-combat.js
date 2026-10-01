@@ -514,6 +514,16 @@ function handleCombatStatePayload(data) {
     }
 
     enterPostCombatState();
+
+    // The server commits tutorial completion before publishing victory.
+    // Refresh immediately, then once more shortly afterward as a harmless
+    // fallback for any delayed UI/network state.
+    window.GFTutorial?.refresh?.();
+    if (snapshot.state === "victory") {
+      window.setTimeout(() => {
+        window.GFTutorial?.refresh?.();
+      }, 150);
+    }
   }
 }
 
@@ -959,6 +969,13 @@ loadHotbarSpells();
 
   // ✅ Always show modal immediately (so user sees it)
   document.getElementById("combatModal").classList.remove("hidden");
+
+  // The movement route advances ENTER_FIRST_COMBAT -> CAST_FIRST_SPELL
+  // as soon as an enemy is spawned. Refresh now that combat is actually
+  // visible so the tutorial immediately changes from movement guidance
+  // to the spell-casting instruction.
+  window.GFTutorial?.refresh?.();
+
   loadEquippedPotions();
     // ✅ Enemy portrait from creatures.creatureimage
 const enemyImg = document.getElementById("enemyPortrait");
@@ -1423,6 +1440,9 @@ async function castSpell(spellId) {
   if (data.playerSP !== undefined) {
     updatePlayerSP(data.playerSP);
   } 
+
+  // Refresh the tutorial after a server-accepted spell cast.
+  window.GFTutorial?.refresh?.();
   
 if (data.dead) {
   logCombat("🏆 Enemy defeated!");
@@ -1676,6 +1696,7 @@ async function useHotbarPotion(slot) {
 
     await refreshPlayerCaps();
     await loadEquippedPotions(); // qty/empty refresh
+    window.GFTutorial?.refresh?.();
   } catch (e) {
     // refund cooldown on network failure
     cancelPotionCooldown(slot);

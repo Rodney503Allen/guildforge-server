@@ -1,0 +1,46 @@
+.tutorial-panel {
+  position: fixed; right: 24px; bottom: 24px; z-index: 10000;
+  width: min(360px, calc(100vw - 32px)); padding: 18px 20px 16px;
+  border: 1px solid rgba(210,174,102,.7); border-radius: 12px;
+  background: linear-gradient(180deg, rgba(37,31,27,.98), rgba(20,18,17,.98));
+  box-shadow: 0 18px 50px rgba(0,0,0,.55); color: #eee3ce;
+}
+.tutorial-kicker { margin-bottom: 6px; font: 700 11px/1.2 Cinzel,serif; letter-spacing: .18em; color: #cda85f; }
+.tutorial-title { margin: 0 56px 7px 0; font: 700 18px/1.25 Cinzel,serif; }
+.tutorial-text { margin: 0; font-size: 14px; line-height: 1.55; color: #cfc4b2; }
+.tutorial-progress { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); font-size: 11px; color: #8f877b; }
+.tutorial-skip { position: absolute; top: 14px; right: 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; background: rgba(255,255,255,.04); color: #aaa197; padding: 5px 8px; cursor: pointer; }
+
+/* Server-rendered target: visible immediately, before tutorial.js runs. */
+.tutorial-server-target,
+[data-tutorial-active-target="true"],
+.tutorial-highlight {
+  position: relative !important;
+  z-index: 10001 !important;
+  outline: 4px solid #ffd56a !important;
+  outline-offset: 5px !important;
+  box-shadow: 0 0 0 3px rgba(0,0,0,.9), 0 0 24px rgba(255,213,106,.95), 0 0 55px rgba(255,213,106,.5) !important;
+  animation: tutorialTargetPulse 1.1s ease-in-out infinite !important;
+}
+
+.tutorial-server-target::after {
+  content: "GO HERE";
+  position: absolute;
+  left: 50%; top: -14px;
+  transform: translate(-50%, -100%);
+  z-index: 10002;
+  padding: 7px 11px;
+  border: 2px solid #ffd56a; border-radius: 5px;
+  background: #171008; color: #ffe5a0;
+  font: 800 11px/1 Cinzel,serif; letter-spacing: .12em; white-space: nowrap;
+  pointer-events: none;
+}
+
+@keyframes tutorialTargetPulse {
+  0%,100% { filter: brightness(1); }
+  50% { filter: brightness(1.18); }
+}
+
+@media (max-width:700px) {
+  .tutorial-panel { right:16px; bottom:16px; left:16px; width:auto; }
+}

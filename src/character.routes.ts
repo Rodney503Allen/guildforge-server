@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
+import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 import {
   getInventoryCapacity,
   getUsedInventorySlots,
@@ -346,6 +347,8 @@ router.post("/character/avatar/equip", requireLogin, async (req, res) => {
 // =======================
 router.get("/character", requireLogin, async (req, res) => {
   const pid = req.session.playerId as number;
+
+  await advanceTutorial(pid, TutorialStep.VISIT_CHARACTER, TutorialStep.EQUIP_STARTER_WEAPON);
 
   const [[basePlayer]]: any = await db.query(`
     SELECT
@@ -726,11 +729,12 @@ router.get("/character", requireLogin, async (req, res) => {
   const renderEquipSlot = (slotName: string, alt: string) => {
     const item = equipped[slotName];
     if (!item) {
-      return `<div class="pd-slot ${slotName}" ondragover="event.preventDefault()" ondrop="dropEquip(event, '${slotName}')"><div class="pd-empty"></div></div>`;
+      return `<div class="pd-slot ${slotName}" data-tutorial-slot="${slotName}" ondragover="event.preventDefault()" ondrop="dropEquip(event, '${slotName}')"><div class="pd-empty"></div></div>`;
     }
 
     return `
       <div class="pd-slot ${slotName}"
+           data-tutorial-slot="${slotName}"
            ondragover="event.preventDefault()"
            ondrop="dropEquip(event, '${slotName}')">
         <div class="equipment-tooltip-target"
@@ -758,11 +762,13 @@ router.get("/character", requireLogin, async (req, res) => {
   <link rel="stylesheet" href="/ui/toast.css">
   <link rel="stylesheet" href="/ui/tooltip.css">
   <link rel="stylesheet" href="/character.css">
+  <link rel="stylesheet" href="/tutorial.css">
 
   <script src="/ui/toast.js"></script>
   <script defer src="/ui/tooltip.js"></script>
   <script defer src="/statpanel.js"></script>
-  <script defer src="/character.js?v=7"></script>
+  <script defer src="/character.js?v=8"></script>
+  <script defer src="/tutorial.js?v=1"></script>
 </head>
 
 <body>
@@ -985,7 +991,7 @@ router.get("/character", requireLogin, async (req, res) => {
           </div>
 
           <div class="quickbelt">
-            <div class="potion-slot">
+            <div class="potion-slot" data-tutorial-potion-slot="health" ondragover="event.preventDefault()" ondrop="dropPotion(event, 'health')">
               <div class="potion-title">Health</div>
 
               ${
@@ -1017,7 +1023,7 @@ router.get("/character", requireLogin, async (req, res) => {
             ${renderToolSlot("Herbalism", herbalismTool, "herbalism")}
             ${renderToolSlot("Woodcutting", woodcuttingTool, "woodcutting")}
 
-            <div class="potion-slot">
+            <div class="potion-slot" data-tutorial-potion-slot="mana" ondragover="event.preventDefault()" ondrop="dropPotion(event, 'mana')">
               <div class="potion-title">Mana</div>
 
               ${
@@ -1120,6 +1126,9 @@ router.get("/character", requireLogin, async (req, res) => {
                     data-id="${g.instance_id}"
                     data-slot="${g.slot || ""}"
                     data-item-type="${g.item_type || ""}"
+                    data-type="${g.type || ""}"
+                    data-effect-target="${g.effect_target || ""}"
+                    data-tutorial-name="${escapeHtml(g.name || "")}"
                     data-search="${escapeHtml(
                       (g.name || "").toLowerCase()
                     )}"
@@ -1399,6 +1408,10 @@ router.post("/character/equip", requireLogin, async (req, res) => {
       [row.player_item_id, pid]
     );
 
+    if (slot === "weapon") {
+      await advanceTutorial(Number(pid), TutorialStep.EQUIP_STARTER_WEAPON, TutorialStep.ASSIGN_HEALTH_POTION);
+    }
+
     return res.json({ success: true });
   }
 
@@ -1417,6 +1430,10 @@ router.post("/character/equip", requireLogin, async (req, res) => {
       `UPDATE inventory SET equipped = 1 WHERE inventory_id = ?`,
       [row.inventory_id]
     );
+  }
+
+  if (slot === "weapon") {
+    await advanceTutorial(Number(pid), TutorialStep.EQUIP_STARTER_WEAPON, TutorialStep.ASSIGN_HEALTH_POTION);
   }
 
   res.json({ success: true });
@@ -1547,6 +1564,10 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
 
     await conn.commit();
     conn.release();
+
+    if (slot === "health") {
+      await advanceTutorial(Number(pid), TutorialStep.ASSIGN_HEALTH_POTION, TutorialStep.VISIT_TRAINER);
+    }
 
     res.json({ success: true });
   } catch (err) {

@@ -6,6 +6,7 @@ import {
   SpellProgressionError,
   trainNextSpellRank
 } from "./services/spellProgressionService";
+import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 
 const router = express.Router();
 
@@ -167,6 +168,13 @@ function buildSpellRows(s: any) {
 
 router.get("/", requireLogin, async (req: any, res: any) => {
   const pid = req.session.playerId as number;
+
+  // Reaching the Trainer completes the tutorial navigation objective.
+  await advanceTutorial(
+    Number(pid),
+    TutorialStep.VISIT_TRAINER,
+    TutorialStep.LEARN_FIRST_SPELL
+  );
 
   const [[player]]: any = await db.query(
     `
@@ -389,6 +397,7 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
         data-spell-card="1"
         data-spell-id="${sid}"
         data-state="${esc(state)}"
+        data-tutorial-spell-state="${esc(state)}"
         data-type="${esc(String(s.type || ""))}"
         data-icon="${attr(icon)}"
         data-name="${attr(name)}"
@@ -641,8 +650,10 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
   <title>Guildforge | Trainer</title>
   <link rel="stylesheet" href="/statpanel.css">
   <link rel="stylesheet" href="/trainer.css">
+  <link rel="stylesheet" href="/tutorial.css">
   <script defer src="/statpanel.js"></script>
   <script defer src="/trainer.js"></script>
+  <script defer src="/tutorial.js?v=3"></script>
 </head>
 <body style="--class-color:${esc(classColor)};">
   <div id="statpanel-root"></div>
@@ -662,7 +673,7 @@ const spellCards = Array.from(spellsByDiscipline.values()).map((group: any) => {
         <div class="hero-actions">
           <span class="pill">Class: <strong>${esc(pclass)}</strong></span>
           <span class="pill">Skill Points: <strong>${playerSkillPoints}</strong></span>
-          <a class="btn danger" href="/town">Return to Town</a>
+          <a class="btn danger" href="/town" data-tutorial-route="/town">Return to Town</a>
         </div>
       </header>
 
@@ -760,6 +771,16 @@ router.get("/learn/:id", requireLogin, async (req: any, res: any) => {
 
   try {
     const result = await trainNextSpellRank(pid, spellId);
+
+    // Learning Rank 1 completes the tutorial's "learn your first spell" step.
+    // Rank upgrades later in the game do not affect tutorial progression.
+    if (Number(result.newRank) === 1) {
+      await advanceTutorial(
+        pid,
+        TutorialStep.LEARN_FIRST_SPELL,
+        TutorialStep.EQUIP_FIRST_SPELL
+      );
+    }
 
     return res.redirect(
       `/trainer?success=${encodeURIComponent(`Spell advanced to Rank ${result.newRank}.`)}`

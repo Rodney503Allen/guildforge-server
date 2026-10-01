@@ -1,6 +1,7 @@
 // routes/quest.routes.ts
 import express from "express";
 import { db } from "./db";
+import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 import { Router } from "express";
 import {
   acceptQuest,
@@ -59,6 +60,12 @@ router.post("/quests/:questId/accept", async (req, res) => {
         [pid, Number(acceptedPlayerQuest.id)]
       );
     }
+
+    await advanceTutorial(
+      Number(pid),
+      TutorialStep.ACCEPT_FIRST_QUEST,
+      TutorialStep.LEAVE_PORT_HAVEN
+    );
 
     res.json(out);
   } catch (err: any) {

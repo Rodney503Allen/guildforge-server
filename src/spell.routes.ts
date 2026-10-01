@@ -22,6 +22,7 @@ import { getEquippedSpells } from "./services/spellLoadoutService";
 import { publishWorldCombatSnapshot } from "./combatSocket";
 import { emitPlayerStatePatch, getSocketServer } from "./socketServer";
 import { publishPlayerLevelUp } from "./playerStateEvents";
+import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 
 import {
   prepareSpellForCast,
@@ -799,6 +800,13 @@ const spellEnemy =
       preparedCast,
       spellContext,
       result
+    );
+
+    // The cast has now passed validation, spent its cost, and executed successfully.
+    await advanceTutorial(
+      pid,
+      TutorialStep.CAST_FIRST_SPELL,
+      TutorialStep.USE_FIRST_POTION
     );
 
     const berserkerCriticalGauge = await processBerserkerCriticalGauge(pid, Boolean(result.crit));

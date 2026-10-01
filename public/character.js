@@ -126,6 +126,23 @@ async function unequipTool(slot) {
   location.reload();
 }
 
+function dropPotion(e, expectedPotionSlot) {
+  e.preventDefault();
+  if (!draggedId) return;
+
+  const el = document.querySelector(`[data-id="${draggedId}"]`);
+  const itemType = String(el?.dataset.type || "").toLowerCase();
+  const effectTarget = String(el?.dataset.effectTarget || "").toLowerCase();
+  const expectedTarget = expectedPotionSlot === "health" ? "hp" : expectedPotionSlot === "mana" ? "sp" : "";
+
+  if (itemType !== "potion" || effectTarget !== expectedTarget) {
+    showErrorToast("That potion does not belong in this slot.");
+    return;
+  }
+
+  equipPotion(draggedId, expectedPotionSlot);
+}
+
 function dropTool(e, expectedToolSlot) {
   e.preventDefault();
   if (!draggedId) return;
@@ -1134,6 +1151,12 @@ async function equipSelectedSkill(spellId, slot) {
 
     selectedSkillId = null;
     renderSkillSelectionUI();
+
+    // Spell equipping does not reload the Character page, so refresh
+    // the shared tutorial immediately after the server confirms success.
+    if (window.GFTutorial?.refresh) {
+      await window.GFTutorial.refresh();
+    }
   } catch (err) {
     console.error("Failed to equip skill:", err);
 

@@ -14,6 +14,12 @@ import {
   type CombatSession,
 } from "./services/combatSessionService";
 
+import {
+  advanceTutorial,
+  completeTutorial,
+  TutorialStep,
+} from "./services/tutorialService";
+
 const COMBAT_TICK_MS = 250;
 
 const combatLoops =
@@ -176,6 +182,43 @@ function startCombatLoop(
           await advanceCombatSession(
             session
           );
+
+          /*
+           * If combat just ended in victory, finish tutorial progression
+           * BEFORE publishing the final snapshot. The browser refreshes the
+           * tutorial as soon as it receives that victory snapshot, so the DB
+           * must already contain the completed state at that point.
+           */
+          if (session.state === "victory") {
+            // Normal path: potion used, then the player wins.
+            let reachedComplete = await advanceTutorial(
+              playerId,
+              TutorialStep.WIN_FIRST_BATTLE,
+              TutorialStep.COMPLETE
+            );
+
+            // Safety path: if the first enemy dies before a potion is needed,
+            // do not strand the new player on an impossible combat step.
+            if (!reachedComplete) {
+              const skippedPotion = await advanceTutorial(
+                playerId,
+                TutorialStep.USE_FIRST_POTION,
+                TutorialStep.WIN_FIRST_BATTLE
+              );
+
+              if (skippedPotion) {
+                reachedComplete = await advanceTutorial(
+                  playerId,
+                  TutorialStep.WIN_FIRST_BATTLE,
+                  TutorialStep.COMPLETE
+                );
+              }
+            }
+
+            if (reachedComplete) {
+              await completeTutorial(playerId);
+            }
+          }
 
           const snapshot =
             buildCombatSnapshot(

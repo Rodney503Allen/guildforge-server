@@ -19,6 +19,7 @@ import {
   getPotionCooldownRemainingMs,
   startPotionCooldown
 } from "./services/potionCooldownService";
+import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 
 const router = Router();
 
@@ -658,6 +659,13 @@ router.post("/combat/potions-use", async (req, res) => {
   if (out.depleted) {
     await db.query(`UPDATE players SET ${col}=NULL WHERE id=?`, [pid]);
   }
+
+  // A server-accepted potion use satisfies the combat potion tutorial step.
+  await advanceTutorial(
+    Number(pid),
+    TutorialStep.USE_FIRST_POTION,
+    TutorialStep.WIN_FIRST_BATTLE
+  );
 
   res.json(out);
 });

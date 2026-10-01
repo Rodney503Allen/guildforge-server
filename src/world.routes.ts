@@ -12,6 +12,7 @@ import { maybeSpawnResourceNodeForPlayer } from "./services/gatheringSpawnServic
 import { advanceHuntObjective } from "./huntService";
 import { publishHuntReadyCheck } from "./huntSocket";
 import { getHuntReadyCheck } from "./services/huntReadyCheckService";
+import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 
 
 const router = express.Router();
@@ -697,6 +698,13 @@ router.get("/world", async (req, res) => {
   const pid = (req.session as any).playerId;
   if (!pid) return res.redirect("/login.html");
 
+  // Reaching the World page means the player has left the haven.
+  await advanceTutorial(
+    Number(pid),
+    TutorialStep.LEAVE_PORT_HAVEN,
+    TutorialStep.ENTER_FIRST_COMBAT
+  );
+
   // Load player
   const [[player]]: any = await db.query(
     `
@@ -853,6 +861,7 @@ res.send(`
   <link rel="stylesheet" href="/hunt-combat.css">
   <link rel="stylesheet" href="/dungeon.css">
 
+  <link rel="stylesheet" href="/tutorial.css">
 </head>
 
 <body data-gf-terrain="${currentTerrain}">
@@ -1885,6 +1894,7 @@ res.send(`
   <script src="/world.page.js" defer></script>
   <script src="/world-quests.js"></script>
   <script src="/world-combat.js"></script>
+  <script src="/tutorial.js?v=8"></script>
   <script src="/world-events.js"></script>
   <script src="/world.js"></script>
   <script src="/socket.io/socket.io.js"></script>
@@ -2629,6 +2639,15 @@ await db.query(
   `UPDATE players SET steps_since_encounter=? WHERE id=?`,
   [stepsSince, pid]
 );
+
+// Only advance the combat tutorial when movement actually spawned an enemy.
+if (enemy) {
+  await advanceTutorial(
+    Number(pid),
+    TutorialStep.ENTER_FIRST_COMBAT,
+    TutorialStep.CAST_FIRST_SPELL
+  );
+}
 
   // Nearest Haven
   let nearestHaven: any = null;

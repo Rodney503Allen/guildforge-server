@@ -3,6 +3,7 @@ import express from "express";
 import { db } from "./db";
 import { getAvailableRumorQuests } from "./services/tavernService";
 import { getActiveHavenReports } from "./services/havenReportService";
+import { getTutorialState, TutorialStep } from "./services/tutorialService";
 
 const router = express.Router();
 
@@ -21,18 +22,9 @@ function stripPublicPath(path: string) {
   return path.startsWith("/public/") ? path.replace("/public/", "/") : path;
 }
 
-function havenBackground(name: any) {
-  const normalized = String(name || "")
-    .trim()
-    .toLowerCase();
-
-const backgrounds: Record<string, string> = {
-  "port haven": "/images/backgrounds/porthaven.webp",
-  "val anash": "/images/backgrounds/valanash.webp",
-  "stonehelm hold": "/images/backgrounds/stonehelmhold.webp"
-};
-
-  return backgrounds[normalized] || "";
+function normalizeTutorialRoute(value: any) {
+  const route = String(value || "").toLowerCase().split("?")[0];
+  return route.replace(/\.html$/i, "");
 }
 
 function renderServiceIcon(icon: any) {
@@ -208,6 +200,17 @@ if (!player) return res.redirect("/login.html");
 const hasAvailableSkillPoints =
   Number(player.skill_points || 0) >= 1;
 
+// Resolve the tutorial target on the server so Town guidance does not depend
+// on tutorial.js successfully rediscovering the correct service after render.
+const tutorialState = await getTutorialState(Number(pid));
+const tutorialStep = tutorialState?.completed ? null : Number(tutorialState?.step);
+const tutorialRoute =
+  tutorialStep === TutorialStep.ACCEPT_FIRST_QUEST ? "/tavern" :
+  tutorialStep === TutorialStep.LEAVE_PORT_HAVEN ? "/world" :
+  tutorialStep === TutorialStep.VISIT_TRAINER ? "/trainer" :
+  tutorialStep === TutorialStep.VISIT_CHARACTER ? "/character" :
+  null;
+
   const [[town]]: any = await db.query(`
     SELECT *
     FROM locations
@@ -253,8 +256,6 @@ const hasAvailableSkillPoints =
     "A guarded haven where travelers trade stories, mend wounds, and prepare for the wilds."
   );
 
-  const townBackground = havenBackground(town.name);
-
 
   res.send(`
 <!doctype html>
@@ -269,7 +270,9 @@ const hasAvailableSkillPoints =
 
   <link rel="stylesheet" href="/statpanel.css">
   <link rel="stylesheet" href="/town.css">
+  <link rel="stylesheet" href="/tutorial.css?v=7">
   <script defer src="/town.js"></script>
+  <script defer src="/tutorial.js?v=8"></script>
 </head>
 
 <body>
@@ -281,11 +284,7 @@ const hasAvailableSkillPoints =
       <div class="town-layout">
         <!-- LEFT COLUMN -->
         <div class="town-main">
-          <section class="town-hero"${
-            townBackground
-              ? ` style="--haven-background: url('${escapeHtml(townBackground)}')"`
-              : ""
-          }>
+          <section class="town-hero">
             <div class="town-hero__shade"></div>
             <div class="town-hero__content">
               <div class="town-kicker">
@@ -317,8 +316,14 @@ const hasAvailableSkillPoints =
                     String(s.route || "").toLowerCase() === "/trainer" && hasAvailableSkillPoints
                       ? "has-spell-alert"
                       : ""
+                  } ${
+                    tutorialRoute === normalizeTutorialRoute(s.route)
+                      ? "tutorial-server-target"
+                      : ""
                   }"
                    href="${escapeHtml(s.route || "#")}"
+                   data-tutorial-route="${escapeHtml(String(s.route || "").toLowerCase())}"
+                   ${tutorialRoute === normalizeTutorialRoute(s.route) ? 'data-tutorial-active-target="true"' : ""}
                    tabindex="0">
                   <div class="service-icon">${renderServiceIcon(s.icon)}</div>
                   <div class="service-copy">
@@ -373,7 +378,7 @@ const hasAvailableSkillPoints =
                   <p>Supplies, gear, and luck — that's what survives the wild.</p>
                 </div>
               </div>
-                <a href="/world" class="leave-btn button-frame">Leave Haven <span>›</span></a>
+                <a href="/world" data-tutorial-route="/world" ${tutorialRoute === "/world" ? 'data-tutorial-active-target="true"' : ""} class="leave-btn button-frame ${tutorialRoute === "/world" ? "tutorial-server-target" : ""}">Leave Haven <span>›</span></a>
             </div>
           </section>
         </aside>

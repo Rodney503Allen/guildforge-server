@@ -7,6 +7,7 @@ import {
   unequipSpell
 } from "./services/spellLoadoutService";
 import { db } from "./db";
+import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 
 const router = Router();
 
@@ -186,6 +187,13 @@ router.post("/spells/equip", async (req, res) => {
       playerId,
       spellId,
       slot
+    );
+
+    // A successful spell equip completes the tutorial hotbar objective.
+    await advanceTutorial(
+      playerId,
+      TutorialStep.EQUIP_FIRST_SPELL,
+      TutorialStep.ACCEPT_FIRST_QUEST
     );
 
     const slots = await getEquippedSpells(playerId);

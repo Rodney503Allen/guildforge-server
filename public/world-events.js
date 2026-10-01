@@ -279,8 +279,15 @@
         ? playerEvent.influence
         : [];
 
+    /*
+     * Regional influence is intentionally hidden until this player has
+     * completed a personal path and committed their contribution.
+     * The server may return influence rows from the moment an event starts,
+     * but exposing them early would let players see the regional vote before
+     * making their own choice.
+     */
     const influenceHtml =
-      influence.length
+      committed && influence.length
         ? `
           <div class="world-event-influence">
             <div class="world-event-influence__title">

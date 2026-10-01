@@ -8,6 +8,7 @@ import { generateLootForCreature } from "./lootGenerator";
 import { recordCreatureKill } from "./bestiaryService";
 import { advanceHuntObjective } from "../huntService";
 import { recordWorldEventProgress } from "./worldEventProgressService";
+import { advanceTutorial, completeTutorial, TutorialStep } from "./tutorialService";
 
 
 /**
@@ -375,6 +376,37 @@ await db.query(
   `DELETE FROM player_creatures WHERE id = ? AND player_id = ?`,
   [playerCreatureId, playerId]
 );
+
+// The first completed world-combat victory finishes the new-player tutorial.
+// These transitions are guarded by the expected current step, so established
+// players and players earlier in the tutorial are unaffected.
+let reachedTutorialComplete = await advanceTutorial(
+  playerId,
+  TutorialStep.WIN_FIRST_BATTLE,
+  TutorialStep.COMPLETE
+);
+
+// If the first enemy dies before the player needs a potion, don't strand them
+// on an impossible potion-use step. Treat the victory as satisfying that step.
+if (!reachedTutorialComplete) {
+  const skippedPotionStep = await advanceTutorial(
+    playerId,
+    TutorialStep.USE_FIRST_POTION,
+    TutorialStep.WIN_FIRST_BATTLE
+  );
+
+  if (skippedPotionStep) {
+    reachedTutorialComplete = await advanceTutorial(
+      playerId,
+      TutorialStep.WIN_FIRST_BATTLE,
+      TutorialStep.COMPLETE
+    );
+  }
+}
+
+if (reachedTutorialComplete) {
+  await completeTutorial(playerId);
+}
 
 return {
   expGained,
