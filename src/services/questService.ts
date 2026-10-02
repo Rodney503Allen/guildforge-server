@@ -311,6 +311,8 @@ export async function advanceQuestObjectives(pid: number, event: QuestEvent): Pr
       const activeObjectives = objectives.filter(r => Math.max(1, Number(r.step_order) || 1) === activeStep);
       let touched = false;
 
+
+      
       for (const r of activeObjectives) {
         if (!objectiveMatchesEvent(r, event)) continue;
 

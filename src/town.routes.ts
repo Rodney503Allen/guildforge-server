@@ -256,6 +256,16 @@ const tutorialRoute =
     "A guarded haven where travelers trade stories, mend wounds, and prepare for the wilds."
   );
 
+  const havenBackgrounds: Record<string, string> = {
+    "port haven": "/images/backgrounds/porthaven.webp",
+    "val anash": "/images/backgrounds/valanash.webp",
+    "stonehelm hold": "/images/backgrounds/stonehelmhold.webp",
+  };
+
+  const havenBackground =
+    havenBackgrounds[String(town.name || "").trim().toLowerCase()] ||
+    "/images/town/town-banner.webp";
+
 
   res.send(`
 <!doctype html>
@@ -284,7 +294,10 @@ const tutorialRoute =
       <div class="town-layout">
         <!-- LEFT COLUMN -->
         <div class="town-main">
-          <section class="town-hero">
+          <section
+            class="town-hero"
+            style="--haven-background: url('${escapeHtml(havenBackground)}');"
+          >
             <div class="town-hero__shade"></div>
             <div class="town-hero__content">
               <div class="town-kicker">
