@@ -1,5 +1,6 @@
 //chestService.ts
 import { db } from "../db";
+import { getScaledBaseStats } from "./lootGenerator";
 import { addItemWithConn } from "./inventoryService";
 import { syncTurnInObjectivesFromInventory } from "./questService";
 import { getInventoryCapacity } from "./inventoryCapacityService";
@@ -86,8 +87,16 @@ async function getChestItemsWithDisplayData(playerId: number, chestId: number) {
         i.icon AS static_icon,
         i.rarity AS static_rarity,
         i.type AS static_type,
+        i.item_type AS static_item_type,
+        i.slot AS static_slot,
         i.description AS static_description,
         i.value AS static_value,
+        COALESCE(i.attack, 0) AS static_attack,
+        COALESCE(i.defense, 0) AS static_defense,
+        COALESCE(i.agility, 0) AS static_agility,
+        COALESCE(i.vitality, 0) AS static_vitality,
+        COALESCE(i.intellect, 0) AS static_intellect,
+        COALESCE(i.crit, 0) AS static_crit,
 
         -- rolled items
         pi.name AS rolled_name,
@@ -99,6 +108,9 @@ async function getChestItemsWithDisplayData(playerId: number, chestId: number) {
         ib.slot AS rolled_slot,
         ib.item_type AS rolled_item_type,
         ib.armor_weight AS rolled_armor_weight,
+        ib.weapon_class AS rolled_weapon_class,
+        ib.description AS rolled_description,
+        ib.required_level AS rolled_required_level,
         COALESCE(ib.base_attack, 0) AS rolled_base_attack,
         COALESCE(ib.base_defense, 0) AS rolled_base_defense
 
@@ -119,6 +131,15 @@ async function getChestItemsWithDisplayData(playerId: number, chestId: number) {
   return (items ?? []).map((it: any) => {
     const isRolled = it.player_item_id != null && it.rolled_name != null;
 
+    const scaledBaseStats = isRolled
+      ? getScaledBaseStats({
+          baseAttack: it.rolled_base_attack,
+          baseDefense: it.rolled_base_defense,
+          requiredLevel: it.rolled_required_level,
+          itemLevel: it.rolled_item_level,
+        })
+      : null;
+
     return {
       id: Number(it.id),
       item_id: it.item_id != null ? Number(it.item_id) : null,
@@ -130,19 +151,28 @@ async function getChestItemsWithDisplayData(playerId: number, chestId: number) {
       rarity: normalizeRarity(isRolled ? it.rolled_rarity : it.static_rarity),
 
       type: isRolled ? "equipment" : (it.static_type ?? null),
-      description: isRolled ? null : (it.static_description ?? null),
+      description: isRolled ? (it.rolled_description ?? null) : (it.static_description ?? null),
       value: isRolled
         ? null
         : (it.static_value != null ? Number(it.static_value) : null),
 
       roll_json: it.roll_json ? safeParseJson(it.roll_json) : null,
 
-      slot: isRolled ? it.rolled_slot : null,
-      item_type: isRolled ? it.rolled_item_type : null,
+      slot: isRolled ? it.rolled_slot : (it.static_slot ?? null),
+      item_type: isRolled ? it.rolled_item_type : (it.static_item_type ?? null),
       armor_weight: isRolled ? it.rolled_armor_weight : null,
+      weapon_class: isRolled ? it.rolled_weapon_class : null,
       item_level: isRolled && it.rolled_item_level != null ? Number(it.rolled_item_level) : null,
-      base_attack: isRolled && it.rolled_base_attack != null ? Number(it.rolled_base_attack) : null,
-      base_defense: isRolled && it.rolled_base_defense != null ? Number(it.rolled_base_defense) : null,
+      base_attack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : null,
+      base_defense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : null,
+
+      attack: !isRolled ? Number(it.static_attack || 0) : 0,
+      defense: !isRolled ? Number(it.static_defense || 0) : 0,
+      agility: !isRolled ? Number(it.static_agility || 0) : 0,
+      vitality: !isRolled ? Number(it.static_vitality || 0) : 0,
+      intellect: !isRolled ? Number(it.static_intellect || 0) : 0,
+      crit: !isRolled ? Number(it.static_crit || 0) : 0,
+
       is_rolled: isRolled
     };
   });

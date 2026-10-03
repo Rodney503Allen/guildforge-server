@@ -68,165 +68,168 @@
     lines.push(`<div>${esc(label)}: +${esc(value)}${esc(suffix)}</div>`);
   }
 
-  function buildAutoStatsHtml(dataset) {
-    const sections = [];
-    const itemLevel = optionalNumber(dataset.itemLevel);
-    const slot = dataset.slot || "";
-    const itemType = dataset.itemType || "";
+  function buildEquipmentType(dataset) {
+    const slot = String(dataset.slot || "").toLowerCase();
     const armorWeight = dataset.armorWeight || "";
+    const weaponClass = dataset.weaponClass || "";
+    const itemType = dataset.itemType || dataset.category || "";
+
+    if ((slot === "weapon" || slot === "offhand") && weaponClass) {
+      return formatLabel(weaponClass);
+    }
+
+    if (armorWeight) return formatLabel(armorWeight);
+    if (weaponClass) return formatLabel(weaponClass);
+    if (itemType) return formatLabel(itemType);
+    return "";
+  }
+
+  function buildEquipmentStats(dataset) {
     const baseAttack = optionalNumber(dataset.baseAttack);
     const baseDefense = optionalNumber(dataset.baseDefense);
-    const agility = optionalNumber(dataset.agility);
-    const vitality = optionalNumber(dataset.vitality);
-    const intellect = optionalNumber(dataset.intellect);
-    const crit = optionalNumber(dataset.crit);
+    const attack = optionalNumber(dataset.attack);
+    const defense = optionalNumber(dataset.defense);
     const rollJson = safeParseJson(dataset.rollJson);
+    const hasRolls = Array.isArray(rollJson) && rollJson.length > 0;
+    const lines = [];
 
-    const metaParts = [];
-    if (slot) metaParts.push(formatLabel(slot));
-    if (itemLevel != null) metaParts.push(`Lv. ${itemLevel}`);
+    const shownAttack = baseAttack != null && baseAttack !== 0 ? baseAttack : attack;
+    const shownDefense = baseDefense != null && baseDefense !== 0 ? baseDefense : defense;
 
-    if (metaParts.length) {
-      sections.push(`<div class="t-meta">${metaParts.map(esc).join(" | ")}</div>`);
+    if (shownAttack != null && shownAttack !== 0) {
+      lines.push(`<div class="t-equip-primary">${esc(shownAttack)} Attack</div>`);
     }
 
-    if (armorWeight || itemType) {
-      const typeParts = [];
-      if (armorWeight) typeParts.push(formatLabel(armorWeight));
-      if (itemType) typeParts.push(formatLabel(itemType));
-      sections.push(`<div class="t-type">${typeParts.map(esc).join(" ")}</div>`);
+    if (shownDefense != null && shownDefense !== 0) {
+      lines.push(`<div class="t-equip-primary">${esc(shownDefense)} Defense</div>`);
     }
 
-    const baseLines = [];
-    addStatLine(baseLines, "Attack", baseAttack);
-    addStatLine(baseLines, "Defense", baseDefense);
-    addStatLine(baseLines, "Agility", agility);
-    addStatLine(baseLines, "Vitality", vitality);
-    addStatLine(baseLines, "Intellect", intellect);
-    addStatLine(baseLines, "Crit", crit, "%");
+    // Generated equipment gets its bonus stats from roll_json so they are not duplicated.
+    if (hasRolls) {
+      rollJson.forEach(affix => {
+        if (!affix) return;
 
-    if (baseLines.length) {
-      sections.push(`<div class="t-base">${baseLines.join("")}</div>`);
-    }
-
-    const bonusLines = [];
-    if (Array.isArray(rollJson)) {
-      for (const affix of rollJson) {
-        if (!affix) continue;
+        const value = Number(affix.value || 0);
+        if (!Number.isFinite(value) || value === 0) return;
 
         const label = affix.label || formatLabel(affix.stat || "Stat");
-        const value = Number(affix.value || 0);
         const isPercent = Boolean(affix.isPercent);
         const resonant = Boolean(affix.resonant);
 
-        if (!Number.isFinite(value) || value === 0) continue;
-
-        const valueText = `+${value}${isPercent ? "%" : ""}`;
-        const resonanceTag = resonant
-          ? ` <span class="t-resonant-tag">(Resonant)</span>`
-          : "";
-
-        bonusLines.push(`
-          <div class="t-affix${resonant ? " t-affix-resonant" : ""}">
-            ${esc(label)}: ${esc(valueText)}${resonanceTag}
+        lines.push(`
+          <div class="t-equip-stat${resonant ? " t-affix-resonant" : ""}">
+            <span class="t-equip-stat-text">+${esc(value)}${isPercent ? "%" : ""} ${esc(label)}</span>
+            ${resonant ? `<span class="t-resonant-tag">Resonant</span>` : ""}
           </div>
         `);
-      }
+      });
+    } else {
+      [
+        ["Agility", optionalNumber(dataset.agility), ""],
+        ["Vitality", optionalNumber(dataset.vitality), ""],
+        ["Intellect", optionalNumber(dataset.intellect), ""],
+        ["Critical Chance", optionalNumber(dataset.crit), "%"]
+      ].forEach(([label, value, suffix]) => {
+        if (value == null || value === 0) return;
+        lines.push(`<div class="t-equip-stat"><span class="t-equip-stat-text">+${esc(value)}${esc(suffix)} ${esc(label)}</span></div>`);
+      });
     }
 
-    if (bonusLines.length) {
-      sections.push('<div class="t-divider"></div>');
-      sections.push(`<div class="t-bonus">${bonusLines.join("")}</div>`);
-    }
-
-    return sections.join("");
+    return lines.join("");
   }
 
   function buildItem(element) {
     const d = element.dataset;
     const name = d.name || "Unknown Item";
-    const rarity = d.rarity || "dormant";
+    const rarity = d.rarity || "base";
+    const itemLevel = optionalNumber(d.itemLevel);
+    const slot = String(d.slot || "").toLowerCase().trim();
+    const equipmentSlots = new Set(["weapon", "offhand", "head", "chest", "legs", "feet", "hands"]);
+    const isEquipment = equipmentSlots.has(slot);
+    const equipmentType = isEquipment ? buildEquipmentType(d) : "";
+    const equipmentStats = isEquipment ? buildEquipmentStats(d) : "";
     const value = optionalNumber(d.value);
-    const rate = optionalNumber(d.rate);
     const sell = optionalNumber(d.sell);
     const price = optionalNumber(d.price);
     const quantity = optionalNumber(d.qty);
     const durability = optionalNumber(d.durability);
     const unique = d.unique === "true" || d.unique === "1";
-    const statsHtml = buildAutoStatsHtml(d);
+    const utilityRows = [];
 
-    const subParts = [];
-    if (value != null) subParts.push(`Value: ${value}g`);
-    if (rate != null) subParts.push(`Rate: ${rate}%`);
+    if (quantity != null && quantity > 1) utilityRows.push(row("Quantity", quantity));
+    if (durability != null) utilityRows.push(row("Durability", durability));
+    if (sell != null) utilityRows.push(row("Sell Value", `${sell}g`));
+    else if (value != null && value > 0) utilityRows.push(row("Value", `${value}g`));
+    if (price != null) utilityRows.push(row("Cost", `${price}g`));
+    if (unique) utilityRows.push(row("Property", "Unique"));
+
+    if (isEquipment) {
+      tooltip.innerHTML = `
+        <div class="t-wow-item">
+          <div class="t-name ${rarityClass(rarity)}">${esc(name)}</div>
+          ${itemLevel != null && itemLevel > 0 ? `<div class="t-item-level">Item Level ${esc(itemLevel)}</div>` : ""}
+          ${(slot || equipmentType) ? `
+            <div class="t-equip-type-row">
+              <span>${esc(formatLabel(slot))}</span>
+              <span>${esc(equipmentType)}</span>
+            </div>
+          ` : ""}
+          ${equipmentStats ? `<div class="t-equip-stats">${equipmentStats}</div>` : ""}
+          ${d.desc ? `<div class="t-flavor-divider"></div><div class="t-item-flavor">${esc(d.desc)}</div>` : ""}
+          ${utilityRows.length ? `<div class="t-item-utility">${utilityRows.join("")}</div>` : ""}
+        </div>
+      `;
+      return;
+    }
+
+    const rarityLabel = formatLabel(rarity === "base" ? "Common" : rarity);
+    const nonEquipmentType = formatLabel(d.type || d.category || "Item");
+    const nonEquipmentItemType = formatLabel(d.itemType || "");
 
     tooltip.innerHTML = `
-      <div class="t-name ${rarityClass(rarity)}">${esc(name)}</div>
-      ${subParts.length ? `<div class="t-sub">${esc(subParts.join(" • "))}</div>` : ""}
-      ${sell != null ? row("Sell", `${sell}g`) : ""}
-      ${price != null ? row("Cost", `${price}g`) : ""}
-      ${quantity != null && quantity > 1 ? row("Stack", quantity) : ""}
-      ${durability != null ? row("Durability", durability) : ""}
-      ${unique ? row("Type", "Unique") : ""}
-      ${statsHtml ? `<div class="t-stats">${statsHtml}</div>` : ""}
-      ${description(d.desc || "")}
+      <div class="t-wow-item">
+        <div class="t-name ${rarityClass(rarity)}">${esc(name)}</div>
+        <div class="t-item-level">${esc(rarityLabel)}</div>
+        ${(nonEquipmentType || nonEquipmentItemType) ? `
+          <div class="t-equip-type-row">
+            <span>${esc(nonEquipmentType)}</span>
+            <span>${esc(nonEquipmentItemType)}</span>
+          </div>
+        ` : ""}
+        ${d.desc ? `<div class="t-flavor-divider"></div><div class="t-item-flavor">${esc(d.desc)}</div>` : ""}
+        ${utilityRows.length ? `<div class="t-item-utility">${utilityRows.join("")}</div>` : ""}
+      </div>
     `;
   }
 
   function buildSpell(element) {
     const d = element.dataset;
     const name = d.name || "Unknown Skill";
-    const discipline = d.discipline || "";
-    const spellType = formatLabel(d.spellType || "");
-    const level = optionalNumber(d.level);
-    const manaCost = optionalNumber(d.manaCost);
-    const cooldown = optionalNumber(d.cooldown);
-    const damage = optionalNumber(d.damage);
-    const heal = optionalNumber(d.heal);
-    const dotDamage = optionalNumber(d.dotDamage);
-    const dotDuration = optionalNumber(d.dotDuration);
-    const dotTickRate = optionalNumber(d.dotTickRate);
-    const buffStat = d.buffStat || "";
-    const buffValue = optionalNumber(d.buffValue);
-    const buffDuration = optionalNumber(d.buffDuration);
-    const debuffStat = d.debuffStat || "";
-    const debuffValue = optionalNumber(d.debuffValue);
-    const debuffDuration = optionalNumber(d.debuffDuration);
+    const manaCost = optionalNumber(d.manaCost) ?? 0;
+    const cooldown = optionalNumber(d.cooldown) ?? 0;
+    const desc = d.desc || "";
 
-    const meta = [discipline, spellType, level != null ? `Level ${level}` : ""]
-      .filter(Boolean)
-      .join(" • ");
+    const manaText =
+      manaCost > 0
+        ? `${manaCost} Mana`
+        : "No Mana Cost";
 
-    const mechanics = [];
-    if (damage != null && damage !== 0) mechanics.push(row("Damage", damage, "t-damage"));
-    if (heal != null && heal !== 0) mechanics.push(row("Healing", heal, "t-heal"));
-    if (dotDamage != null && dotDamage !== 0) mechanics.push(row("DoT Damage", dotDamage, "t-damage"));
-    if (dotDuration != null && dotDuration > 0) mechanics.push(row("DoT Duration", `${dotDuration} sec`));
-    if (dotTickRate != null && dotTickRate > 0) mechanics.push(row("Tick Rate", `${dotTickRate} sec`));
-
-    if (buffStat && buffValue != null && buffValue !== 0) {
-      mechanics.push(row(formatLabel(buffStat), `+${buffValue}`, "t-positive"));
-    }
-    if (buffDuration != null && buffDuration > 0) {
-      mechanics.push(row("Buff Duration", `${buffDuration} sec`));
-    }
-
-    if (debuffStat && debuffValue != null && debuffValue !== 0) {
-      mechanics.push(row(formatLabel(debuffStat), `${debuffValue}`, "t-negative"));
-    }
-    if (debuffDuration != null && debuffDuration > 0) {
-      mechanics.push(row("Debuff Duration", `${debuffDuration} sec`));
-    }
-
-    const costs = [];
-    if (manaCost != null && manaCost > 0) costs.push(row("Mana", manaCost, "t-mana"));
-    if (cooldown != null) costs.push(row("Cooldown", cooldown > 0 ? `${cooldown} sec` : "None"));
+    const cooldownText =
+      cooldown > 0
+        ? `${cooldown} sec cooldown`
+        : "No cooldown";
 
     tooltip.innerHTML = `
-      <div class="t-name gf-skill">${esc(name)}</div>
-      ${meta ? `<div class="t-sub">${esc(meta)}</div>` : ""}
-      ${description(d.desc || "")}
-      ${mechanics.length ? `<div class="t-section">${mechanics.join("")}</div>` : ""}
-      ${costs.length ? `<div class="t-section t-cost-section">${costs.join("")}</div>` : ""}
+      <div class="t-wow-spell">
+        <div class="t-name gf-skill">${esc(name)}</div>
+
+        <div class="t-spell-meta-row">
+          <span class="t-spell-mana">${esc(manaText)}</span>
+          <span class="t-spell-cooldown">${esc(cooldownText)}</span>
+        </div>
+
+        ${desc ? `<div class="t-spell-description">${esc(desc)}</div>` : ""}
+      </div>
     `;
   }
 

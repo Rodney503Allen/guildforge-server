@@ -3535,7 +3535,13 @@ body.dungeon-modal-open{
 .dungeon-action-status{
   text-align:center;
 }
+/* =========================================================
+   GLOBAL TOOLTIP — ABOVE DUNGEON MODAL
+========================================================= */
 
+.gf-tooltip {
+  z-index: 100010 !important;
+}
 
 /* Smaller screens can scroll the eight-slot bar without wrapping it. */
 @media(max-width:720px){

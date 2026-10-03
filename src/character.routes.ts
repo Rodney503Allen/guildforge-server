@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { db } from "./db";
 import { getFinalPlayerStats } from "./services/playerService";
+import { getScaledBaseStats } from "./services/lootGenerator";
 import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 import {
   getInventoryCapacity,
@@ -59,6 +60,7 @@ function buildTooltipAttrs(item: any) {
     `data-name="${escapeHtml(item?.name || "Unknown Item")}"`,
     `data-rarity="${escapeHtml(item?.rarity || "base")}"`,
     `data-desc="${escapeHtml(item?.description || "")}"`,
+    `data-type="${escapeHtml(item?.type || item?.category || "")}"`,
   ];
 
   const hasGearSlot = ["weapon", "offhand", "head", "chest", "legs", "feet", "hands"].includes(
@@ -70,8 +72,15 @@ function buildTooltipAttrs(item: any) {
     attrs.push(`data-item-level="${item?.item_level ?? ""}"`);
     attrs.push(`data-item-type="${escapeHtml(item?.item_type || item?.type || "")}"`);
     attrs.push(`data-armor-weight="${escapeHtml(item?.armor_weight || "")}"`);
+    attrs.push(`data-weapon-class="${escapeHtml(item?.weapon_class || "")}"`);
     attrs.push(`data-base-attack="${Number(item?.base_attack || 0)}"`);
     attrs.push(`data-base-defense="${Number(item?.base_defense || 0)}"`);
+    attrs.push(`data-attack="${Number(item?.attack || 0)}"`);
+    attrs.push(`data-defense="${Number(item?.defense || 0)}"`);
+    attrs.push(`data-agility="${Number(item?.agility || 0)}"`);
+    attrs.push(`data-vitality="${Number(item?.vitality || 0)}"`);
+    attrs.push(`data-intellect="${Number(item?.intellect || 0)}"`);
+    attrs.push(`data-crit="${Number(item?.crit || 0)}"`);
     attrs.push(`data-roll-json='${escapeHtml(JSON.stringify(item?.roll_json || []))}'`);
   } else {
     const stats = [
@@ -83,8 +92,16 @@ function buildTooltipAttrs(item: any) {
       item?.crit ? `Crit +${item.crit}%` : null,
     ].filter(Boolean).join("<br>");
 
+    attrs.push(`data-item-type="${escapeHtml(item?.item_type || item?.type || item?.category || "")}"`);
+    attrs.push(`data-category="${escapeHtml(item?.category || "")}"`);
     attrs.push(`data-value="${Number(item?.value || 0)}"`);
     attrs.push(`data-qty="${Number(item?.quantity || 1)}"`);
+    attrs.push(`data-attack="${Number(item?.attack || 0)}"`);
+    attrs.push(`data-defense="${Number(item?.defense || 0)}"`);
+    attrs.push(`data-agility="${Number(item?.agility || 0)}"`);
+    attrs.push(`data-vitality="${Number(item?.vitality || 0)}"`);
+    attrs.push(`data-intellect="${Number(item?.intellect || 0)}"`);
+    attrs.push(`data-crit="${Number(item?.crit || 0)}"`);
     attrs.push(`data-stats="${escapeHtml(stats)}"`);
   }
 
@@ -482,6 +499,8 @@ router.get("/character", requireLogin, async (req, res) => {
       ib.description AS base_description,
       ib.item_type AS base_item_type,
       ib.armor_weight AS base_armor_weight,
+      ib.weapon_class AS base_weapon_class,
+      ib.required_level AS base_required_level,
       ib.base_attack AS base_attack,
       ib.base_defense AS base_defense
 
@@ -504,6 +523,15 @@ router.get("/character", requireLogin, async (req, res) => {
     const isRolled = !!g.player_item_id;
     const rolls = isRolled ? parseRollJson(g.rolled_roll_json) : [];
 
+    const scaledBaseStats = isRolled
+      ? getScaledBaseStats({
+          baseAttack: g.base_attack,
+          baseDefense: g.base_defense,
+          requiredLevel: g.base_required_level,
+          itemLevel: g.rolled_item_level,
+        })
+      : null;
+
     return {
       instance_id: Number(g.instance_id),
       inventory_id: Number(g.instance_id),
@@ -519,17 +547,18 @@ router.get("/character", requireLogin, async (req, res) => {
       item_level: isRolled ? Number(g.rolled_item_level || 0) : null,
       item_type: isRolled ? g.base_item_type : null,
       armor_weight: isRolled ? g.base_armor_weight : null,
-      base_attack: isRolled ? (Number(g.base_attack) || 0) : (Number(g.static_attack) || 0),
-      base_defense: isRolled ? (Number(g.base_defense) || 0) : (Number(g.static_defense) || 0),
+      weapon_class: isRolled ? g.base_weapon_class : null,
+      base_attack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : (Number(g.static_attack) || 0),
+      base_defense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : (Number(g.static_defense) || 0),
 
       attack: isRolled
-        ? (Number(g.base_attack) || 0)
+        ? Number(scaledBaseStats?.baseAttack || 0)
           + statFromRolls(rolls, "attack")
           + statFromRolls(rolls, "attack_power")
         : (Number(g.static_attack) || 0),
 
       defense: isRolled
-        ? (Number(g.base_defense) || 0)
+        ? Number(scaledBaseStats?.baseDefense || 0)
           + statFromRolls(rolls, "defense")
         : (Number(g.static_defense) || 0),
 
@@ -643,6 +672,8 @@ router.get("/character", requireLogin, async (req, res) => {
       ib.description AS base_description,
       ib.item_type AS base_item_type,
       ib.armor_weight AS base_armor_weight,
+      ib.weapon_class AS base_weapon_class,
+      ib.required_level AS base_required_level,
       ib.base_attack AS base_attack,
       ib.base_defense AS base_defense,
       ib.sell_value AS base_sell_value
@@ -662,6 +693,15 @@ router.get("/character", requireLogin, async (req, res) => {
   const normalizedInv = (inv || []).map((g: any) => {
     const isRolled = !!g.player_item_id;
     const rolls = isRolled ? parseRollJson(g.rolled_roll_json) : [];
+
+    const scaledBaseStats = isRolled
+      ? getScaledBaseStats({
+          baseAttack: g.base_attack,
+          baseDefense: g.base_defense,
+          requiredLevel: g.base_required_level,
+          itemLevel: g.rolled_item_level,
+        })
+      : null;
 
     return {
       instance_id: Number(g.instance_id),
@@ -686,17 +726,18 @@ router.get("/character", requireLogin, async (req, res) => {
         ? g.base_item_type
         : g.static_item_type,
       armor_weight: isRolled ? g.base_armor_weight : null,
-      base_attack: isRolled ? (Number(g.base_attack) || 0) : (Number(g.static_attack) || 0),
-      base_defense: isRolled ? (Number(g.base_defense) || 0) : (Number(g.static_defense) || 0),
+      weapon_class: isRolled ? g.base_weapon_class : null,
+      base_attack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : (Number(g.static_attack) || 0),
+      base_defense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : (Number(g.static_defense) || 0),
 
       attack: isRolled
-        ? (Number(g.base_attack) || 0)
+        ? Number(scaledBaseStats?.baseAttack || 0)
           + statFromRolls(rolls, "attack")
           + statFromRolls(rolls, "attack_power")
         : (Number(g.static_attack) || 0),
 
       defense: isRolled
-        ? (Number(g.base_defense) || 0)
+        ? Number(scaledBaseStats?.baseDefense || 0)
           + statFromRolls(rolls, "defense")
         : (Number(g.static_defense) || 0),
 

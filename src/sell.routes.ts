@@ -2,6 +2,7 @@
 import express from "express";
 import { db } from "./db";
 import { SELL_RATE, sellInventoryEntryAtomic } from "./services/inventoryService";
+import { getScaledBaseStats } from "./services/lootGenerator";
 
 const router = express.Router();
 
@@ -75,7 +76,8 @@ router.get("/sell", async (req, res) => {
       i.rarity AS static_rarity,
       i.value AS static_value,
       i.category AS static_category,
-      i.type AS static_item_type,
+      i.type AS static_type,
+      i.item_type AS static_item_type,
       i.slot AS static_slot,
       i.attack AS static_attack,
       i.defense AS static_defense,
@@ -96,6 +98,8 @@ router.get("/sell", async (req, res) => {
       ib.item_type AS base_item_type,
       ib.slot AS base_slot,
       ib.armor_weight AS base_armor_weight,
+      ib.weapon_class AS base_weapon_class,
+      ib.required_level AS base_required_level,
       ib.base_attack AS base_attack,
       ib.base_defense AS base_defense,
       ib.description AS base_description
@@ -117,6 +121,15 @@ router.get("/sell", async (req, res) => {
   const items = (rows || []).map((it: any) => {
     const isRolled = it.player_item_id != null;
     const rolls = isRolled ? parseRollJson(it.rolled_roll_json) : [];
+
+    const scaledBaseStats = isRolled
+      ? getScaledBaseStats({
+          baseAttack: it.base_attack,
+          baseDefense: it.base_defense,
+          requiredLevel: it.base_required_level,
+          itemLevel: it.rolled_item_level,
+        })
+      : null;
 
     const rarity = isRolled ? it.rolled_rarity : it.static_rarity;
     const baseValue = isRolled
@@ -148,13 +161,25 @@ router.get("/sell", async (req, res) => {
           desc: desc || "",
           isRolled,
 
-          // universal tooltip fields
+          // canonical item tooltip fields
+          type: isRolled ? "equipment" : (it.static_type || it.static_category || ""),
           itemType: isRolled ? (it.base_item_type || "") : (it.static_item_type || ""),
           slot: isRolled ? (it.base_slot || "") : (it.static_slot || ""),
           armorWeight: isRolled ? (it.base_armor_weight || "") : "",
+          weaponClass: isRolled ? (it.base_weapon_class || "") : "",
           itemLevel: isRolled ? Number(it.rolled_item_level || 0) : "",
-          baseAttack: isRolled ? Number(it.base_attack || 0) : Number(it.static_attack || 0),
-          baseDefense: isRolled ? Number(it.base_defense || 0) : Number(it.static_defense || 0),
+          baseAttack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : Number(it.static_attack || 0),
+          baseDefense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : Number(it.static_defense || 0),
+          stats: !isRolled
+            ? [
+                it.static_attack ? `Attack +${it.static_attack}` : null,
+                it.static_defense ? `Defense +${it.static_defense}` : null,
+                it.static_agility ? `Agility +${it.static_agility}` : null,
+                it.static_vitality ? `Vitality +${it.static_vitality}` : null,
+                it.static_intellect ? `Intellect +${it.static_intellect}` : null,
+                it.static_crit ? `Crit +${it.static_crit}%` : null
+              ].filter(Boolean).join("<br>")
+            : "",
           rollJson: isRolled ? rolls : null,
 
           // only for card subtitle
@@ -178,12 +203,15 @@ router.get("/sell", async (req, res) => {
            data-qty="${Number(it.quantity) || 1}"
            data-icon="${escapeHtml(it.icon || "")}"
            data-desc="${escapeHtml(it.desc || "")}"
+           data-type="${escapeHtml(it.type || "")}"
            data-item-type="${escapeHtml(it.itemType || "")}"
            data-slot="${escapeHtml(it.slot || "")}"
            data-armor-weight="${escapeHtml(it.armorWeight || "")}"
+           data-weapon-class="${escapeHtml(it.weaponClass || "")}"
            data-item-level="${it.itemLevel !== "" ? escapeHtml(String(it.itemLevel)) : ""}"
            data-base-attack="${escapeHtml(String(it.baseAttack ?? ""))}"
            data-base-defense="${escapeHtml(String(it.baseDefense ?? ""))}"
+           data-stats="${escapeHtml(it.stats || "")}"
            data-roll-json='${escapeHtml(JSON.stringify(it.rollJson || []))}'>
         <div class="icon-wrap">
           <div class="icon">${
@@ -227,8 +255,8 @@ res.send(`
   <link rel="stylesheet" href="/ui/toast.css">
   <script defer src="/ui/toast.js"></script>
 
-  <link rel="stylesheet" href="/ui/itemTooltip.css">
-  <script defer src="/ui/itemTooltip.js"></script>
+  <link rel="stylesheet" href="/ui/tooltip.css">
+  <script defer src="/ui/tooltip.js"></script>
 
   <link rel="stylesheet" href="/sell.css">
   <script defer src="/sell.js"></script>

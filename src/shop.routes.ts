@@ -2,7 +2,7 @@
 import express from "express";
 import { db } from "./db";
 import { addItemAtomic } from "./services/inventoryService";
-import { generateLootFromBaseItem } from "./services/lootGenerator";
+import { generateLootFromBaseItem, getScaledBaseStats } from "./services/lootGenerator";
 import { hasInventorySpace } from "./services/inventoryCapacityService";
 
 const router = express.Router();
@@ -104,6 +104,21 @@ function getTownShopChoiceCount(townLevel: number) {
   return 6;
 }
 
+function getShopGeneratedItemLevel(base: any, playerLevel: number, regionMaxLevel: number) {
+  const baseMinLevel = Math.max(1, Number(base?.required_level) || 1);
+  const rawBaseMaxLevel = Number(base?.max_level);
+
+  const baseMaxLevel =
+    Number.isFinite(rawBaseMaxLevel) && rawBaseMaxLevel > 0
+      ? Math.max(baseMinLevel, rawBaseMaxLevel)
+      : regionMaxLevel;
+
+  return Math.max(
+    baseMinLevel,
+    Math.min(playerLevel, regionMaxLevel, baseMaxLevel)
+  );
+}
+
 function getBasePrice(base: any) {
   const sellValue = Number(base.sell_value ?? 0);
   const requiredLevel = Number(base.required_level ?? 1);
@@ -148,6 +163,7 @@ router.get("/shop", async (req, res) => {
       SELECT
         p.id,
         p.gold,
+        p.level,
         p.map_x,
         p.map_y,
         c.slug AS class_slug
@@ -193,6 +209,11 @@ router.get("/shop", async (req, res) => {
 
     const townLevel = getTownLevel(town);
     const choiceCount = getTownShopChoiceCount(townLevel);
+    const playerLevel = Math.max(1, Number(player.level) || 1);
+    const regionMaxLevel = Math.max(
+      1,
+      Number(town.max_level ?? town.recommended_level ?? townLevel) || townLevel
+    );
 
     const [shops]: any = await db.query(
       `
@@ -246,6 +267,7 @@ router.get("/shop", async (req, res) => {
           i.rarity,
           i.value,
           i.category,
+          i.type,
           i.item_type,
 
           i.attack,
@@ -318,6 +340,7 @@ router.get("/shop", async (req, res) => {
           ib.slot,
           ib.item_type,
           ib.armor_weight,
+          ib.weapon_class,
           ib.required_level,
           ib.max_level,
           ib.base_attack,
@@ -384,15 +407,39 @@ router.get("/shop", async (req, res) => {
 
         sourceType: "base",
 
-        attack:
-          Number(
-            b.base_attack ?? 0
-          ),
+        display_item_level: getShopGeneratedItemLevel(
+          b,
+          playerLevel,
+          regionMaxLevel
+        ),
 
-        defense:
-          Number(
-            b.base_defense ?? 0
-          ),
+        display_base_attack: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseAttack,
+
+        display_base_defense: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseDefense,
+
+        attack: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseAttack,
+
+        defense: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseDefense,
 
         agility: 0,
 
@@ -432,6 +479,7 @@ router.get("/shop", async (req, res) => {
           ib.slot,
           ib.item_type,
           ib.armor_weight,
+          ib.weapon_class,
           ib.required_level,
           ib.max_level,
           ib.base_attack,
@@ -493,15 +541,39 @@ router.get("/shop", async (req, res) => {
 
         sourceType: "base",
 
-        attack:
-          Number(
-            b.base_attack ?? 0
-          ),
+        display_item_level: getShopGeneratedItemLevel(
+          b,
+          playerLevel,
+          regionMaxLevel
+        ),
 
-        defense:
-          Number(
-            b.base_defense ?? 0
-          ),
+        display_base_attack: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseAttack,
+
+        display_base_defense: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseDefense,
+
+        attack: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseAttack,
+
+        defense: getScaledBaseStats({
+          baseAttack: b.base_attack,
+          baseDefense: b.base_defense,
+          requiredLevel: b.required_level,
+          itemLevel: getShopGeneratedItemLevel(b, playerLevel, regionMaxLevel),
+        }).baseDefense,
 
         agility: 0,
 
@@ -531,48 +603,14 @@ router.get("/shop", async (req, res) => {
 
     function renderItemCard(i: any) {
       const stats = [
-        i.attack
-          ? `Attack +${i.attack}`
-          : null,
-
-        i.defense
-          ? `Defense +${i.defense}`
-          : null,
-
-        i.agility
-          ? `Agility +${i.agility}`
-          : null,
-
-        i.vitality
-          ? `Vitality +${i.vitality}`
-          : null,
-
-        i.intellect
-          ? `Intellect +${i.intellect}`
-          : null,
-
-        i.crit
-          ? `Crit +${i.crit}%`
-          : null,
-
+        i.attack ? `Attack +${i.attack}` : null,
+        i.defense ? `Defense +${i.defense}` : null,
+        i.agility ? `Agility +${i.agility}` : null,
+        i.vitality ? `Vitality +${i.vitality}` : null,
+        i.intellect ? `Intellect +${i.intellect}` : null,
+        i.crit ? `Crit +${i.crit}%` : null,
         i.effect_type === "restore"
-          ? `✨ Restores ${i.effect_value} ${
-              i.effect_target === "hp"
-                ? "HP"
-                : "SP"
-            }`
-          : null,
-
-        i.slot
-          ? `Slot: ${i.slot}`
-          : null,
-
-        i.armor_weight
-          ? `Weight: ${i.armor_weight}`
-          : null,
-
-        i.required_level
-          ? `Requires Level ${i.required_level}`
+          ? `Restores ${i.effect_value} ${i.effect_target === "hp" ? "HP" : "SP"}`
           : null
       ]
         .filter(Boolean)
@@ -656,6 +694,14 @@ router.get("/shop", async (req, res) => {
           aria-label="${escapeHtml(i.name)}"
           data-name="${escapeHtml(i.name)}"
           data-rarity="${escapeHtml(i.rarity || "common")}"
+          data-type="${escapeHtml(i.type || i.category || "")}"
+          data-item-type="${escapeHtml(i.item_type || "")}"
+          data-slot="${escapeHtml(i.slot || "")}"
+          data-armor-weight="${escapeHtml(i.armor_weight || "")}"
+          data-weapon-class="${escapeHtml(i.weapon_class || "")}"
+          data-item-level="${i.sourceType === "base" ? Number(i.display_item_level || i.required_level || 1) : ""}"
+          data-base-attack="${i.sourceType === "base" ? Number(i.display_base_attack ?? i.base_attack ?? 0) : ""}"
+          data-base-defense="${i.sourceType === "base" ? Number(i.display_base_defense ?? i.base_defense ?? 0) : ""}"
           data-value="${Number(i.value || 0)}"
           data-price="${Number(i.price || 0)}"
           data-qty="1"
@@ -761,12 +807,12 @@ router.get("/shop", async (req, res) => {
 
   <link
     rel="stylesheet"
-    href="/ui/itemTooltip.css"
+    href="/ui/tooltip.css"
   >
 
   <script
     defer
-    src="/ui/itemTooltip.js"
+    src="/ui/tooltip.js"
   ></script>
 
   <link
@@ -1670,6 +1716,7 @@ router.post(
             ib.slot,
             ib.item_type,
             ib.armor_weight,
+            ib.weapon_class,
             ib.required_level,
             ib.max_level,
             ib.base_attack,

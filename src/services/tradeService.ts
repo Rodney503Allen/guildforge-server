@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { getScaledBaseStats } from "./lootGenerator";
 
 const TRADE_REQUEST_MINUTES = 10;
 
@@ -112,6 +113,29 @@ async function getLockedTrade(
   return rows[0];
 }
 
+function applyTradeTooltipStats(row: any) {
+  if (!row || row.player_item_id == null) {
+    return row;
+  }
+
+  const scaled = getScaledBaseStats({
+    baseAttack: Number(row.base_attack ?? 0),
+    baseDefense: Number(row.base_defense ?? 0),
+    requiredLevel: Number(
+      row.base_required_level ?? row.item_level ?? 1
+    ),
+    itemLevel: Number(
+      row.item_level ?? row.base_required_level ?? 1
+    ),
+  });
+
+  return {
+    ...row,
+    base_attack: scaled.baseAttack,
+    base_defense: scaled.baseDefense,
+  };
+}
+
 async function getTradeOffers(
   connection: any,
   tradeId: number,
@@ -138,6 +162,9 @@ async function getTradeOffers(
         COALESCE(ib.icon, items.icon) AS icon,
         CASE WHEN inv.player_item_id IS NULL THEN items.value ELSE ib.sell_value END AS value,
         CASE WHEN inv.player_item_id IS NULL THEN items.item_type ELSE ib.item_type END AS item_type,
+        CASE WHEN inv.player_item_id IS NULL THEN items.type ELSE NULL END AS type,
+        CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE ib.weapon_class END AS weapon_class,
+        CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE ib.required_level END AS base_required_level,
         CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE ib.armor_weight END AS armor_weight,
         CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE pi.item_level END AS item_level,
         CASE WHEN inv.player_item_id IS NULL THEN items.attack ELSE ib.base_attack END AS base_attack,
@@ -172,7 +199,7 @@ async function getTradeOffers(
     [tradeId],
   );
 
-  return rows;
+  return rows.map(applyTradeTooltipStats);
 }
 
 async function buildTradeView(
@@ -613,7 +640,7 @@ export async function getTradeInventory(
 
   assertParticipant(tradeRows[0], playerId);
 
-  return query<any[]>(
+  const rows = await query<any[]>(
     `
       SELECT
         inv.inventory_id,
@@ -630,6 +657,9 @@ export async function getTradeInventory(
         COALESCE(ib.icon, items.icon) AS icon,
         CASE WHEN inv.player_item_id IS NULL THEN items.value ELSE ib.sell_value END AS value,
         CASE WHEN inv.player_item_id IS NULL THEN items.item_type ELSE ib.item_type END AS item_type,
+        CASE WHEN inv.player_item_id IS NULL THEN items.type ELSE NULL END AS type,
+        CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE ib.weapon_class END AS weapon_class,
+        CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE ib.required_level END AS base_required_level,
         CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE ib.armor_weight END AS armor_weight,
         CASE WHEN inv.player_item_id IS NULL THEN NULL ELSE pi.item_level END AS item_level,
         CASE WHEN inv.player_item_id IS NULL THEN items.attack ELSE ib.base_attack END AS base_attack,
@@ -664,6 +694,8 @@ export async function getTradeInventory(
     `,
     [playerId],
   );
+
+  return rows.map(applyTradeTooltipStats);
 }
 
 /* =========================================================

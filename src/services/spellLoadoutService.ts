@@ -1,5 +1,7 @@
 // services/spellLoadoutService.ts
 import { db } from "../db";
+import { getFinalPlayerStats } from "./playerService";
+import { buildSpellTooltipPresentation } from "./spellTooltipService";
 
 export const MAX_HOTBAR_SLOTS = 6;
 
@@ -94,58 +96,68 @@ export async function getEquippedSpells(playerId: number) {
     bySlot.set(Number(row.slot), row);
   }
 
-  return Array.from(
-    { length: MAX_HOTBAR_SLOTS },
-    (_, index) => {
-      const slot = index + 1;
-      const row = bySlot.get(slot);
+  const playerStats = await getFinalPlayerStats(playerId);
 
-      if (!row) {
+  return Promise.all(
+    Array.from(
+      { length: MAX_HOTBAR_SLOTS },
+      async (_, index) => {
+        const slot = index + 1;
+        const row = bySlot.get(slot);
+
+        if (!row) {
+          return {
+            slot,
+            spell: null
+          };
+        }
+
+        const tooltip = await buildSpellTooltipPresentation(
+          playerId,
+          {
+            id: Number(row.spell_id),
+            ...row
+          },
+          playerStats
+        );
+
         return {
           slot,
-          spell: null
+          spell: {
+            id: Number(row.spell_id),
+            name: row.name,
+            description: tooltip.description,
+            icon: row.icon,
+            audio: row.audio,
+            level: Number(row.level || 1),
+            manaCost: tooltip.manaCost,
+            cooldown: tooltip.cooldown,
+            type: row.type,
+
+            target_type: row.target_type,
+            effect_type: row.effect_type,
+            handler_key: row.handler_key,
+
+            damage: tooltip.damage,
+            heal: tooltip.healing,
+
+            dot_damage: tooltip.dotDamage,
+            dot_duration: tooltip.dotDuration,
+            dot_tick_rate: tooltip.dotTickRate,
+
+            buff_stat: row.buff_stat,
+            buff_value: Number(row.buff_value || 0),
+            buff_duration: Number(row.buff_duration || 0),
+
+            debuff_stat: row.debuff_stat,
+            debuff_value: Number(row.debuff_value || 0),
+            debuff_duration: Number(row.debuff_duration || 0),
+
+            rank: tooltip.rank
+          }
         };
       }
-
-      return {
-        slot,
-        spell: {
-          id: Number(row.spell_id),
-          name: row.name,
-          description: row.description,
-          icon: row.icon,
-          audio: row.audio,
-          level: Number(row.level || 1),
-          manaCost: Number(row.mana_cost || 0),
-          cooldown: Number(row.cooldown || 0),
-          type: row.type,
-
-          target_type:
-            row.target_type,
-
-          effect_type:
-            row.effect_type,
-
-          handler_key:
-            row.handler_key,
-
-          damage: Number(row.damage || 0),
-          heal: Number(row.heal || 0),
-
-          dot_damage: Number(row.dot_damage || 0),
-          dot_duration: Number(row.dot_duration || 0),
-          dot_tick_rate: Number(row.dot_tick_rate || 0),
-
-          buff_stat: row.buff_stat,
-          buff_value: Number(row.buff_value || 0),
-          buff_duration: Number(row.buff_duration || 0),
-
-          debuff_stat: row.debuff_stat,
-          debuff_value: Number(row.debuff_value || 0),
-          debuff_duration: Number(row.debuff_duration || 0)
-        }
-      };
-    }
+    )
   );
 }
 

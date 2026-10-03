@@ -166,10 +166,20 @@ function showLootToast(title, message, type = "error") {
       const type = item.type ?? "";
       const itemType = item.item_type ?? "";
       const armorWeight = item.armor_weight ?? "";
+      const weaponClass = item.weapon_class ?? "";
       const slot = item.slot ?? "";
       const itemLevel = item.item_level ?? "";
       const baseAttack = item.base_attack ?? "";
       const baseDefense = item.base_defense ?? "";
+
+      const staticStats = [
+        item.attack ? `Attack +${item.attack}` : null,
+        item.defense ? `Defense +${item.defense}` : null,
+        item.agility ? `Agility +${item.agility}` : null,
+        item.vitality ? `Vitality +${item.vitality}` : null,
+        item.intellect ? `Intellect +${item.intellect}` : null,
+        item.crit ? `Crit +${item.crit}%` : null
+      ].filter(Boolean).join("<br>");
 
       const rollJson = item.roll_json ? JSON.stringify(item.roll_json) : "";
 
@@ -179,16 +189,18 @@ function showLootToast(title, message, type = "error") {
       tile.setAttribute("data-name", name);
       tile.setAttribute("data-rarity", rarity);
       tile.setAttribute("data-qty", String(qty));
+      tile.setAttribute("data-type", type);
 
       if (desc) tile.setAttribute("data-desc", desc);
       if (value !== "" && value != null) tile.setAttribute("data-value", String(value));
       if (slot) tile.setAttribute("data-slot", slot);
       if (itemType) tile.setAttribute("data-item-type", itemType);
-      else if (type) tile.setAttribute("data-item-type", type);
       if (armorWeight) tile.setAttribute("data-armor-weight", armorWeight);
+      if (weaponClass) tile.setAttribute("data-weapon-class", weaponClass);
       if (itemLevel !== "" && itemLevel != null) tile.setAttribute("data-item-level", String(itemLevel));
       if (baseAttack !== "" && baseAttack != null) tile.setAttribute("data-base-attack", String(baseAttack));
       if (baseDefense !== "" && baseDefense != null) tile.setAttribute("data-base-defense", String(baseDefense));
+      if (staticStats) tile.setAttribute("data-stats", staticStats);
       if (rollJson) tile.setAttribute("data-roll-json", rollJson);
 
       tile.innerHTML = `

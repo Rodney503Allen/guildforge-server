@@ -193,3 +193,385 @@
     width: min(300px, calc(100vw - 20px));
   }
 }
+
+/* =========================================
+   ITEM TOOLTIP V2
+   ========================================= */
+.gf-tooltip-item {
+  width: min(340px, calc(100vw - 24px));
+  padding: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  border-color: rgba(79, 70, 55, .95);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(92, 74, 43, .12), transparent 42%),
+    linear-gradient(180deg, rgba(20, 19, 17, .99), rgba(9, 10, 11, .99));
+  box-shadow:
+    0 22px 60px rgba(0, 0, 0, .88),
+    inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+
+.gf-tooltip-item .t-item-header {
+  padding: 12px 14px 11px;
+  border-top: 3px solid currentColor;
+  border-bottom: 1px solid rgba(126, 105, 72, .25);
+  background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,0));
+}
+
+.gf-tooltip-item .t-item-header .t-name {
+  margin: 0;
+  color: currentColor;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 14px;
+  line-height: 1.25;
+  letter-spacing: .45px;
+  text-transform: none;
+}
+
+.gf-tooltip-item .t-item-identity {
+  margin-top: 4px;
+  color: rgba(171, 164, 151, .92);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .45px;
+}
+
+.gf-tooltip-item .t-item-primary-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 9px 13px;
+  background: rgba(255,255,255,.012);
+  border-bottom: 1px solid rgba(126, 105, 72, .18);
+}
+
+.gf-tooltip-item .t-item-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 2px;
+}
+
+.gf-tooltip-item .t-item-stat-value {
+  color: #e8d7a8;
+  font-weight: 900;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.gf-tooltip-item .t-item-stat-label {
+  color: rgba(205, 207, 207, .9);
+  font-size: 11px;
+}
+
+.gf-tooltip-item .t-item-section {
+  padding: 9px 14px 10px;
+  border-bottom: 1px solid rgba(126, 105, 72, .18);
+}
+
+.gf-tooltip-item .t-item-section-label {
+  margin-bottom: 5px;
+  color: rgba(139, 129, 112, .9);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.gf-tooltip-item .t-item-affix {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 7px;
+  padding: 2px 0;
+}
+
+.gf-tooltip-item .t-item-affix-value {
+  color: #e6c57a;
+  font-weight: 900;
+}
+
+.gf-tooltip-item .t-item-affix-label {
+  color: rgba(214, 216, 218, .94);
+}
+
+.gf-tooltip-item .t-resonant-tag {
+  color: #d7b56a;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+
+.gf-tooltip-item .t-desc {
+  margin: 0;
+  padding: 10px 14px;
+  color: rgba(169, 169, 164, .94);
+  border-bottom: 1px solid rgba(126, 105, 72, .16);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.gf-tooltip-item .t-item-utility {
+  padding: 6px 14px 8px;
+  background: rgba(0,0,0,.16);
+}
+
+.gf-tooltip-item .t-item-utility .t-row {
+  padding: 3px 0;
+  border-top: 0;
+}
+
+.gf-tooltip-item .t-item-utility .t-k {
+  color: rgba(135, 139, 142, .9);
+}
+
+.gf-tooltip-item .t-item-utility .t-v {
+  color: rgba(197, 199, 200, .95);
+  font-weight: 800;
+}
+
+.gf-tooltip-item .t-item-header.gf-base,
+.gf-tooltip-item .t-item-header.gf-common { color: #c9cfd9; }
+.gf-tooltip-item .t-item-header.gf-dormant,
+.gf-tooltip-item .t-item-header.gf-uncommon { color: #50c878; }
+.gf-tooltip-item .t-item-header.gf-awakened,
+.gf-tooltip-item .t-item-header.gf-rare { color: #78c8ff; }
+.gf-tooltip-item .t-item-header.gf-empowered,
+.gf-tooltip-item .t-item-header.gf-epic { color: #d38cff; }
+.gf-tooltip-item .t-item-header.gf-transcendent,
+.gf-tooltip-item .t-item-header.gf-legendary { color: #ffb84a; }
+
+@media (max-width: 520px) {
+  .gf-tooltip-item .t-item-primary-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   ITEM TOOLTIP V2.1 — CLEAN BASE STATS + RESONANT EMPHASIS
+   ========================================================= */
+.gf-tooltip-item .t-item-primary-stats {
+  display: block;
+  padding: 9px 14px 8px;
+}
+
+.gf-tooltip-item .t-item-base-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 2px 0;
+}
+
+.gf-tooltip-item .t-item-base-value {
+  min-width: 30px;
+  color: #f0d99a;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.gf-tooltip-item .t-item-base-label {
+  color: rgba(222, 220, 211, .95);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.gf-tooltip-item .t-item-secondary-stats {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(126, 105, 72, .14);
+}
+
+.gf-tooltip-item .t-affix-resonant {
+  position: relative;
+  margin: 4px -7px 2px;
+  padding: 6px 7px;
+  border: 1px solid rgba(218, 177, 83, .48);
+  border-radius: 4px;
+  background:
+    linear-gradient(90deg, rgba(218, 177, 83, .15), rgba(218, 177, 83, .035));
+  box-shadow:
+    inset 3px 0 0 rgba(235, 194, 93, .8),
+    0 0 10px rgba(218, 177, 83, .08);
+}
+
+.gf-tooltip-item .t-affix-resonant .t-item-affix-value,
+.gf-tooltip-item .t-affix-resonant .t-item-affix-label {
+  color: #f2d47f;
+  font-weight: 900;
+  text-shadow: 0 0 7px rgba(218, 177, 83, .22);
+}
+
+.gf-tooltip-item .t-affix-resonant .t-resonant-tag {
+  padding: 2px 5px;
+  border: 1px solid rgba(237, 198, 104, .45);
+  border-radius: 3px;
+  color: #f3d98e;
+  background: rgba(218, 177, 83, .12);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .75px;
+}
+
+
+/* =========================================================
+   ITEM TOOLTIP V2.2 — WOW-STYLE EQUIPMENT LAYOUT
+   ========================================================= */
+.gf-tooltip-item .t-wow-item {
+  padding: 12px 14px 11px;
+  border-top: 3px solid rgba(126, 105, 72, .45);
+}
+
+.gf-tooltip-item .t-wow-item .t-name {
+  margin: 0 0 1px;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 14px;
+  line-height: 1.25;
+  letter-spacing: .4px;
+}
+
+.gf-tooltip-item .t-item-level {
+  margin-bottom: 9px;
+  color: rgba(178, 178, 174, .9);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.gf-tooltip-item .t-equip-type-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 5px;
+  color: rgba(225, 225, 219, .96);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.gf-tooltip-item .t-equip-stats {
+  color: rgba(225, 225, 219, .96);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.gf-tooltip-item .t-equip-primary {
+  margin: 1px 0;
+  color: rgba(238, 237, 228, .98);
+  font-weight: 800;
+}
+
+.gf-tooltip-item .t-equip-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 18px;
+}
+
+.gf-tooltip-item .t-equip-stat-text {
+  color: #76d692;
+  font-weight: 700;
+}
+
+.gf-tooltip-item .t-flavor-divider {
+  height: 1px;
+  margin: 9px 0 7px;
+  background: rgba(126, 105, 72, .45);
+}
+
+.gf-tooltip-item .t-item-flavor {
+  color: rgba(178, 174, 164, .94);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-style: italic;
+}
+
+.gf-tooltip-item .t-wow-item .t-item-utility {
+  margin: 9px -14px -11px;
+  padding: 6px 14px 8px;
+  border-top: 1px solid rgba(126, 105, 72, .16);
+}
+
+.gf-tooltip-item .t-wow-item .t-affix-resonant {
+  position: relative;
+  margin: 4px -6px 2px;
+  padding: 4px 6px;
+  border: 1px solid rgba(226, 185, 84, .5);
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(226, 185, 84, .14), rgba(226, 185, 84, .025));
+  box-shadow: inset 2px 0 0 rgba(244, 203, 98, .9), 0 0 10px rgba(218, 177, 83, .08);
+}
+
+.gf-tooltip-item .t-wow-item .t-affix-resonant .t-equip-stat-text {
+  color: #f0cf73;
+  font-weight: 900;
+  text-shadow: 0 0 7px rgba(218, 177, 83, .22);
+}
+
+.gf-tooltip-item .t-wow-item .t-resonant-tag {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid rgba(237, 198, 104, .42);
+  border-radius: 3px;
+  color: #f3d98e;
+  background: rgba(218, 177, 83, .1);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+
+/* =========================================================
+   WOW-STYLE SPELL TOOLTIPS
+   ========================================================= */
+
+.gf-tooltip-spell {
+  min-width: 290px;
+  max-width: 380px;
+}
+
+.gf-tooltip-spell .t-wow-spell {
+  display: flex;
+  flex-direction: column;
+}
+
+.gf-tooltip-spell .t-wow-spell .t-name {
+  margin-bottom: 7px;
+}
+
+.gf-tooltip-spell .t-spell-meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 11px;
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+.gf-tooltip-spell .t-spell-mana {
+  color: #8ebcff;
+  white-space: nowrap;
+}
+
+.gf-tooltip-spell .t-spell-cooldown {
+  color: #ddd3bd;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.gf-tooltip-spell .t-spell-description {
+  color: #f0eadc;
+  font-size: 0.94rem;
+  line-height: 1.48;
+  white-space: normal;
+}
+

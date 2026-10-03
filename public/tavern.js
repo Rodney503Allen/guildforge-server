@@ -621,6 +621,11 @@ const tooltipAttrs = (item, quantity) => `
       : ""
   }
   ${
+    item.type
+      ? `data-type="${escapeHtml(item.type)}"`
+      : ""
+  }
+  ${
     item.item_type
       ? `data-item-type="${escapeHtml(item.item_type)}"`
       : ""
@@ -628,6 +633,11 @@ const tooltipAttrs = (item, quantity) => `
   ${
     item.armor_weight
       ? `data-armor-weight="${escapeHtml(item.armor_weight)}"`
+      : ""
+  }
+  ${
+    item.weapon_class
+      ? `data-weapon-class="${escapeHtml(item.weapon_class)}"`
       : ""
   }
   ${

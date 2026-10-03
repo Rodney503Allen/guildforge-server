@@ -3726,6 +3726,7 @@ function renderDungeonHotbar() {
           Math.max(
             0,
             Number(
+              spell.manaCost ??
               spell.mana_cost ??
               0
             )
@@ -3757,6 +3758,17 @@ function renderDungeonHotbar() {
                 spell.id
               )
             }"
+            data-tooltip="spell"
+            data-name="${escapeDungeonHtml(
+              spell.name ?? "Ability"
+            )}"
+            data-desc="${escapeDungeonHtml(
+              spell.description ?? ""
+            )}"
+            data-mana-cost="${manaCost}"
+            data-cooldown="${Number(
+              spell.cooldown ?? 0
+            ) || 0}"
             ${
               disabled
                 ? "disabled"
@@ -3791,24 +3803,7 @@ function renderDungeonHotbar() {
                 : ""
             }
 
-            <div class="dungeon-spell-tooltip">
-              <strong>
-                ${escapeDungeonHtml(
-                  spell.name
-                )}
-              </strong>
 
-              <span>
-                ${escapeDungeonHtml(
-                  spell.description ??
-                  ""
-                )}
-              </span>
-
-              <span>
-                ${manaCost} SP
-              </span>
-            </div>
           </button>
         `;
       }

@@ -856,7 +856,7 @@ res.send(`
   <title>Guildforge | World Map</title>
   <link rel="stylesheet" href="/world.css">
   <link rel="stylesheet" href="/rest.css">
-  <link rel="stylesheet" href="/ui/itemTooltip.css">
+  <link rel="stylesheet" href="/ui/tooltip.css">
   <link rel="stylesheet" href="/hunt-ready-check.css">
   <link rel="stylesheet" href="/hunt-combat.css">
   <link rel="stylesheet" href="/dungeon.css">
@@ -1870,7 +1870,7 @@ res.send(`
   <link rel="stylesheet" href="/statpanel.css" />
   <link rel="stylesheet" href="/ui/toast.css" />
 
-  <script src="/ui/itemTooltip.js"></script>
+  <script src="/ui/tooltip.js"></script>
   <script src="/lootChest.js"></script>
 
 <script>

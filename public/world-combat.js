@@ -1275,45 +1275,24 @@ function renderHotbarSpells(spells) {
       const name = (s.name ?? "Spell").toString();
       const icon = (s.icon ?? "default.webp").toString();
 
-      btn.title = name;
+      btn.removeAttribute("title");
       btn.onclick = () => castSpell(s.id);
-// Build a readable description (same logic as spellbook)
-let description = "";
-switch (s.type) {
-  case "damage": description = `Damage: ${s.damage ?? 0}`; break;
-  case "heal": description = `Heal: ${s.heal ?? 0}`; break;
-  case "dot": description = `DOT: ${s.dot_damage ?? 0} / ${s.dot_tick_rate ?? 1}s (${s.dot_duration ?? 0}s)`; break;
-  case "damage_dot": description = `Hit: ${s.damage ?? 0} + DOT: ${s.dot_damage ?? 0}/${s.dot_tick_rate ?? 1}s (${s.dot_duration ?? 0}s)`; break;
-  case "buff": description = `Buff ${String(s.buff_stat || "").toUpperCase()} +${s.buff_value ?? 0} (${s.buff_duration ?? 0}s)`; break;
-  case "debuff": description = `Debuff ${String(s.debuff_stat || "").toUpperCase()} ${s.debuff_value ?? 0} (${s.debuff_duration ?? 0}s)`; break;
-  default: description = s.description || "";
-}
 
-btn.innerHTML = `
-  <img src="/icons/spells/${icon}" alt="${name}" onerror="this.src='/icons/default.webp'">
-  <span class="hotbar-key">${key}</span>
-  <div class="hotbar-cd hidden" id="hotbar-cd-${s.id}"></div>
+      btn.dataset.tooltip = "spell";
+      btn.dataset.name = name;
+      btn.dataset.desc = (s.description ?? "").toString();
+      btn.dataset.manaCost = String(
+        Number(s.manaCost ?? s.mana_cost ?? 0) || 0
+      );
+      btn.dataset.cooldown = String(
+        Number(s.cooldown ?? 0) || 0
+      );
 
-  <!-- ✅ Tooltip -->
-  <div class="hotbar-tooltip">
-    <div class="tt-title">${name}</div>
-
-    <div class="tt-row">
-      <span class="tt-muted">Cost</span>
-      <span>${s.manaCost ?? s.mana_cost ?? 0} SP</span>
-    </div>
-
-    ${s.cooldown ? `
-      <div class="tt-row">
-        <span class="tt-muted">Cooldown</span>
-        <span>${s.cooldown}s</span>
-      </div>
-    ` : ""}
-
-    <div class="tt-sep"></div>
-    <div>${description || "<span class='tt-muted'>No description</span>"}</div>
-  </div>
-`;
+      btn.innerHTML = `
+        <img src="/icons/spells/${icon}" alt="${name}" onerror="this.src='/icons/default.webp'">
+        <span class="hotbar-key">${key}</span>
+        <div class="hotbar-cd hidden" id="hotbar-cd-${s.id}"></div>
+      `;
     }
 
     // ✅ Insert spell buttons BEFORE the mana potion button

@@ -170,6 +170,45 @@ function getItemLevelMultiplier(itemLevel: number): number {
   return 1 + Math.floor(safeLevel / 5) * 0.5;
 }
 
+export function getScaledBaseStats(args: {
+  baseAttack: number | null | undefined;
+  baseDefense: number | null | undefined;
+  requiredLevel: number | null | undefined;
+  itemLevel: number | null | undefined;
+}): { baseAttack: number; baseDefense: number; scalingTiers: number } {
+  const baseAttack = Math.max(0, Number(args.baseAttack) || 0);
+  const baseDefense = Math.max(0, Number(args.baseDefense) || 0);
+
+  const requiredLevel = Math.max(1, Number(args.requiredLevel) || 1);
+  const itemLevel = Math.max(requiredLevel, Number(args.itemLevel) || requiredLevel);
+
+  // Base items begin at their own required level. Every full 5 levels gained
+  // beyond that point adds 20% of the original base stat plus 2 flat points.
+  const scalingTiers = Math.max(
+    0,
+    Math.floor((itemLevel - requiredLevel) / 5)
+  );
+
+  const scaleStat = (baseValue: number): number => {
+    if (baseValue <= 0) return 0;
+    if (scalingTiers <= 0) return Math.round(baseValue);
+
+    return Math.max(
+      1,
+      Math.round(
+        baseValue * (1 + 0.20 * scalingTiers) +
+        2 * scalingTiers
+      )
+    );
+  };
+
+  return {
+    baseAttack: scaleStat(baseAttack),
+    baseDefense: scaleStat(baseDefense),
+    scalingTiers,
+  };
+}
+
 function getAdjustedAffixRange(
   affix: AffixRow,
   armorWeight: string | null,
@@ -545,8 +584,16 @@ function buildFinalItem(args: {
 
   const rarityLabel = RARITY_LABELS[rarity];
   const name = rarityLabel ? `${rarityLabel} ${base.name}` : base.name;
-  const baseAttack = Number(base.base_attack || 0);
-  const baseDefense = Number(base.base_defense || 0);
+
+  const {
+    baseAttack,
+    baseDefense,
+  } = getScaledBaseStats({
+    baseAttack: base.base_attack,
+    baseDefense: base.base_defense,
+    requiredLevel: base.required_level,
+    itemLevel,
+  });
 
   const sellValueBase = Number(base.sell_value || 0);
   const sellValue =

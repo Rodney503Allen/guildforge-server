@@ -8,6 +8,8 @@ import {
 } from "./services/spellLoadoutService";
 import { db } from "./db";
 import { advanceTutorial, TutorialStep } from "./services/tutorialService";
+import { getFinalPlayerStats } from "./services/playerService";
+import { buildSpellTooltipPresentation } from "./services/spellTooltipService";
 
 const router = Router();
 
@@ -67,6 +69,9 @@ const [rows]: any = await db.query(
     s.mana_cost,
     s.cooldown,
     s.type,
+    s.target_type,
+    s.effect_type,
+    s.handler_key,
 
     s.discipline_id,
     d.name AS discipline_name,
@@ -100,34 +105,52 @@ const [rows]: any = await db.query(
   `,
   [playerId]
 );
-const spells = (rows || []).map((row: any) => ({
-  id: Number(row.id),
-  name: row.name,
-  description: row.description,
-  icon: row.icon,
-  level: Number(row.level || 1),
-  manaCost: Number(row.mana_cost || 0),
-  cooldown: Number(row.cooldown || 0),
-  type: row.type,
+const playerStats = await getFinalPlayerStats(playerId);
 
-  disciplineId: Number(row.discipline_id),
-  disciplineName: row.discipline_name,
+const spells = await Promise.all(
+  (rows || []).map(async (row: any) => {
+    const tooltip = await buildSpellTooltipPresentation(
+      playerId,
+      row,
+      playerStats
+    );
 
-  damage: Number(row.damage || 0),
-  heal: Number(row.heal || 0),
+    return {
+      id: Number(row.id),
+      name: row.name,
+      description: tooltip.description,
+      icon: row.icon,
+      level: Number(row.level || 1),
+      manaCost: tooltip.manaCost,
+      cooldown: tooltip.cooldown,
+      type: row.type,
 
-  dot_damage: Number(row.dot_damage || 0),
-  dot_duration: Number(row.dot_duration || 0),
-  dot_tick_rate: Number(row.dot_tick_rate || 0),
+      target_type: row.target_type,
+      effect_type: row.effect_type,
+      handler_key: row.handler_key,
 
-  buff_stat: row.buff_stat,
-  buff_value: Number(row.buff_value || 0),
-  buff_duration: Number(row.buff_duration || 0),
+      disciplineId: Number(row.discipline_id),
+      disciplineName: row.discipline_name,
 
-  debuff_stat: row.debuff_stat,
-  debuff_value: Number(row.debuff_value || 0),
-  debuff_duration: Number(row.debuff_duration || 0)
-}));
+      damage: tooltip.damage,
+      heal: tooltip.healing,
+
+      dot_damage: tooltip.dotDamage,
+      dot_duration: tooltip.dotDuration,
+      dot_tick_rate: tooltip.dotTickRate,
+
+      buff_stat: row.buff_stat,
+      buff_value: Number(row.buff_value || 0),
+      buff_duration: Number(row.buff_duration || 0),
+
+      debuff_stat: row.debuff_stat,
+      debuff_value: Number(row.debuff_value || 0),
+      debuff_duration: Number(row.debuff_duration || 0),
+
+      rank: tooltip.rank
+    };
+  })
+);
 
     return res.json({
       success: true,

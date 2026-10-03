@@ -3272,7 +3272,15 @@ function renderHuntSpellHotbar() {
               type="button"
               onclick="activateHuntSpell(${spellId})"
               disabled
-              title="${name}"
+              data-tooltip="spell"
+              data-name="${name}"
+              data-desc="${escapeHuntHtml(spell.description ?? "")}"
+              data-mana-cost="${Number(
+                spell.manaCost ??
+                spell.mana_cost ??
+                0
+              ) || 0}"
+              data-cooldown="${Number(spell.cooldown ?? 0) || 0}"
             >
               <img
                 src="${escapeHuntHtml(icon)}"
@@ -3289,29 +3297,7 @@ function renderHuntSpellHotbar() {
                 class="hunt-spell-cooldown hidden"
               ></div>
 
-              <div class="hunt-spell-tooltip">
-                <strong>
-                  ${name}
-                </strong>
 
-                <span>
-                  ${Number(
-                    spell.manaCost ??
-                    spell.mana_cost ??
-                    0
-                  )} SP
-                </span>
-
-                ${
-                  Number(spell.cooldown) > 0
-                    ? `
-                      <span>
-                        ${Number(spell.cooldown)}s cooldown
-                      </span>
-                    `
-                    : ""
-                }
-              </div>
             </button>
           `;
         }

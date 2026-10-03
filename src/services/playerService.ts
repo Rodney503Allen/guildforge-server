@@ -2,6 +2,7 @@
 import { db } from "../db";
 import { computePlayerStats, type ItemMods, type DerivedStats } from "./statEngine";
 import { getActiveBuffs } from "./buffService";
+import { getScaledBaseStats } from "./lootGenerator";
 export type Archetype =
   | "Arcanist"
   | "Divine"
@@ -244,7 +245,9 @@ export async function getFinalPlayerStats(
 
       -- rolled item path
       pi.roll_json AS rolled_roll_json,
+      pi.item_level AS rolled_item_level,
 
+      ib.required_level AS base_required_level,
       ib.base_attack,
       ib.base_defense
 
@@ -278,9 +281,16 @@ export async function getFinalPlayerStats(
     const rolls = parseRollJson(g.rolled_roll_json);
     const rollMods = rollsToItemMods(rolls);
 
+    const scaledBaseStats = getScaledBaseStats({
+      baseAttack: g.base_attack,
+      baseDefense: g.base_defense,
+      requiredLevel: g.base_required_level,
+      itemLevel: g.rolled_item_level,
+    });
+
     return {
-      base_attack: Number(g.base_attack || 0),
-      base_defense: Number(g.base_defense || 0),
+      base_attack: scaledBaseStats.baseAttack,
+      base_defense: scaledBaseStats.baseDefense,
       ...rollMods
     };
   });
