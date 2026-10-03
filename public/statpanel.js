@@ -60,6 +60,45 @@ loadGuildforgeStylesheetOnce(
   "guildforge-audio-settings-css"
 );
 
+
+// =======================
+// SEASONAL / HOLIDAY THEME
+// =======================
+//
+// Change this one value to control the global seasonal HUD styling.
+// Use null to disable holiday styling entirely.
+//
+// Supported themes:
+//   "halloween"
+//   null
+const GUILDFORGE_HOLIDAY_THEME = "halloween";
+
+function initializeGuildforgeHolidayTheme() {
+  const theme = String(
+    GUILDFORGE_HOLIDAY_THEME || ""
+  ).trim().toLowerCase();
+
+  document.documentElement.removeAttribute(
+    "data-gf-holiday"
+  );
+
+  if (!theme) {
+    return;
+  }
+
+  document.documentElement.setAttribute(
+    "data-gf-holiday",
+    theme
+  );
+
+  loadGuildforgeStylesheetOnce(
+    "/holiday.css",
+    "guildforge-holiday-css"
+  );
+}
+
+initializeGuildforgeHolidayTheme();
+
 // =======================
 // GLOBAL AUDIO BOOTSTRAP
 // =======================

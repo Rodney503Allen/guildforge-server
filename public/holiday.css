@@ -1,0 +1,242 @@
+/* =========================================================
+   GUILDFORGE HOLIDAY THEMES
+   Active theme is controlled in statpanel.js:
+     const GUILDFORGE_HOLIDAY_THEME = "halloween";
+
+   Disable with:
+     const GUILDFORGE_HOLIDAY_THEME = null;
+========================================================= */
+
+.holiday-decoration {
+  display: none;
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+}
+
+.holiday-logo-o {
+  display: inline;
+}
+
+
+/* =========================================================
+   HALLOWEEN — STATPANEL
+========================================================= */
+
+html[data-gf-holiday="halloween"] #statpanel {
+  --gf-halloween-orange: #d66a2e;
+  --gf-halloween-ember: #8d351d;
+
+  /* Required so the hanging web can extend below the HUD. */
+  overflow: visible;
+
+  background:
+    radial-gradient(
+      ellipse at 50% -60%,
+      rgba(213, 102, 46, 0.13),
+      transparent 52%
+    ),
+    radial-gradient(
+      circle at 8% 10%,
+      rgba(74, 58, 84, 0.12),
+      transparent 25%
+    ),
+    linear-gradient(
+      180deg,
+      #15171a 0%,
+      #090b0d 70%,
+      #060708 100%
+    );
+
+  border-bottom-color: #322822;
+
+  box-shadow:
+    0 5px 0 #050607,
+    0 18px 35px var(--gf-shadow),
+    inset 0 -1px 0 rgba(214, 106, 46, 0.08);
+}
+
+
+/* Keep all actual HUD content above the corner webs. */
+html[data-gf-holiday="halloween"] #statpanel > section,
+html[data-gf-holiday="halloween"] #statpanel > nav {
+  position: relative;
+  z-index: 3;
+}
+
+
+/* Seasonal ember line. */
+html[data-gf-holiday="halloween"] #statpanel::after {
+  z-index: 4;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      var(--gf-halloween-ember),
+      var(--gf-halloween-orange),
+      var(--gf-halloween-ember),
+      transparent
+    );
+
+  opacity: 0.62;
+}
+
+
+/* Disable the old CSS-generated webs. */
+html[data-gf-holiday="halloween"] #statpanel::before,
+html[data-gf-holiday="halloween"] .statpanel-character::after {
+  content: none !important;
+  display: none !important;
+}
+
+
+/* =========================================================
+   HALLOWEEN — IMAGE COBWEBS
+========================================================= */
+
+html[data-gf-holiday="halloween"] .holiday-decoration {
+  display: block;
+}
+
+
+/*
+  Corner webs deliberately sit BELOW player info/navigation.
+  They decorate the HUD background rather than covering controls.
+*/
+html[data-gf-holiday="halloween"] .holiday-cobweb {
+  z-index: 1;
+}
+
+
+/* TOP LEFT */
+html[data-gf-holiday="halloween"] .holiday-cobweb-top-left {
+  top: 0;
+  left: 0;
+
+  width: clamp(145px, 12vw, 225px);
+  height: clamp(92px, 8vw, 150px);
+
+  background:
+    url("/images/holiday/cobweb_corner.png")
+    top left / contain no-repeat;
+
+  opacity: 0.48;
+}
+
+
+/* BOTTOM RIGHT */
+html[data-gf-holiday="halloween"] .holiday-cobweb-bottom-right {
+  right: 0;
+  bottom: 0;
+
+  width: clamp(145px, 12vw, 225px);
+  height: clamp(92px, 8vw, 150px);
+
+  background:
+    url("/images/holiday/cobweb_corner.png")
+    top left / contain no-repeat;
+
+  opacity: 0.46;
+
+  transform: rotate(180deg);
+  transform-origin: center;
+}
+
+
+/* Hanging web disabled. */
+
+
+/* Hanging web disabled. */
+html[data-gf-holiday="halloween"] .holiday-cobweb-bottom {
+  display: none !important;
+}
+
+
+/* =========================================================
+   HALLOWEEN — PUMPKIN "O"
+========================================================= */
+
+/*
+  The original text O is transparent and occupies no visual space.
+  pumpkin.png alone renders in that character slot.
+*/
+html[data-gf-holiday="halloween"] .holiday-logo-o {
+  position: relative;
+  top: 0.08em;
+
+  display: inline-block;
+
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.025em;
+
+  color: transparent !important;
+  text-indent: -9999px;
+  overflow: hidden;
+  line-height: 1;
+
+  vertical-align: -0.08em;
+
+  background:
+    url("/images/holiday/pumpkin.png")
+    center / contain no-repeat;
+
+  filter:
+    drop-shadow(0 2px 1px #000)
+    drop-shadow(0 0 5px rgba(230, 105, 35, 0.55));
+}
+
+
+/* =========================================================
+   HALLOWEEN — SMALL ACCENTS
+========================================================= */
+
+html[data-gf-holiday="halloween"] .logo-text {
+  text-shadow:
+    0 2px 0 #000,
+    0 4px 10px #000,
+    0 0 17px rgba(214, 106, 46, 0.28);
+}
+
+html[data-gf-holiday="halloween"] .logo-slogan span,
+html[data-gf-holiday="halloween"] .pi-divider,
+html[data-gf-holiday="halloween"] .buff-icon-symbol {
+  color: var(--gf-halloween-orange);
+}
+
+html[data-gf-holiday="halloween"] .nav-action-btn:hover,
+html[data-gf-holiday="halloween"] button.audio-nav-action:hover {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(214, 106, 46, 0.14),
+      rgba(44, 22, 14, 0.2)
+    );
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 1180px) {
+}
+
+@media (max-width: 860px) {
+  html[data-gf-holiday="halloween"] .holiday-cobweb-top-left,
+  html[data-gf-holiday="halloween"] .holiday-cobweb-bottom-right {
+    width: 145px;
+    height: 100px;
+    opacity: 0.4;
+  }
+}
+
+@media (max-width: 590px) {
+  html[data-gf-holiday="halloween"] .holiday-cobweb-top-left,
+  html[data-gf-holiday="halloween"] .holiday-cobweb-bottom-right {
+    width: 105px;
+    height: 76px;
+    opacity: 0.34;
+  }
+}
