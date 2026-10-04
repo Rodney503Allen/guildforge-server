@@ -3765,7 +3765,7 @@ router.post("/api/world-event/interact/:spawnId", async (req, res) => {
 const HALLOWED_VENDOR_OBJECT_TYPE = "seasonal_vendor";
 const HALLOWED_VENDOR_KEY = "headless_horseman";
 const HALLOWED_CANDY_CORN_ITEM_ID = 61;
-const HALLOWED_PORTRAIT_AVATAR_ID = 2;
+const HALLOWED_PORTRAIT_AVATAR_ID = 12;
 const HALLOWED_PORTRAIT_COST = 50;
 
 async function getHallowedVendorForPlayer(playerId: number, objectId: number, executor: any = db) {
