@@ -174,6 +174,7 @@ async function refreshSessionEnemy(session: CombatSession) {
       pc.id,
       pc.hp,
       pc.affix_id,
+      pc.seasonal_variant,
 
       c.name,
       c.attack,
@@ -204,16 +205,25 @@ async function refreshSessionEnemy(session: CombatSession) {
 
   const debuffs = await getCreatureDebuffTotals(enemyRow.id);
 
-  const hpMult = Number(enemyRow.hp_mult ?? 1);
-  const attackMult = Number(enemyRow.attack_mult ?? 1);
+  const seasonalVariant = enemyRow.seasonal_variant
+    ? String(enemyRow.seasonal_variant).toUpperCase()
+    : null;
+  const isHallowed = seasonalVariant === "HALLOWED";
+
+  // Hallowed creatures are mutually exclusive with normal affixes at spawn.
+  // Keep the fallback affix multipliers here for ordinary affixed creatures.
+  const hpMult = isHallowed ? 1.15 : Number(enemyRow.hp_mult ?? 1);
+  const attackMult = isHallowed ? 1.10 : Number(enemyRow.attack_mult ?? 1);
   const defenseMult = Number(enemyRow.defense_mult ?? 1);
   const speedMult = Number(enemyRow.speed_mult ?? 1);
 
   const modifiedMaxHp = Math.floor(Number(enemyRow.maxhp ?? 1) * hpMult);
 
-  const enemyDisplayName = enemyRow.affix_name
-    ? `${enemyRow.affix_name} ${enemyRow.name}`
-    : String(enemyRow.name ?? "Enemy");
+  const enemyDisplayName = isHallowed
+    ? `Hallowed ${enemyRow.name}`
+    : enemyRow.affix_name
+      ? `${enemyRow.affix_name} ${enemyRow.name}`
+      : String(enemyRow.name ?? "Enemy");
 
   const baseDescription = String(enemyRow.description ?? "");
   const affixDescription = String(enemyRow.affix_description ?? "");
@@ -1048,6 +1058,8 @@ export async function createCombatSession(
   SELECT
     pc.id,
     pc.hp,
+    pc.affix_id,
+    pc.seasonal_variant,
     c.name,
     c.maxhp,
     c.attack,
@@ -1056,9 +1068,16 @@ export async function createCombatSession(
     c.crit,
     c.level,
     c.description,
-    c.attack_speed
+    c.attack_speed,
+    ca.name AS affix_name,
+    ca.description AS affix_description,
+    ca.hp_mult,
+    ca.attack_mult,
+    ca.defense_mult,
+    ca.speed_mult
   FROM player_creatures pc
   JOIN creatures c ON c.id = pc.creature_id
+  LEFT JOIN creature_affixes ca ON ca.id = pc.affix_id
   WHERE pc.player_id = ?
   LIMIT 1
   `,
@@ -1069,20 +1088,47 @@ export async function createCombatSession(
 
   const now = Date.now();
 
+  const seasonalVariant = enemyRow.seasonal_variant
+    ? String(enemyRow.seasonal_variant).toUpperCase()
+    : null;
+  const isHallowed = seasonalVariant === "HALLOWED";
+
+  const hpMult = isHallowed ? 1.15 : Number(enemyRow.hp_mult ?? 1);
+  const attackMult = isHallowed ? 1.10 : Number(enemyRow.attack_mult ?? 1);
+  const defenseMult = Number(enemyRow.defense_mult ?? 1);
+  const speedMult = Number(enemyRow.speed_mult ?? 1);
+
+  const modifiedMaxHp = Math.floor(Number(enemyRow.maxhp ?? 1) * hpMult);
+  const modifiedAttack = Math.floor(Number(enemyRow.attack ?? 0) * attackMult);
+  const modifiedDefense = Math.floor(Number(enemyRow.defense ?? 0) * defenseMult);
+  const modifiedAgility = Math.floor(Number(enemyRow.agility ?? 0) * speedMult);
+
+  const enemyDisplayName = isHallowed
+    ? `Hallowed ${enemyRow.name}`
+    : enemyRow.affix_name
+      ? `${enemyRow.affix_name} ${enemyRow.name}`
+      : String(enemyRow.name ?? "Enemy");
+
+  const baseDescription = String(enemyRow.description ?? "");
+  const affixDescription = String(enemyRow.affix_description ?? "");
+  const enemyDescription = enemyRow.affix_name
+    ? `${baseDescription}\n\n${affixDescription}`
+    : baseDescription;
+
   const enemyStats: DerivedStats = {
     level: Number(enemyRow.level ?? 1),
-    attack: Number(enemyRow.attack ?? 0),
-    defense: Number(enemyRow.defense ?? 0),
-    agility: Number(enemyRow.agility ?? 0),
+    attack: modifiedAttack,
+    defense: modifiedDefense,
+    agility: modifiedAgility,
     vitality: 0,
     intellect: 0,
     crit: Math.max(0, Math.min(0.4, Number(enemyRow.crit ?? 0) * 0.005)),
     hpoints: Number(enemyRow.hp ?? 1),
     spoints: 0,
-    maxhp: Number(enemyRow.maxhp ?? 1),
+    maxhp: modifiedMaxHp,
     maxspoints: 0,
     spellPower: 1,
-    dodgeChance: clamp(Number(enemyRow.agility ?? 0) * 0.002, 0, 0.35),
+    dodgeChance: clamp(modifiedAgility * 0.002, 0, 0.35),
     critDamageMult: 1.5,
     damageReduction: 0,
     lifesteal: 0,
@@ -1119,11 +1165,11 @@ export async function createCombatSession(
 
     enemy: {
       side: "enemy",
-      name: String(enemyRow.name ?? "Enemy"),
+      name: enemyDisplayName,
       level: Number(enemyRow.level ?? 1),
-      description: String(enemyRow.description ?? ""),
+      description: enemyDescription,
       hp: Number(enemyRow.hp ?? 0),
-      maxHp: Number(enemyRow.maxhp ?? 1),
+      maxHp: modifiedMaxHp,
       sp: 0,
       maxSp: 0,
       gauge: 0,
@@ -1134,7 +1180,7 @@ export async function createCombatSession(
       cooldowns: {},
     },
 
-    log: [`⚠ ${enemyRow.name ?? "Enemy"} engages you!`],
+    log: [`⚠ ${enemyDisplayName} engages you!`],
   };
 
   combatSessions.set(playerId, session);

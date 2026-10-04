@@ -3759,6 +3759,203 @@ router.post("/api/world-event/interact/:spawnId", async (req, res) => {
 });
 
 
+// =======================
+// HALLOWED SEASONAL VENDOR
+// =======================
+const HALLOWED_VENDOR_OBJECT_TYPE = "seasonal_vendor";
+const HALLOWED_VENDOR_KEY = "headless_horseman";
+const HALLOWED_CANDY_CORN_ITEM_ID = 61;
+const HALLOWED_PORTRAIT_AVATAR_ID = 2;
+const HALLOWED_PORTRAIT_COST = 50;
+
+async function getHallowedVendorForPlayer(playerId: number, objectId: number, executor: any = db) {
+  const [[row]]: any = await executor.query(
+    `
+      SELECT
+        wo.id,
+        wo.name,
+        wo.object_type,
+        wo.x,
+        wo.y,
+        wo.interaction_radius,
+        wo.params_json,
+        p.map_x,
+        p.map_y
+      FROM world_objects wo
+      JOIN players p ON p.id = ?
+      WHERE wo.id = ?
+        AND wo.is_active = 1
+        AND wo.object_type = ?
+      LIMIT 1
+    `,
+    [playerId, objectId, HALLOWED_VENDOR_OBJECT_TYPE]
+  );
+
+  if (!row) throw new Error("SEASONAL_VENDOR_NOT_FOUND");
+
+  let params: any = row.params_json || {};
+  if (typeof params === "string") {
+    try { params = JSON.parse(params); } catch { params = {}; }
+  }
+
+  if (String(params?.vendor_key || "") !== HALLOWED_VENDOR_KEY) {
+    throw new Error("SEASONAL_VENDOR_NOT_FOUND");
+  }
+
+  const distance =
+    Math.abs(Number(row.map_x) - Number(row.x)) +
+    Math.abs(Number(row.map_y) - Number(row.y));
+  const radius = Math.max(0, Number(row.interaction_radius) || 1);
+
+  if (distance > radius) throw new Error("TOO_FAR_AWAY");
+  return row;
+}
+
+router.get("/api/seasonal-vendor/:objectId", async (req, res) => {
+  try {
+    const pid = Number((req.session as any)?.playerId);
+    if (!pid) return res.status(401).json({ error: "not_logged_in" });
+
+    const objectId = Number(req.params.objectId);
+    if (!Number.isInteger(objectId) || objectId <= 0) {
+      return res.status(400).json({ error: "invalid_object_id" });
+    }
+
+    const vendor = await getHallowedVendorForPlayer(pid, objectId);
+
+    const [[currency]]: any = await db.query(
+      `SELECT COALESCE(SUM(quantity), 0) AS quantity FROM inventory WHERE player_id = ? AND item_id = ?`,
+      [pid, HALLOWED_CANDY_CORN_ITEM_ID]
+    );
+
+    const [[owned]]: any = await db.query(
+      `SELECT 1 AS owned FROM player_avatars WHERE player_id = ? AND avatar_id = ? LIMIT 1`,
+      [pid, HALLOWED_PORTRAIT_AVATAR_ID]
+    );
+
+    const [[avatar]]: any = await db.query(
+      `SELECT id, name, image_url, rarity, description FROM avatars WHERE id = ? AND is_active = 1 LIMIT 1`,
+      [HALLOWED_PORTRAIT_AVATAR_ID]
+    );
+
+    if (!avatar) return res.status(404).json({ error: "seasonal_reward_not_found" });
+
+    return res.json({
+      success: true,
+      vendor: {
+        id: Number(vendor.id),
+        name: String(vendor.name || "The Headless Horseman"),
+        dialogue: "The silent rider extends a gloved hand toward your collection of Candy Corn..."
+      },
+      currency: {
+        itemId: HALLOWED_CANDY_CORN_ITEM_ID,
+        name: "Candy Corn",
+        quantity: Number(currency?.quantity || 0)
+      },
+      reward: {
+        avatarId: Number(avatar.id),
+        name: avatar.name || "Hallowed Alpha Portrait",
+        imageUrl: avatar.image_url || null,
+        rarity: avatar.rarity || "rare",
+        description: avatar.description || "An exclusive portrait from the Guildforge Alpha Hallowed event.",
+        cost: HALLOWED_PORTRAIT_COST,
+        owned: !!owned
+      }
+    });
+  } catch (err: any) {
+    const msg = String(err?.message || "");
+    if (msg === "SEASONAL_VENDOR_NOT_FOUND") return res.status(404).json({ error: "seasonal_vendor_not_found" });
+    if (msg === "TOO_FAR_AWAY") return res.status(400).json({ error: "too_far_away" });
+    console.error("GET /api/seasonal-vendor/:objectId ERROR:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+router.post("/api/seasonal-vendor/:objectId/purchase", async (req, res) => {
+  const pid = Number((req.session as any)?.playerId);
+  if (!pid) return res.status(401).json({ error: "not_logged_in" });
+
+  const objectId = Number(req.params.objectId);
+  if (!Number.isInteger(objectId) || objectId <= 0) {
+    return res.status(400).json({ error: "invalid_object_id" });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    await getHallowedVendorForPlayer(pid, objectId, conn);
+
+    const [[owned]]: any = await conn.query(
+      `SELECT 1 AS owned FROM player_avatars WHERE player_id = ? AND avatar_id = ? LIMIT 1 FOR UPDATE`,
+      [pid, HALLOWED_PORTRAIT_AVATAR_ID]
+    );
+    if (owned) {
+      await conn.rollback();
+      return res.status(409).json({ error: "already_owned" });
+    }
+
+    const [stacks]: any = await conn.query(
+      `
+        SELECT inventory_id, quantity
+        FROM inventory
+        WHERE player_id = ? AND item_id = ? AND quantity > 0
+        ORDER BY inventory_id ASC
+        FOR UPDATE
+      `,
+      [pid, HALLOWED_CANDY_CORN_ITEM_ID]
+    );
+
+    const total = (stacks || []).reduce((sum: number, stack: any) => sum + Number(stack.quantity || 0), 0);
+    if (total < HALLOWED_PORTRAIT_COST) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: "not_enough_candy_corn",
+        required: HALLOWED_PORTRAIT_COST,
+        current: total
+      });
+    }
+
+    let remaining = HALLOWED_PORTRAIT_COST;
+    for (const stack of stacks || []) {
+      if (remaining <= 0) break;
+      const qty = Number(stack.quantity || 0);
+      const spend = Math.min(qty, remaining);
+      const left = qty - spend;
+
+      if (left <= 0) {
+        await conn.query(`DELETE FROM inventory WHERE inventory_id = ? AND player_id = ?`, [stack.inventory_id, pid]);
+      } else {
+        await conn.query(`UPDATE inventory SET quantity = ? WHERE inventory_id = ? AND player_id = ?`, [left, stack.inventory_id, pid]);
+      }
+      remaining -= spend;
+    }
+
+    await conn.query(
+      `INSERT INTO player_avatars (player_id, avatar_id) VALUES (?, ?)`,
+      [pid, HALLOWED_PORTRAIT_AVATAR_ID]
+    );
+
+    await conn.commit();
+
+    return res.json({
+      success: true,
+      message: "Hallowed Alpha Portrait unlocked!",
+      avatarId: HALLOWED_PORTRAIT_AVATAR_ID,
+      candyCornSpent: HALLOWED_PORTRAIT_COST,
+      candyCornRemaining: total - HALLOWED_PORTRAIT_COST
+    });
+  } catch (err: any) {
+    try { await conn.rollback(); } catch (_) {}
+    const msg = String(err?.message || "");
+    if (msg === "SEASONAL_VENDOR_NOT_FOUND") return res.status(404).json({ error: "seasonal_vendor_not_found" });
+    if (msg === "TOO_FAR_AWAY") return res.status(400).json({ error: "too_far_away" });
+    console.error("POST /api/seasonal-vendor/:objectId/purchase ERROR:", err);
+    return res.status(500).json({ error: "server_error" });
+  } finally {
+    conn.release();
+  }
+});
+
 router.post("/api/world/interact/:objectId", async (req, res) => {
   try {
     const pid = (req.session as any)?.playerId;

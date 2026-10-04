@@ -4369,6 +4369,10 @@ function renderNearbyObjects(objects) {
         obj.object_type ===
         "world_event_interact";
 
+      const isSeasonalVendor =
+        obj.object_type ===
+        "seasonal_vendor";
+
       const rangeText =
         obj.inRange
           ? `
@@ -4442,6 +4446,17 @@ function renderNearbyObjects(objects) {
     </button>
   `;
 
+} else if (isSeasonalVendor) {
+
+  btn = `
+    <button
+      class="world-interact__btn world-interact__btn--seasonal"
+      onclick="openHallowedVendor(${Number(obj.id)})"
+    >
+      Browse Wares
+    </button>
+  `;
+
 } else if (isWorldEventInteract) {
 
   btn = `
@@ -4484,7 +4499,9 @@ function renderNearbyObjects(objects) {
             ? "Hunt Quarry"
             : isWorldEventInteract
               ? "World Event"
-              : String(
+              : isSeasonalVendor
+                ? "Seasonal Merchant"
+                : String(
                   obj.object_type ||
                   "object"
                 );
@@ -4985,6 +5002,146 @@ window.rejoinHuntEncounter =
 
 window.confrontHuntTarget =
   confrontHuntTarget;
+
+function ensureHallowedVendorUi() {
+  if (!document.getElementById("hallowedVendorStyles")) {
+    const style = document.createElement("style");
+    style.id = "hallowedVendorStyles";
+    style.textContent = `
+      .hallowed-vendor-backdrop{position:fixed;inset:0;background:rgba(5,3,8,.78);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}
+      .hallowed-vendor{width:min(560px,100%);background:linear-gradient(180deg,#201527 0%,#100d14 100%);border:1px solid #8f5a28;box-shadow:0 20px 70px #000,0 0 35px rgba(214,115,36,.16);border-radius:12px;color:#eee2d0;overflow:hidden}
+      .hallowed-vendor__header{padding:20px 22px 16px;border-bottom:1px solid rgba(222,139,58,.24);position:relative}
+      .hallowed-vendor__title{font-size:24px;font-weight:800;color:#f0a34a;letter-spacing:.02em}
+      .hallowed-vendor__dialogue{margin-top:7px;color:#bdb0bd;font-style:italic;line-height:1.45}
+      .hallowed-vendor__close{position:absolute;right:14px;top:12px;border:0;background:transparent;color:#bfb4bd;font-size:26px;cursor:pointer}
+      .hallowed-vendor__currency{padding:12px 22px;background:rgba(0,0,0,.2);font-weight:700;color:#ffd38d}
+      .hallowed-vendor__reward{display:grid;grid-template-columns:92px 1fr;gap:16px;padding:22px}
+      .hallowed-vendor__portrait{width:92px;height:92px;object-fit:cover;border-radius:8px;border:2px solid #c67a2d;background:#09070a}
+      .hallowed-vendor__reward-name{font-size:18px;font-weight:800;color:#f1d7ae}
+      .hallowed-vendor__desc{margin:6px 0 14px;color:#bfb5bd;line-height:1.4}
+      .hallowed-vendor__cost{font-weight:800;color:#f0a34a;margin-bottom:12px}
+      .hallowed-vendor__buy{border:1px solid #a96429;background:linear-gradient(#7c3e18,#4f250f);color:#fff0d3;padding:9px 14px;border-radius:6px;font-weight:800;cursor:pointer}
+      .hallowed-vendor__buy:hover:not(:disabled){filter:brightness(1.14)}
+      .hallowed-vendor__buy:disabled{opacity:.5;cursor:not-allowed}
+      .hallowed-vendor__owned{color:#9fd18b;font-weight:800}
+      @media(max-width:520px){.hallowed-vendor__reward{grid-template-columns:1fr}.hallowed-vendor__portrait{width:110px;height:110px}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  let backdrop = document.getElementById("hallowedVendorBackdrop");
+  if (!backdrop) {
+    backdrop = document.createElement("div");
+    backdrop.id = "hallowedVendorBackdrop";
+    backdrop.className = "hallowed-vendor-backdrop";
+    backdrop.style.display = "none";
+    backdrop.addEventListener("click", event => {
+      if (event.target === backdrop) closeHallowedVendor();
+    });
+    document.body.appendChild(backdrop);
+  }
+  return backdrop;
+}
+
+function closeHallowedVendor() {
+  const backdrop = document.getElementById("hallowedVendorBackdrop");
+  if (backdrop) backdrop.style.display = "none";
+}
+
+async function openHallowedVendor(objectId) {
+  if (isInCombat()) return;
+
+  try {
+    const res = await fetch(`/api/seasonal-vendor/${Number(objectId)}`, { credentials: "include" });
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data?.error === "too_far_away") {
+        showErrorToast("Move closer to the Headless Horseman before browsing his wares.", "Too Far Away");
+        return;
+      }
+      throw new Error(data?.error || "Unable to open seasonal vendor.");
+    }
+
+    renderHallowedVendor(data, Number(objectId));
+  } catch (err) {
+    console.error("Failed to open Hallowed vendor", err);
+    showErrorToast("The Headless Horseman's wares could not be loaded.", "Vendor Unavailable");
+  }
+}
+
+function renderHallowedVendor(data, objectId) {
+  const backdrop = ensureHallowedVendorUi();
+  const vendor = data?.vendor || {};
+  const currency = data?.currency || {};
+  const reward = data?.reward || {};
+  const owned = !!reward.owned;
+  const canAfford = Number(currency.quantity || 0) >= Number(reward.cost || 0);
+
+  backdrop.innerHTML = `
+    <div class="hallowed-vendor" role="dialog" aria-modal="true" aria-label="${escapeHtml(vendor.name || "The Headless Horseman")}">
+      <div class="hallowed-vendor__header">
+        <button class="hallowed-vendor__close" onclick="closeHallowedVendor()" aria-label="Close">&times;</button>
+        <div class="hallowed-vendor__title">${escapeHtml(vendor.name || "The Headless Horseman")}</div>
+        <div class="hallowed-vendor__dialogue">${escapeHtml(vendor.dialogue || "")}</div>
+      </div>
+      <div class="hallowed-vendor__currency">Candy Corn: ${Number(currency.quantity || 0)}</div>
+      <div class="hallowed-vendor__reward">
+        ${reward.imageUrl ? `<img class="hallowed-vendor__portrait" src="${escapeHtml(reward.imageUrl)}" alt="${escapeHtml(reward.name || "Hallowed Alpha Portrait")}">` : `<div class="hallowed-vendor__portrait"></div>`}
+        <div>
+          <div class="hallowed-vendor__reward-name">${escapeHtml(reward.name || "Hallowed Alpha Portrait")}</div>
+          <div class="hallowed-vendor__desc">${escapeHtml(reward.description || "Exclusive Guildforge Alpha Hallowed portrait.")}</div>
+          <div class="hallowed-vendor__cost">Cost: ${Number(reward.cost || 0)} Candy Corn</div>
+          ${owned
+            ? `<div class="hallowed-vendor__owned">Unlocked</div>`
+            : `<button class="hallowed-vendor__buy" ${canAfford ? "" : "disabled"} onclick="purchaseHallowedPortrait(${Number(objectId)})">${canAfford ? "Unlock Portrait" : "Not Enough Candy Corn"}</button>`}
+        </div>
+      </div>
+    </div>
+  `;
+  backdrop.style.display = "flex";
+}
+
+async function purchaseHallowedPortrait(objectId) {
+  try {
+    const res = await fetch(`/api/seasonal-vendor/${Number(objectId)}/purchase`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data?.error === "not_enough_candy_corn") {
+        showErrorToast(`You need ${Number(data.required || 50)} Candy Corn.`, "Not Enough Candy Corn");
+        await openHallowedVendor(objectId);
+        return;
+      }
+      if (data?.error === "already_owned") {
+        await openHallowedVendor(objectId);
+        return;
+      }
+      if (data?.error === "too_far_away") {
+        closeHallowedVendor();
+        showErrorToast("You moved too far away from the Headless Horseman.", "Too Far Away");
+        return;
+      }
+      throw new Error(data?.error || "Purchase failed.");
+    }
+
+    if (window.GFToast?.show) {
+      GFToast.show("Portrait Unlocked", "The Hallowed Alpha Portrait is now available on your Character page.", { type: "success", durationMs: 3600 });
+    }
+    await openHallowedVendor(objectId);
+  } catch (err) {
+    console.error("Hallowed portrait purchase failed", err);
+    showErrorToast("The portrait could not be unlocked.", "Purchase Failed");
+  }
+}
+
+window.openHallowedVendor = openHallowedVendor;
+window.closeHallowedVendor = closeHallowedVendor;
+window.purchaseHallowedPortrait = purchaseHallowedPortrait;
 
 async function interactWithWorldObject(objectId) {
   if (isInCombat()) return;

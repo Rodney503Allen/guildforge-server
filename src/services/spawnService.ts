@@ -3,6 +3,13 @@
 import { db } from "../db";
 import { recordCreatureSeen } from "./bestiaryService";
 
+// Halloween 2026 seasonal event switch. Set to false to immediately stop
+// new Hallowed creatures from spawning without removing event data/rewards.
+const HALLOWED_EVENT_ACTIVE = true;
+const HALLOWED_SPAWN_CHANCE = 0.10;
+const HALLOWED_HP_MULT = 1.15;
+const HALLOWED_ATTACK_MULT = 1.10;
+
 export async function trySpawnEnemy(
   playerId: number,
   mapX: number,
@@ -186,11 +193,17 @@ const weightedCandidates = candidates.map((creature: any) => {
     }
   }
 
-  // 6) Roll a creature affix.
+  // 6) Roll the active seasonal variant before ordinary creature affixes.
+  // Halloween 2026: Hallowed creatures are intentionally mutually exclusive
+  // with ordinary creature affixes so their identity/rewards remain clear.
+  const isHallowed =
+    HALLOWED_EVENT_ACTIVE &&
+    Math.random() < HALLOWED_SPAWN_CHANCE;
+
   let affix: any = null;
   const affixSpawnChance = 0.12;
 
-  if (Math.random() < affixSpawnChance) {
+  if (!isHallowed && Math.random() < affixSpawnChance) {
     const [affixes]: any = await db.query(
       `
       SELECT *
@@ -203,8 +216,8 @@ const weightedCandidates = candidates.map((creature: any) => {
     affix = affixes?.[0] || null;
   }
 
-  const hpMult = affix ? Number(affix.hp_mult || 1) : 1;
-  const attackMult = affix ? Number(affix.attack_mult || 1) : 1;
+  const hpMult = isHallowed ? HALLOWED_HP_MULT : (affix ? Number(affix.hp_mult || 1) : 1);
+  const attackMult = isHallowed ? HALLOWED_ATTACK_MULT : (affix ? Number(affix.attack_mult || 1) : 1);
   const defenseMult = affix ? Number(affix.defense_mult || 1) : 1;
   const speedMult = affix ? Number(affix.speed_mult || 1) : 1;
 
@@ -217,8 +230,8 @@ const weightedCandidates = candidates.map((creature: any) => {
   await db.query(
     `
     INSERT INTO player_creatures
-      (player_id, creature_id, affix_id, hp, map_x, map_y)
-    VALUES (?, ?, ?, ?, ?, ?)
+      (player_id, creature_id, affix_id, hp, map_x, map_y, seasonal_variant)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
     [
       playerId,
@@ -226,7 +239,8 @@ const weightedCandidates = candidates.map((creature: any) => {
       affix?.id || null,
       spawnedHp,
       mapX,
-      mapY
+      mapY,
+      isHallowed ? 'HALLOWED' : null
     ]
   );
 
@@ -236,9 +250,11 @@ const weightedCandidates = candidates.map((creature: any) => {
     affix?.id || null
   );
 
-  const displayName = affix
-    ? `${affix.name} ${chosen.name}`
-    : chosen.name;
+  const displayName = isHallowed
+    ? `Hallowed ${chosen.name}`
+    : affix
+      ? `${affix.name} ${chosen.name}`
+      : chosen.name;
 
   return {
     id: chosen.id,
@@ -283,6 +299,8 @@ const weightedCandidates = candidates.map((creature: any) => {
 
     creatureId: chosen.id,
     affixId: affix?.id || null,
+    seasonalVariant: isHallowed ? 'HALLOWED' : null,
+    isHallowed,
 
     zoneMin,
     zoneMax

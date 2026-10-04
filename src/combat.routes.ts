@@ -255,6 +255,7 @@ const [[enemyRow]]: any = await db.query(
     pc.id,
     pc.hp,
     pc.affix_id,
+    pc.seasonal_variant,
 
     c.name,
     c.level,
@@ -290,8 +291,13 @@ const [[enemyRow]]: any = await db.query(
 
   const debuffs = await getCreatureDebuffTotals(enemyRow.id);
 
-const hpMult = Number(enemyRow.hp_mult ?? 1);
-const attackMult = Number(enemyRow.attack_mult ?? 1);
+const seasonalVariant = enemyRow.seasonal_variant
+  ? String(enemyRow.seasonal_variant).toUpperCase()
+  : null;
+const isHallowed = seasonalVariant === "HALLOWED";
+
+const hpMult = isHallowed ? 1.15 : Number(enemyRow.hp_mult ?? 1);
+const attackMult = isHallowed ? 1.10 : Number(enemyRow.attack_mult ?? 1);
 const defenseMult = Number(enemyRow.defense_mult ?? 1);
 const speedMult = Number(enemyRow.speed_mult ?? 1);
 
@@ -329,9 +335,11 @@ const enemyStats = {
 };
 
   
-  const enemyDisplayName = enemyRow.affix_name
-  ? `${enemyRow.affix_name} ${enemyRow.name}`
-  : String(enemyRow.name ?? "Enemy");
+  const enemyDisplayName = isHallowed
+    ? `Hallowed ${enemyRow.name}`
+    : enemyRow.affix_name
+      ? `${enemyRow.affix_name} ${enemyRow.name}`
+      : String(enemyRow.name ?? "Enemy");
 
   const baseDescription = String(enemyRow.description ?? "");
   const affixDescription = String(enemyRow.affix_description ?? "");
@@ -347,6 +355,19 @@ const enemyStats = {
   session.enemy.hp = Number(enemyRow.hp ?? 0);
   session.enemy.maxHp = modifiedMaxHp;
   session.enemy.stats = enemyStats as any;
+
+  // Show seasonal variant intro once per combat session
+  if (isHallowed && !session.enemy.seasonalIntroShown) {
+    session.log.push(
+      `🎃 ${enemyDisplayName} emerges, touched by the Hallow!`
+    );
+
+    session.log.push(
+      `📈 Hallowed: +15% HP, +10% Attack.`
+    );
+
+    session.enemy.seasonalIntroShown = true;
+  }
 
   // Show affix intro once per combat session
   if (enemyRow.affix_name && !session.enemy.affixIntroShown) {

@@ -108,6 +108,7 @@ const [[row]]: any = await db.query(`
   SELECT
     pc.creature_id,
     pc.affix_id,
+    pc.seasonal_variant,
     pc.map_x AS encounter_map_x,
     pc.map_y AS encounter_map_y,
 
@@ -151,6 +152,8 @@ const affixName = row.affix_name ? String(row.affix_name) : null;
 const affixXpMult = Number(row.xp_mult ?? 1);
 const affixGoldMult = Number(row.gold_mult ?? 1);
 const affixLootMult = Number(row.loot_mult ?? 1);
+const seasonalVariant = row.seasonal_variant ? String(row.seasonal_variant).toUpperCase() : null;
+const isHallowed = seasonalVariant === 'HALLOWED';
 const regionName = row.region_name ? String(row.region_name).trim() : null;
 const encounterMapX = row.encounter_map_x == null ? null : Number(row.encounter_map_x);
 const encounterMapY = row.encounter_map_y == null ? null : Number(row.encounter_map_y);
@@ -350,6 +353,13 @@ try {
   );
 }
 
+  // Hallowed Halloween encounters always award 1-3 Candy Corn (items.id = 61).
+  // The currency uses the normal combat chest so it follows existing loot UX.
+  const HALLOWED_CANDY_CORN_ITEM_ID = 61;
+  const candyCornQty = isHallowed
+    ? Math.floor(Math.random() * 3) + 1
+    : 0;
+
   const chestDrops = [
     ...(drops ?? []).map((d: any) => ({
       item_id: d.itemId,
@@ -359,7 +369,10 @@ try {
       player_item_id: g.playerItemId,
       qty: 1,
       roll_json: g.affixes
-    }))
+    })),
+    ...(candyCornQty > 0
+      ? [{ item_id: HALLOWED_CANDY_CORN_ITEM_ID, qty: candyCornQty }]
+      : [])
   ];
 
   let chest = null;
@@ -444,6 +457,15 @@ return {
   huntProgress,
 
   worldEventProgress,
+
+  seasonalEvent: isHallowed
+    ? {
+        variant: 'HALLOWED',
+        currencyItemId: HALLOWED_CANDY_CORN_ITEM_ID,
+        currencyName: 'Candy Corn',
+        quantity: candyCornQty
+      }
+    : null,
 
   worldEventSpawn: {
     id: worldEventSpawnId,
