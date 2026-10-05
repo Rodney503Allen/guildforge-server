@@ -7,7 +7,8 @@ import { advanceTutorial, TutorialStep } from "./services/tutorialService";
 import {
   getInventoryCapacity,
   getUsedInventorySlots,
-  hasInventorySpace
+  hasInventorySpace,
+  canUseBackpackCapacity
 } from "./services/inventoryCapacityService";
 
 const router = Router();
@@ -63,7 +64,7 @@ function buildTooltipAttrs(item: any) {
     `data-type="${escapeHtml(item?.type || item?.category || "")}"`,
   ];
 
-  const hasGearSlot = ["weapon", "offhand", "head", "chest", "legs", "feet", "hands"].includes(
+  const hasGearSlot = ["weapon", "offhand", "head", "chest", "legs", "feet", "hands", "backpack"].includes(
     String(item?.slot || "")
   );
 
@@ -81,6 +82,7 @@ function buildTooltipAttrs(item: any) {
     attrs.push(`data-vitality="${Number(item?.vitality || 0)}"`);
     attrs.push(`data-intellect="${Number(item?.intellect || 0)}"`);
     attrs.push(`data-crit="${Number(item?.crit || 0)}"`);
+    attrs.push(`data-inventory-slots="${Number(item?.inventory_slots || 0)}"`);
     attrs.push(`data-roll-json='${escapeHtml(JSON.stringify(item?.roll_json || []))}'`);
   } else {
     const stats = [
@@ -485,6 +487,7 @@ router.get("/character", requireLogin, async (req, res) => {
       i.vitality AS static_vitality,
       i.intellect AS static_intellect,
       i.crit AS static_crit,
+      i.inventory_slots AS static_inventory_slots,
 
       pi.id AS rolled_player_item_id,
       pi.name AS rolled_name,
@@ -566,6 +569,7 @@ router.get("/character", requireLogin, async (req, res) => {
       vitality: isRolled ? statFromRolls(rolls, "vitality") : (Number(g.static_vitality) || 0),
       intellect: isRolled ? statFromRolls(rolls, "intellect") : (Number(g.static_intellect) || 0),
       crit: isRolled ? statFromRolls(rolls, "crit") : (Number(g.static_crit) || 0),
+      inventory_slots: isRolled ? 0 : (Number(g.static_inventory_slots) || 0),
 
       roll_json: rolls,
       is_rolled: isRolled
@@ -658,6 +662,7 @@ router.get("/character", requireLogin, async (req, res) => {
       i.vitality AS static_vitality,
       i.intellect AS static_intellect,
       i.crit AS static_crit,
+      i.inventory_slots AS static_inventory_slots,
 
       pi.id AS rolled_player_item_id,
       pi.name AS rolled_name,
@@ -745,6 +750,7 @@ router.get("/character", requireLogin, async (req, res) => {
       vitality: isRolled ? statFromRolls(rolls, "vitality") : (Number(g.static_vitality) || 0),
       intellect: isRolled ? statFromRolls(rolls, "intellect") : (Number(g.static_intellect) || 0),
       crit: isRolled ? statFromRolls(rolls, "crit") : (Number(g.static_crit) || 0),
+      inventory_slots: isRolled ? 0 : (Number(g.static_inventory_slots) || 0),
 
       roll_json: rolls,
       is_rolled: isRolled
@@ -1029,6 +1035,7 @@ router.get("/character", requireLogin, async (req, res) => {
             ${renderEquipSlot("legs", "Legs")}
             ${renderEquipSlot("feet", "Feet")}
             ${renderEquipSlot("hands", "Hands")}
+            ${renderEquipSlot("backpack", "Backpack")}
           </div>
 
           <div class="quickbelt">
@@ -1140,7 +1147,8 @@ router.get("/character", requireLogin, async (req, res) => {
                     "chest",
                     "legs",
                     "feet",
-                    "hands"
+                    "hands",
+                    "backpack"
                   ].includes(g.slot)
                     ? `equipItem(${g.instance_id})`
                     : String(g.type) === "potion" &&
@@ -1372,6 +1380,7 @@ router.post("/character/equip", requireLogin, async (req, res) => {
       inv.player_item_id,
       inv.quantity,
       i.slot AS static_slot,
+      i.inventory_slots AS static_inventory_slots,
       ib.slot AS rolled_slot
     FROM inventory inv
     LEFT JOIN items i
@@ -1398,11 +1407,23 @@ router.post("/character/equip", requireLogin, async (req, res) => {
     "chest",
     "legs",
     "feet",
-    "hands"
+    "hands",
+    "backpack"
   ]);
 
   if (!ALLOWED_SLOTS.has(slot)) {
     return res.json({ error: "That item cannot be equipped." });
+  }
+
+  if (slot === "backpack") {
+    const newBackpackBonus = Math.max(0, Number(row.static_inventory_slots || 0));
+    const fit = await canUseBackpackCapacity(Number(pid), newBackpackBonus, 0);
+
+    if (!fit.canFit) {
+      return res.json({
+        error: `That backpack only provides ${newBackpackBonus} extra slots. You need ${fit.required}/${fit.capacity} slots for your current inventory.`
+      });
+    }
   }
 
   const [equippedRows]: any = await db.query(`
@@ -1858,14 +1879,41 @@ router.post("/character/unequip", requireLogin, async (req, res) => {
   if (!inventoryId) return res.json({ error: "Missing inventoryId" });
 
   const [[row]]: any = await db.query(`
-    SELECT inventory_id, item_id, player_item_id, quantity
-    FROM inventory
-    WHERE inventory_id = ? AND player_id = ? AND equipped = 1
+    SELECT
+      inv.inventory_id,
+      inv.item_id,
+      inv.player_item_id,
+      inv.quantity,
+      i.slot AS static_slot,
+      i.inventory_slots AS static_inventory_slots,
+      ib.slot AS rolled_slot
+    FROM inventory inv
+    LEFT JOIN items i ON i.id = inv.item_id
+    LEFT JOIN player_items pi ON pi.id = inv.player_item_id
+    LEFT JOIN item_bases ib ON ib.id = pi.item_base_id
+    WHERE inv.inventory_id = ?
+      AND inv.player_id = ?
+      AND inv.equipped = 1
+    LIMIT 1
   `, [inventoryId, pid]);
 
   if (!row) return res.json({ error: "Item not found or not equipped" });
 
-  const space = await hasInventorySpace(pid, 1);
+  const rowSlot = row.rolled_slot || row.static_slot;
+
+  if (rowSlot === "backpack") {
+    const fit = await canUseBackpackCapacity(Number(pid), 0, 1);
+
+    if (!fit.canFit) {
+      return res.json({
+        error: `You cannot remove that backpack yet. Your inventory would require ${fit.required}/${fit.capacity} slots without it.`
+      });
+    }
+  }
+
+  const space = rowSlot === "backpack"
+    ? { hasSpace: true, used: 0, capacity: 0 }
+    : await hasInventorySpace(pid, 1);
 
   if (!space.hasSpace) {
     return res.json({

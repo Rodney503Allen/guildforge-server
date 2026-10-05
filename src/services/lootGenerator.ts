@@ -110,6 +110,7 @@ const DEFAULT_GEAR_DROP_CHANCES = {
   boss: 0.60,
 };
 
+
 const CATEGORY_WEIGHTS = [
   { key: "armor" as const, weight: 55 },
   { key: "weapon" as const, weight: 35 },
@@ -244,9 +245,9 @@ export async function generateLootForCreature(
   const results: SavedItem[] = [];
 
   const gearDropChance = Math.min(
-  1,
-  getGearDropChance(creature) * lootMult
-);
+    1,
+    getGearDropChance(creature) * lootMult
+  );
   if (!rollChance(gearDropChance)) {
     return results;
   }

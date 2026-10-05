@@ -91,7 +91,12 @@
     const defense = optionalNumber(dataset.defense);
     const rollJson = safeParseJson(dataset.rollJson);
     const hasRolls = Array.isArray(rollJson) && rollJson.length > 0;
+    const inventorySlots = optionalNumber(dataset.inventorySlots);
     const lines = [];
+
+    if (inventorySlots != null && inventorySlots > 0) {
+      lines.push(`<div class="t-equip-primary">+${esc(inventorySlots)} Inventory Slots</div>`);
+    }
 
     const shownAttack = baseAttack != null && baseAttack !== 0 ? baseAttack : attack;
     const shownDefense = baseDefense != null && baseDefense !== 0 ? baseDefense : defense;
@@ -144,7 +149,7 @@
     const rarity = d.rarity || "base";
     const itemLevel = optionalNumber(d.itemLevel);
     const slot = String(d.slot || "").toLowerCase().trim();
-    const equipmentSlots = new Set(["weapon", "offhand", "head", "chest", "legs", "feet", "hands"]);
+    const equipmentSlots = new Set(["weapon", "offhand", "head", "chest", "legs", "feet", "hands", "backpack"]);
     const isEquipment = equipmentSlots.has(slot);
     const equipmentType = isEquipment ? buildEquipmentType(d) : "";
     const equipmentStats = isEquipment ? buildEquipmentStats(d) : "";

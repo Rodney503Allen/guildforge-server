@@ -11,6 +11,50 @@ import { recordWorldEventProgress } from "./worldEventProgressService";
 import { advanceTutorial, completeTutorial, TutorialStep } from "./tutorialService";
 
 
+const BACKPACK_DROPS = [
+  { minLevel: 16, itemName: "Merchant's Sack", chance: 0.04 },
+  { minLevel: 11, itemName: "Traveler's Sack", chance: 0.04 },
+  { minLevel: 7, itemName: "Sturdy Pouch", chance: 0.04 },
+] as const;
+
+async function rollBackpackChestDrop(
+  creatureLevel: number,
+  lootMult: number
+): Promise<{ item_id: number; qty: number } | null> {
+  for (const drop of BACKPACK_DROPS) {
+    if (creatureLevel < drop.minLevel) continue;
+
+    const chance = Math.min(1, Math.max(0, drop.chance * lootMult));
+    if (Math.random() >= chance) continue;
+
+    const [[itemRow]]: any = await db.query(
+      `
+        SELECT id
+        FROM items
+        WHERE name = ?
+          AND slot = 'backpack'
+        LIMIT 1
+      `,
+      [drop.itemName]
+    );
+
+    const itemId = Number(itemRow?.id || 0);
+
+    if (!itemId) {
+      console.warn(`Backpack drop item not found: ${drop.itemName}`);
+      return null;
+    }
+
+    return {
+      item_id: itemId,
+      qty: 1
+    };
+  }
+
+  return null;
+}
+
+
 /**
  * Marks a physical event creature spawn as consumed by THIS player only.
  *
@@ -360,11 +404,20 @@ try {
     ? Math.floor(Math.random() * 3) + 1
     : 0;
 
+  // Backpacks are global bonus drops based on creature level.
+  // They enter the normal combat chest so the player sees and claims them
+  // through the same loot flow as other static item drops.
+  const backpackDrop = await rollBackpackChestDrop(
+    creatureLevel,
+    affixLootMult
+  );
+
   const chestDrops = [
     ...(drops ?? []).map((d: any) => ({
       item_id: d.itemId,
       qty: d.qty
     })),
+    ...(backpackDrop ? [backpackDrop] : []),
     ...(rolledGear ?? []).map((g: any) => ({
       player_item_id: g.playerItemId,
       qty: 1,
