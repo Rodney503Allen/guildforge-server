@@ -56,8 +56,23 @@ let dungeonBusy =
 let dungeonRestState =
   null;
 
+/*
+ * Socket.IO is the primary live-state transport. This slow poll is only
+ * a recovery/resync path for missed events or temporary disconnects.
+ */
 const DUNGEON_POLL_MS =
-  650;
+  12000;
+
+let dungeonSocket =
+  null;
+
+let dungeonSocketBound =
+  false;
+
+let dungeonSocketInstanceId =
+  null;
+let dungeonLifecycleRefreshTimer =
+  null;
 
 
 let dungeonInitialized =
@@ -65,6 +80,219 @@ let dungeonInitialized =
 
 let dungeonModalOpen =
   false;
+
+/* =========================================================
+   DUNGEON AUDIO
+========================================================= */
+
+let dungeonAudioInstanceId =
+  null;
+
+let dungeonAudioMusicKey =
+  null;
+
+let dungeonAudioAmbienceKey =
+  null;
+
+function getDungeonAudioPhase() {
+  return String(
+    dungeonEncounter?.phase ??
+    dungeonActive?.phase ??
+    ""
+  ).toLowerCase();
+}
+
+function getDungeonAudioInstanceId() {
+  return Number(
+    dungeonActive?.instanceId ??
+    dungeonActive?.id ??
+    0
+  ) || null;
+}
+
+function makeDungeonAudioKey(
+  type,
+  instanceId
+) {
+  return `dungeon_${instanceId}_${type}`;
+}
+
+async function syncDungeonAudio() {
+  const audio =
+    window.GFAudio;
+
+  if (
+    !audio ||
+    !dungeonActive
+  ) {
+    return;
+  }
+
+  const instanceId =
+    getDungeonAudioInstanceId();
+
+  if (!instanceId) {
+    return;
+  }
+
+  const musicPath =
+    String(
+      dungeonActive.music ??
+      ""
+    ).trim();
+
+  const bossMusicPath =
+    String(
+      dungeonActive.bossMusic ??
+      ""
+    ).trim();
+
+  const ambiencePath =
+    String(
+      dungeonActive.ambience ??
+      ""
+    ).trim();
+
+  const normalMusicKey =
+    makeDungeonAudioKey(
+      "music",
+      instanceId
+    );
+
+  const bossMusicKey =
+    makeDungeonAudioKey(
+      "boss",
+      instanceId
+    );
+
+  const ambienceKey =
+    makeDungeonAudioKey(
+      "ambience",
+      instanceId
+    );
+
+  if (musicPath) {
+    audio.registerTrack(
+      "music",
+      normalMusicKey,
+      musicPath
+    );
+  }
+
+  if (bossMusicPath) {
+    audio.registerTrack(
+      "music",
+      bossMusicKey,
+      bossMusicPath
+    );
+  }
+
+  if (ambiencePath) {
+    audio.registerTrack(
+      "ambience",
+      ambienceKey,
+      ambiencePath
+    );
+  }
+
+  dungeonAudioInstanceId =
+    instanceId;
+
+  if (
+    ambiencePath &&
+    dungeonAudioAmbienceKey !==
+      ambienceKey
+  ) {
+    dungeonAudioAmbienceKey =
+      ambienceKey;
+
+    void audio.playAmbience(
+      ambienceKey,
+      {
+        crossfadeMs: 1200,
+        volume: 1,
+        loop: true
+      }
+    );
+  }
+
+  const phase =
+    getDungeonAudioPhase();
+
+  const wantsBossMusic =
+    phase === "boss" &&
+    Boolean(
+      bossMusicPath
+    );
+
+  const desiredMusicKey =
+    wantsBossMusic
+      ? bossMusicKey
+      : normalMusicKey;
+
+  if (
+    !musicPath &&
+    !wantsBossMusic
+  ) {
+    return;
+  }
+
+  if (
+    dungeonAudioMusicKey ===
+      desiredMusicKey
+  ) {
+    return;
+  }
+
+  dungeonAudioMusicKey =
+    desiredMusicKey;
+
+  void audio.playPageMusic(
+    desiredMusicKey,
+    {
+      crossfadeMs: 1800,
+      volume: 1,
+      loop: true
+    }
+  );
+}
+
+function releaseDungeonAudio() {
+  const audio =
+    window.GFAudio;
+
+  if (!audio) {
+    dungeonAudioInstanceId =
+      null;
+    dungeonAudioMusicKey =
+      null;
+    dungeonAudioAmbienceKey =
+      null;
+    return;
+  }
+
+  if (dungeonAudioMusicKey) {
+    audio.releasePageMusic(
+      dungeonAudioMusicKey,
+      700
+    );
+  }
+
+  if (dungeonAudioAmbienceKey) {
+    audio.stopAmbience(
+      700
+    );
+  }
+
+  dungeonAudioInstanceId =
+    null;
+
+  dungeonAudioMusicKey =
+    null;
+
+  dungeonAudioAmbienceKey =
+    null;
+}
 
 /*
  * Client-side expedition log archive.
@@ -824,6 +1052,7 @@ async function initializeDungeonPage() {
     dungeonInitialized
   ) {
     await refreshDungeonPage();
+    await connectDungeonRealtimeSocket();
     startDungeonPolling();
     startSmoothDungeonTimers();
     return;
@@ -837,6 +1066,7 @@ async function initializeDungeonPage() {
     await loadDungeonCombatPotions();
 
     await refreshDungeonPage();
+    await connectDungeonRealtimeSocket();
 
     startDungeonPolling();
   } catch (error) {
@@ -1489,6 +1719,14 @@ async function refreshDungeonPage() {
       encounterData?.encounter ??
       null;
 
+    if (dungeonActive) {
+      await syncDungeonAudio();
+    } else {
+      releaseDungeonAudio();
+    }
+
+    await syncDungeonInstanceSocket();
+
     loadDungeonRoomLogs();
 
     if (!dungeonActive) {
@@ -1770,6 +2008,37 @@ function renderDungeonRoomSteps(
 
 let dungeonLastMechanicSequences =
   new Map();
+
+function playDungeonEnemyAlertSound() {
+  const audio =
+    window.GFAudio;
+
+  if (!audio) {
+    return;
+  }
+
+  const alertKey =
+    "enemy_alert";
+
+  if (
+    !audio.tracks?.sfx?.[
+      alertKey
+    ]
+  ) {
+    audio.registerTrack(
+      "sfx",
+      alertKey,
+      "/sounds/ui/enemy_alert.ogg"
+    );
+  }
+
+  void audio.playSfx(
+    alertKey,
+    {
+      volume: 0.75
+    }
+  );
+}
 
 function formatDungeonEffectSeconds(
   ms
@@ -3050,6 +3319,8 @@ function renderDungeonMechanic(
     warning.classList.add(
       "is-alerting"
     );
+
+    playDungeonEnemyAlertSound();
 
     dungeonLastMechanicSequences.set(
       sequenceKey,
@@ -5096,6 +5367,8 @@ function closeDungeonModalView() {
   dungeonModalOpen =
     false;
 
+  releaseDungeonAudio();
+  leaveDungeonInstanceSocket();
   stopDungeonPolling();
   stopSmoothDungeonTimers();
   stopDungeonPotionCooldownTimer();
@@ -5117,6 +5390,227 @@ window.openDungeonModal =
 
 window.closeDungeonModalView =
   closeDungeonModalView;
+
+
+/* =========================================================
+   REAL-TIME DUNGEON SOCKET
+========================================================= */
+
+function getDungeonActiveInstanceId() {
+  return Number(
+    dungeonActive?.instanceId ??
+    dungeonActive?.id ??
+    dungeonEncounter?.instanceId ??
+    0
+  ) || null;
+}
+
+async function connectDungeonRealtimeSocket() {
+  try {
+    let socket =
+      window.GFSocket;
+
+    if (
+      !socket &&
+      window.GFSocketReady
+    ) {
+      socket =
+        await window.GFSocketReady;
+    }
+
+    if (
+      !socket ||
+      typeof socket.on !==
+        "function"
+    ) {
+      return null;
+    }
+
+    dungeonSocket =
+      socket;
+
+    if (!dungeonSocketBound) {
+      dungeonSocketBound =
+        true;
+
+      socket.on(
+        "dungeon:state",
+        payload => {
+          const snapshot =
+            payload?.combat ??
+            payload ??
+            null;
+
+          if (!snapshot) {
+            return;
+          }
+
+          dungeonCombat =
+            snapshot;
+
+          renderDungeonCombat(
+            snapshot
+          );
+        }
+      );
+
+      socket.on(
+        "dungeon:instance-changed",
+        payload => {
+          const incomingInstanceId =
+            Number(
+              payload?.instanceId ??
+              0
+            );
+
+          const activeInstanceId =
+            getDungeonActiveInstanceId();
+
+          if (
+            activeInstanceId &&
+            incomingInstanceId &&
+            incomingInstanceId !==
+              activeInstanceId
+          ) {
+            return;
+          }
+
+          /*
+           * The server deliberately sends lifecycle transitions through
+           * both the instance room and each member's private player room.
+           * Coalesce duplicate delivery into one immediate resync.
+           */
+          if (
+            dungeonLifecycleRefreshTimer
+          ) {
+            window.clearTimeout(
+              dungeonLifecycleRefreshTimer
+            );
+          }
+
+          dungeonLifecycleRefreshTimer =
+            window.setTimeout(
+              () => {
+                dungeonLifecycleRefreshTimer =
+                  null;
+
+                void refreshDungeonPage();
+              },
+              0
+            );
+        }
+      );
+
+      socket.on(
+        "connect",
+        () => {
+          socket.emit(
+            "dungeon:subscribe"
+          );
+
+          dungeonSocketInstanceId =
+            null;
+
+          void syncDungeonInstanceSocket();
+
+          /* One authoritative resync after reconnect. */
+          if (
+            dungeonModalOpen ||
+            !document.getElementById(
+              "dungeonModal"
+            )
+          ) {
+            void refreshDungeonPage();
+          }
+        }
+      );
+    }
+
+    if (socket.connected) {
+      socket.emit(
+        "dungeon:subscribe"
+      );
+
+      await syncDungeonInstanceSocket();
+    }
+
+    return socket;
+  } catch (error) {
+    console.error(
+      "Dungeon realtime socket setup failed:",
+      error
+    );
+
+    return null;
+  }
+}
+
+async function syncDungeonInstanceSocket() {
+  const socket =
+    dungeonSocket ??
+    window.GFSocket;
+
+  if (
+    !socket ||
+    !socket.connected
+  ) {
+    return;
+  }
+
+  const instanceId =
+    getDungeonActiveInstanceId();
+
+  if (!instanceId) {
+    leaveDungeonInstanceSocket();
+    return;
+  }
+
+  if (
+    dungeonSocketInstanceId ===
+      instanceId
+  ) {
+    return;
+  }
+
+  await new Promise(resolve => {
+    socket.emit(
+      "dungeon:instance:join",
+      instanceId,
+      response => {
+        if (response?.ok) {
+          dungeonSocketInstanceId =
+            instanceId;
+        } else {
+          console.warn(
+            "Dungeon instance socket join rejected:",
+            response?.error ||
+            "Unknown error"
+          );
+        }
+
+        resolve();
+      }
+    );
+  });
+}
+
+function leaveDungeonInstanceSocket() {
+  const instanceId =
+    dungeonSocketInstanceId;
+
+  if (
+    dungeonSocket &&
+    instanceId
+  ) {
+    dungeonSocket.emit(
+      "dungeon:instance:leave",
+      instanceId
+    );
+  }
+
+  dungeonSocketInstanceId =
+    null;
+}
 
 
 /* =========================================================
@@ -5401,6 +5895,8 @@ document.addEventListener(
 window.addEventListener(
   "beforeunload",
   () => {
+    releaseDungeonAudio();
+    leaveDungeonInstanceSocket();
     stopDungeonPolling();
     stopSmoothDungeonTimers();
     stopDungeonPotionCooldownTimer();

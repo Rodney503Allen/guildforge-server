@@ -190,6 +190,43 @@ const dungeonCombatSessions =
     DungeonCombatSession
   >();
 
+/*
+ * Dungeon combat is intentionally kept independent from Socket.IO.
+ * dungeonSocket.ts registers this publisher at startup so lifecycle
+ * mutations inside the combat service can notify the instance room
+ * immediately without creating a service -> socket circular import.
+ */
+type DungeonCombatLifecyclePublisher = (
+  instanceId: number,
+  payload: any,
+) => void;
+
+let dungeonCombatLifecyclePublisher:
+  DungeonCombatLifecyclePublisher | null =
+    null;
+
+export function setDungeonCombatLifecyclePublisher(
+  publisher:
+    DungeonCombatLifecyclePublisher | null,
+) {
+  dungeonCombatLifecyclePublisher =
+    publisher;
+}
+
+function publishDungeonCombatLifecycle(
+  instanceId: number,
+  payload: any,
+) {
+  dungeonCombatLifecyclePublisher?.(
+    Number(instanceId),
+    {
+      instanceId:
+        Number(instanceId),
+      ...payload,
+    },
+  );
+}
+
 /* =========================================================
    SESSION COLLECTION
 ========================================================= */
@@ -1019,6 +1056,39 @@ export async function completeDungeonCombatEnemyDefeat(
     defeatedId,
   );
 
+  /*
+   * Enemy defeat changes persistent dungeon state, so every member must
+   * hear about it immediately. The client performs one authoritative
+   * refresh for this rare lifecycle transition instead of waiting for
+   * the 12-second recovery poll.
+   */
+  publishDungeonCombatLifecycle(
+    session.instanceId,
+    {
+      reason:
+        result.completedBoss
+          ? "boss-defeated"
+          : result.completedWave
+            ? "wave-completed"
+            : "enemy-defeated",
+      defeatedEnemyId:
+        defeatedId,
+      completedWave:
+        Boolean(
+          result.completedWave
+        ),
+      completedBoss:
+        Boolean(
+          result.completedBoss
+        ),
+      remainingCount:
+        Number(
+          result.remainingCount ??
+          0
+        ),
+    },
+  );
+
   if (
     result.completedWave ||
     result.completedBoss
@@ -1057,6 +1127,16 @@ export async function completeDungeonCombatPartyDefeat(
 
   await handleDungeonPartyWipe(
     session.instanceId
+  );
+
+  publishDungeonCombatLifecycle(
+    session.instanceId,
+    {
+      reason:
+        "party-defeated",
+      state:
+        "defeat",
+    },
   );
 
   destroyDungeonCombatSession(

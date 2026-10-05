@@ -25,6 +25,80 @@ import {
   getEquippedCombatPotions,
 } from "./services/combatPotionService";
 
+import {
+  publishDungeonInstanceChanged,
+  publishDungeonInstanceState,
+} from "./dungeonSocket";
+
+const DUNGEON_SOCKET_TICK_MS = 500;
+const dungeonSocketTickers = new Map<number, NodeJS.Timeout>();
+const dungeonSocketTicksInFlight = new Set<number>();
+
+async function buildEnrichedDungeonSnapshot(session: any) {
+  return enrichDungeonSnapshotWithBuffs(
+    buildDungeonCombatSnapshot(session)
+  );
+}
+
+async function publishCombatSnapshot(instanceId: number, session: any) {
+  const snapshot = await buildEnrichedDungeonSnapshot(session);
+
+  publishDungeonInstanceState(instanceId, {
+    combat: snapshot,
+    serverTime: Date.now(),
+  });
+
+  return snapshot;
+}
+
+function stopDungeonSocketTicker(instanceId: number) {
+  const timer = dungeonSocketTickers.get(instanceId);
+  if (!timer) return;
+  clearInterval(timer);
+  dungeonSocketTickers.delete(instanceId);
+}
+
+function ensureDungeonSocketTicker(instanceId: number) {
+  if (dungeonSocketTickers.has(instanceId)) return;
+
+  const timer = setInterval(async () => {
+    if (dungeonSocketTicksInFlight.has(instanceId)) return;
+    dungeonSocketTicksInFlight.add(instanceId);
+
+    const session = getDungeonCombatSession(instanceId);
+
+    if (!session) {
+      dungeonSocketTicksInFlight.delete(instanceId);
+      stopDungeonSocketTicker(instanceId);
+      publishDungeonInstanceChanged(instanceId, {
+        reason: "combat-session-ended",
+        instanceId,
+      });
+      return;
+    }
+
+    try {
+      await advanceDungeonCombatSession(session);
+      await publishCombatSnapshot(instanceId, session);
+
+      if (session.state !== "active") {
+        stopDungeonSocketTicker(instanceId);
+        publishDungeonInstanceChanged(instanceId, {
+          reason: "combat-ended",
+          instanceId,
+          state: session.state,
+        });
+      }
+    } catch (error) {
+      console.error("Dungeon socket combat tick failed:", error);
+    } finally {
+      dungeonSocketTicksInFlight.delete(instanceId);
+    }
+  }, DUNGEON_SOCKET_TICK_MS);
+
+  dungeonSocketTickers.set(instanceId, timer);
+}
+
 const router =
   express.Router();
 
@@ -300,17 +374,13 @@ router.post(
         session
       );
 
-      const snapshot =
-        await enrichDungeonSnapshotWithBuffs(
-          buildDungeonCombatSnapshot(
-            session
-          )
-        );
+      const instanceId = Number(state.encounter.instanceId);
+      const snapshot = await publishCombatSnapshot(instanceId, session);
+      ensureDungeonSocketTicker(instanceId);
 
       return res.json({
         ok: true,
-        session:
-          snapshot,
+        session: snapshot,
       });
     } catch (error: any) {
       console.error(
@@ -379,22 +449,16 @@ router.get(
         session
       );
 
-      const snapshot =
-        await enrichDungeonSnapshotWithBuffs(
-          buildDungeonCombatSnapshot(
-            session
-          )
-        );
+      const snapshot = await publishCombatSnapshot(instanceId, session);
+
+      if (session.state === "active") {
+        ensureDungeonSocketTicker(instanceId);
+      }
 
       return res.json({
         ok: true,
-
-        active:
-          session.state ===
-          "active",
-
-        combat:
-          snapshot,
+        active: session.state === "active",
+        combat: snapshot,
       });
     } catch (error: any) {
       console.error(
@@ -487,6 +551,12 @@ router.post(
             targetEnemyId,
           )
         );
+
+      publishDungeonInstanceState(instanceId, {
+        combat: snapshot,
+        serverTime: Date.now(),
+      });
+      ensureDungeonSocketTicker(instanceId);
 
       return res.json({
         ok: true,
@@ -644,18 +714,27 @@ router.post(
         );
       }
 
-      if (
-        result.snapshot
-      ) {
+      if (result.snapshot) {
         result.snapshot =
-          await enrichDungeonSnapshotWithBuffs(
-            result.snapshot
-          );
+          await enrichDungeonSnapshotWithBuffs(result.snapshot);
+
+        publishDungeonInstanceState(instanceId, {
+          combat: result.snapshot,
+          serverTime: Date.now(),
+        });
       }
 
-      return res.json(
-        result
-      );
+      if (session.state === "active") {
+        ensureDungeonSocketTicker(instanceId);
+      } else {
+        publishDungeonInstanceChanged(instanceId, {
+          reason: "combat-ended",
+          instanceId,
+          state: session.state,
+        });
+      }
+
+      return res.json(result);
     } catch (error: any) {
       console.error(
         "Dungeon combat spell error:",
@@ -799,9 +878,25 @@ router.post(
           );
       }
 
-      return res.json(
-        result
-      );
+if (
+  result.ok &&
+  "snapshot" in result &&
+  result.snapshot
+) {
+  result.snapshot =
+    await enrichDungeonSnapshotWithBuffs(
+      result.snapshot
+    );
+
+  publishDungeonInstanceState(
+    instanceId,
+    result.snapshot
+  );
+}
+
+      ensureDungeonSocketTicker(instanceId);
+
+      return res.json(result);
     } catch (error: any) {
       console.error(
         "Dungeon potion use error:",

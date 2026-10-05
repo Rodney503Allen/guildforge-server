@@ -10,6 +10,7 @@ import {
   hasInventorySpace,
   canUseBackpackCapacity
 } from "./services/inventoryCapacityService";
+import { addItemWithConn } from "./services/inventoryService";
 
 const router = Router();
 
@@ -1651,42 +1652,71 @@ router.post("/character/unequip-potion", requireLogin, async (req, res) => {
 
   if (!col) return res.json({ error: "Invalid slot" });
 
-  const space = await hasInventorySpace(pid, 1);
-
-  if (!space.hasSpace) {
-    return res.json({
-      error: `Inventory full (${space.used}/${space.capacity}). Sell, use, or equip something first.`
-    });
-  }
-
   const conn = await db.getConnection();
 
   try {
     await conn.beginTransaction();
 
     const [[player]]: any = await conn.query(
-      `SELECT ${col} AS inventoryId FROM players WHERE id = ? LIMIT 1`,
+      `SELECT ${col} AS inventoryId FROM players WHERE id = ? LIMIT 1 FOR UPDATE`,
       [pid]
     );
 
     const oldInventoryId = Number(player?.inventoryId || 0);
 
-    if (oldInventoryId) {
-      await conn.query(
-        `
-        UPDATE inventory
-        SET equipped = 0
-        WHERE inventory_id = ?
-          AND player_id = ?
-        `,
-        [oldInventoryId, pid]
-      );
+    if (!oldInventoryId) {
+      await conn.rollback();
+      conn.release();
+      return res.json({ success: true });
     }
 
+    const [[potionRow]]: any = await conn.query(
+      `
+      SELECT
+        inventory_id,
+        item_id,
+        player_item_id,
+        quantity,
+        equipped
+      FROM inventory
+      WHERE inventory_id = ?
+        AND player_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [oldInventoryId, pid]
+    );
+
+    if (!potionRow || potionRow.item_id == null || potionRow.player_item_id != null) {
+      throw new Error("EQUIPPED_POTION_NOT_FOUND");
+    }
+
+    const itemId = Number(potionRow.item_id);
+    const quantity = Math.max(1, Number(potionRow.quantity) || 1);
+
+    // Clear the slot reference before removing the equipped inventory row.
     await conn.query(
       `UPDATE players SET ${col} = NULL WHERE id = ?`,
       [pid]
     );
+
+    // Remove the equipped stack, then return its full quantity through the
+    // shared inventory service. This fills partial stacks first and only
+    // creates overflow stacks when necessary.
+    const [deleted]: any = await conn.query(
+      `
+      DELETE FROM inventory
+      WHERE inventory_id = ?
+        AND player_id = ?
+      `,
+      [oldInventoryId, pid]
+    );
+
+    if (!deleted?.affectedRows) {
+      throw new Error("EQUIPPED_POTION_DELETE_FAILED");
+    }
+
+    await addItemWithConn(conn, pid, itemId, quantity);
 
     await conn.commit();
     conn.release();
@@ -1699,6 +1729,7 @@ router.post("/character/unequip-potion", requireLogin, async (req, res) => {
     res.json({ error: "Failed to unequip potion" });
   }
 });
+
 
 // =======================
 // EQUIP TOOLS

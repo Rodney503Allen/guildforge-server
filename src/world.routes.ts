@@ -1889,19 +1889,24 @@ res.send(`
   window.__WORLD_EVENT_MAP_SPAWNS__ =
     ${JSON.stringify(worldEventMapSpawns)};
 </script>
-  <script src="/ui/toast.js"></script>
-  <script src="/statpanel.js"></script>
-  <script src="/world.page.js" defer></script>
-  <script src="/world-quests.js"></script>
-  <script src="/world-combat.js"></script>
-  <script src="/tutorial.js?v=8"></script>
-  <script src="/world-events.js"></script>
-  <script src="/world.js"></script>
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="/hunt-ready-check.js"></script>
-  <script src="/hunt-combat.js"></script>
-  <script src="/rest.js" defer></script>
-  <script src="/dungeon.js"></script>
+<script src="/ui/toast.js"></script>
+
+<!-- Global realtime connection -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/guildforgeSocket.js"></script>
+
+<script src="/statpanel.js"></script>
+<script src="/world.page.js" defer></script>
+<script src="/world-quests.js"></script>
+<script src="/world-combat.js"></script>
+<script src="/tutorial.js?v=8"></script>
+<script src="/world-events.js"></script>
+<script src="/world.js"></script>
+
+<script src="/hunt-ready-check.js"></script>
+<script src="/hunt-combat.js"></script>
+<script src="/rest.js" defer></script>
+<script src="/dungeon.js"></script>
 </body>
 
 

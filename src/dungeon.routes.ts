@@ -41,10 +41,41 @@ import {
 } from "./services/dungeonReadyCheckService";
 
 import {
+  publishDungeonInstanceChanged,
   publishDungeonReadyCheck,
 } from "./dungeonSocket";
 
 const router = express.Router();
+
+async function publishDungeonLifecycleForPlayer(
+  playerId: number,
+  reason: string,
+) {
+  try {
+    const dungeon = await getActiveDungeonForPlayer(playerId);
+    if (!dungeon) return;
+
+    const instanceId = Number(
+      (dungeon as any).instanceId ??
+      (dungeon as any).id ??
+      0
+    );
+
+    if (!Number.isInteger(instanceId) || instanceId <= 0) return;
+
+    const encounter =
+      await getCurrentDungeonEncounterForPlayer(playerId);
+
+    publishDungeonInstanceChanged(instanceId, {
+      reason,
+      instanceId,
+      dungeon,
+      encounter,
+    });
+  } catch (error) {
+    console.error("Dungeon lifecycle socket publish failed:", error);
+  }
+}
 
 function requireLogin(req: any, res: any, next: any) {
   const playerId = Number(req.session?.playerId);
@@ -167,11 +198,10 @@ router.post("/active/loot/:rollId/choice", async (req: any, res) => {
       });
     }
 
+    const playerId = Number(req.session.playerId);
     const result =
       await submitDungeonLootChoice(
-        Number(
-          req.session.playerId
-        ),
+        playerId,
         rollId,
         choice as
           | "need"
@@ -179,6 +209,7 @@ router.post("/active/loot/:rollId/choice", async (req: any, res) => {
           | "pass",
       );
 
+    await publishDungeonLifecycleForPlayer(playerId, "loot-choice");
     res.json(result);
   } catch (err: any) {
     console.error(
@@ -227,13 +258,11 @@ router.get("/active/wipe", async (req: any, res) => {
 
 router.post("/active/wipe/retry", async (req: any, res) => {
   try {
+    const playerId = Number(req.session.playerId);
     const result =
-      await retryDungeonRoomForPlayer(
-        Number(
-          req.session.playerId
-        )
-      );
+      await retryDungeonRoomForPlayer(playerId);
 
+    await publishDungeonLifecycleForPlayer(playerId, "wipe-retry");
     res.json(result);
   } catch (err: any) {
     console.error(
@@ -296,6 +325,7 @@ router.post("/active/rest/advance", async (req: any, res) => {
         playerId
       );
 
+    await publishDungeonLifecycleForPlayer(playerId, "rest-advance");
     res.json(result);
   } catch (err: any) {
     console.error(
@@ -433,11 +463,13 @@ router.post("/:dungeonId/enter", async (req: any, res) => {
       return res.status(400).json({ ok: false, error: "Invalid dungeon." });
     }
 
+    const playerId = Number(req.session.playerId);
     const dungeon = await createDungeonInstance(
-      Number(req.session.playerId),
+      playerId,
       dungeonId,
     );
 
+    await publishDungeonLifecycleForPlayer(playerId, "entered");
     res.json({ ok: true, dungeon });
   } catch (err: any) {
     console.error("POST /api/dungeons/:dungeonId/enter failed:", err);
@@ -530,11 +562,14 @@ router.post("/abandon", async (req: any, res) => {
      * The database run is gone, so remove any cached combat
      * session for the same dungeon instance as well.
      */
-    destroyDungeonCombatSession(
-      Number(
-        result.instanceId
-      )
-    );
+    const instanceId = Number(result.instanceId);
+
+    destroyDungeonCombatSession(instanceId);
+
+    publishDungeonInstanceChanged(instanceId, {
+      reason: "abandoned",
+      instanceId,
+    });
 
     res.json(result);
   } catch (err: any) {

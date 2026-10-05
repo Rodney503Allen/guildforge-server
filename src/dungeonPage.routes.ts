@@ -49,15 +49,13 @@ router.get(
 
   <title>Guildforge | Dungeon</title>
 
-  <link
-    rel="stylesheet"
-    href="/ui/itemTooltip.css"
-  >
+  <!-- Shared Guildforge UI -->
+  <link rel="stylesheet" href="/ui/tooltip.css">
+  <link rel="stylesheet" href="/statpanel.css">
+  <link rel="stylesheet" href="/ui/toast.css">
 
-  <link
-    rel="stylesheet"
-    href="/dungeon.css"
-  >
+  <!-- Dungeon -->
+  <link rel="stylesheet" href="/dungeon.css">
 </head>
 
 <body>
@@ -342,20 +340,32 @@ router.get(
 
   </main>
 
-  <script>
-    window.__PLAYER_ID__ =
-      ${playerId};
-  </script>
+  <!-- Shared Guildforge stat panel -->
+  <div class="dungeon-statpanel">
+    <div id="statpanel-root"></div>
+  </div>
 
-  <script
-    src="/ui/itemTooltip.js"
-    defer
-  ></script>
+<script>
+  window.__PLAYER_ID__ =
+    ${playerId};
+</script>
 
-  <script
-    src="/dungeon.js"
-    defer
-  ></script>
+<!-- Shared Guildforge UI -->
+<script src="/ui/toast.js"></script>
+
+<!-- Guildforge global realtime connection -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/guildforgeSocket.js"></script>
+
+<!-- Guildforge global audio system -->
+<script src="/audioManager.js"></script>
+
+<!-- Standardized tooltip + stat panel -->
+<script src="/ui/tooltip.js"></script>
+<script src="/statpanel.js"></script>
+
+<!-- Dungeon -->
+<script src="/dungeon.js" defer></script>
 </body>
 </html>
     `);

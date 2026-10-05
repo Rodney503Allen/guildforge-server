@@ -19,6 +19,8 @@ import {
   getPartyByPlayer,
 } from "./partyService";
 
+import { db } from "./db";
+
 import {
   emitToPlayer,
 } from "./socketServer";
@@ -27,6 +29,10 @@ import {
   deleteResolvedDungeonReadyCheck,
   getDungeonReadyCheck,
 } from "./services/dungeonReadyCheckService";
+
+import {
+  setDungeonCombatLifecyclePublisher,
+} from "./services/dungeonCombatSessionService";
 
 let io:
   SocketIOServer | null =
@@ -187,13 +193,38 @@ export function registerDungeonSocket(
       }
 
       /*
-       * Membership is still enforced by the HTTP/service layer for
-       * authoritative actions. This room is only a delivery channel.
+       * Instance rooms now carry live combat/lifecycle snapshots, so
+       * membership MUST be enforced before allowing a subscription.
        */
+      const [[membership]]: any =
+        await db.query(
+          `
+            SELECT id
+            FROM dungeon_instance_members
+            WHERE instance_id = ?
+              AND player_id = ?
+              AND is_active = 1
+            LIMIT 1
+          `,
+          [instanceId, playerId]
+        );
+
+      if (!membership) {
+        return ack({
+          ok: false,
+          error: "You are not an active member of this Dungeon instance.",
+        });
+      }
+
+      /* Leave stale instance rooms before joining the current run. */
+      for (const room of socket.rooms) {
+        if (room.startsWith("dungeon:instance:")) {
+          await socket.leave(room);
+        }
+      }
+
       await socket.join(
-        instanceRoom(
-          instanceId
-        )
+        instanceRoom(instanceId)
       );
 
       ack({
@@ -540,35 +571,176 @@ export function publishDungeonChanged(
 }
 
 export function publishDungeonInstanceState(
-  instanceId:
-    number,
-  snapshot:
-    any,
+  instanceId: number,
+  snapshot: any,
 ) {
+  const finalInstanceId =
+    Number(instanceId);
+
   if (
     !io ||
-    !Number.isInteger(
-      Number(
-        instanceId
-      )
-    ) ||
-    Number(
-      instanceId
-    ) <= 0
+    !Number.isInteger(finalInstanceId) ||
+    finalInstanceId <= 0
   ) {
     return;
   }
 
+  /*
+   * Fast path: broadcast to the live instance room.
+   */
   io
     .to(
       instanceRoom(
-        Number(
-          instanceId
-        )
+        finalInstanceId
       )
     )
     .emit(
       "dungeon:state",
       snapshot
     );
+
+  /*
+   * Guaranteed delivery path:
+   * also emit the live combat snapshot directly to every active member's
+   * authenticated player:<id> room.
+   *
+   * This intentionally mirrors the ready-check reliability model. If an
+   * instance-room join is late or broken, party members still receive
+   * real-time combat instead of waiting for the HTTP recovery poll.
+   */
+  void db.query(
+    `
+      SELECT player_id
+      FROM dungeon_instance_members
+      WHERE instance_id = ?
+        AND is_active = 1
+    `,
+    [finalInstanceId]
+  )
+    .then(
+      ([rows]: any) => {
+        for (
+          const row of
+          rows ?? []
+        ) {
+          const memberPlayerId =
+            Number(
+              row.player_id
+            );
+
+          if (
+            Number.isInteger(
+              memberPlayerId
+            ) &&
+            memberPlayerId > 0
+          ) {
+            emitToPlayer(
+              memberPlayerId,
+              "dungeon:state",
+              snapshot
+            );
+          }
+        }
+      }
+    )
+    .catch(
+      error => {
+        console.error(
+          "Dungeon state direct broadcast failed:",
+          error
+        );
+      }
+    );
 }
+
+export function publishDungeonInstanceChanged(
+  instanceId: number,
+  payload: any = {},
+) {
+  const finalInstanceId =
+    Number(instanceId);
+
+  if (
+    !io ||
+    !Number.isInteger(finalInstanceId) ||
+    finalInstanceId <= 0
+  ) {
+    return;
+  }
+
+  const finalPayload = {
+    instanceId:
+      finalInstanceId,
+    ...payload,
+  };
+
+  io
+    .to(
+      instanceRoom(
+        finalInstanceId
+      )
+    )
+    .emit(
+      "dungeon:instance-changed",
+      finalPayload
+    );
+
+  /*
+   * Lifecycle transitions are rare and important. Deliver them directly
+   * to every active member too, so an instance-room subscription race can
+   * never leave another player's UI waiting for the recovery poll.
+   */
+  void db.query(
+    `
+      SELECT player_id
+      FROM dungeon_instance_members
+      WHERE instance_id = ?
+        AND is_active = 1
+    `,
+    [finalInstanceId]
+  )
+    .then(
+      ([rows]: any) => {
+        for (
+          const row of
+          rows ?? []
+        ) {
+          const memberPlayerId =
+            Number(
+              row.player_id
+            );
+
+          if (
+            Number.isInteger(
+              memberPlayerId
+            ) &&
+            memberPlayerId > 0
+          ) {
+            emitToPlayer(
+              memberPlayerId,
+              "dungeon:instance-changed",
+              finalPayload
+            );
+          }
+        }
+      }
+    )
+    .catch(
+      error => {
+        console.error(
+          "Dungeon lifecycle direct broadcast failed:",
+          error
+        );
+      }
+    );
+}
+
+/*
+ * Register the socket publisher with the combat service.
+ * This lets enemy defeat / wave completion / boss completion / wipes
+ * wake every client immediately without making the service import Socket.IO.
+ */
+setDungeonCombatLifecyclePublisher(
+  publishDungeonInstanceChanged
+);
+

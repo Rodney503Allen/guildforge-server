@@ -30,6 +30,9 @@ export async function getActiveDungeonForPlayer(playerId: number) {
         d.slug AS dungeon_slug,
         d.description AS dungeon_description,
         d.image AS dungeon_image,
+        d.music AS dungeon_music,
+        d.ambience AS dungeon_ambience,
+        d.boss_music AS dungeon_boss_music,
         dr.name AS current_room_name
       FROM dungeon_instance_members dim
       JOIN dungeon_instances di ON di.id = dim.instance_id
@@ -64,6 +67,9 @@ export async function getActiveDungeonForPlayer(playerId: number) {
     dungeonSlug: String(row.dungeon_slug),
     description: String(row.dungeon_description ?? ""),
     image: row.dungeon_image ?? null,
+    music: row.dungeon_music ?? null,
+    ambience: row.dungeon_ambience ?? null,
+    bossMusic: row.dungeon_boss_music ?? null,
     partyId: row.party_id == null ? null : Number(row.party_id),
     leaderPlayerId: Number(row.leader_player_id),
     currentRoomId: row.current_room_id == null ? null : Number(row.current_room_id),
