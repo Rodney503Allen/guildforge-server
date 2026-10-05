@@ -1,9 +1,63 @@
 //shop.routes.ts
 import express from "express";
 import { db } from "./db";
-import { addItemAtomic } from "./services/inventoryService";
+import { addItemAtomic, DEFAULT_MAX_STACK_SIZE } from "./services/inventoryService";
 import { generateLootFromBaseItem, getScaledBaseStats } from "./services/lootGenerator";
 import { hasInventorySpace } from "./services/inventoryCapacityService";
+
+
+const SHOP_STACKABLE_CATEGORIES = new Set(["material", "consumable", "quest", "misc"]);
+
+async function getStaticPurchaseSlotsNeeded(playerId: number, itemId: number) {
+  const [[item]]: any = await db.query(
+    `
+      SELECT category, type, item_type
+      FROM items
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [itemId]
+  );
+
+  if (!item) throw new Error("ITEM_NOT_FOUND");
+
+  const category = String(item.category || "").toLowerCase();
+  const type = String(item.type || "").toLowerCase();
+  const itemType = String(item.item_type || "").toLowerCase();
+
+  const isTool =
+    type === "tool" ||
+    itemType === "mining_tool" ||
+    itemType === "herbalism_tool" ||
+    itemType === "woodcutting_tool";
+
+  const isBackpack = itemType === "backpack";
+
+  const isStackable =
+    !isTool &&
+    !isBackpack &&
+    SHOP_STACKABLE_CATEGORIES.has(category);
+
+  if (!isStackable) return 1;
+
+  const [[stack]]: any = await db.query(
+    `
+      SELECT inventory_id
+      FROM inventory
+      WHERE player_id = ?
+        AND item_id = ?
+        AND player_item_id IS NULL
+        AND equipped = 0
+        AND randid IS NULL
+        AND durability IS NULL
+        AND quantity < ?
+      LIMIT 1
+    `,
+    [playerId, itemId, DEFAULT_MAX_STACK_SIZE]
+  );
+
+  return stack ? 0 : 1;
+}
 
 const router = express.Router();
 
@@ -1299,6 +1353,46 @@ router.post(
           error:
             "Invalid item id"
         });
+      }
+
+      const [[purchaseItem]]: any =
+        await db.query(
+          `
+          SELECT
+            si.item_id
+          FROM shop_items si
+          WHERE si.id = ?
+          LIMIT 1
+          `,
+          [shopItemId]
+        );
+
+      if (!purchaseItem) {
+        return res.json({
+          error:
+            "Item not found"
+        });
+      }
+
+      const slotsNeeded =
+        await getStaticPurchaseSlotsNeeded(
+          Number(pid),
+          Number(purchaseItem.item_id)
+        );
+
+      if (slotsNeeded > 0) {
+        const inventorySpace =
+          await hasInventorySpace(
+            Number(pid),
+            slotsNeeded
+          );
+
+        if (!inventorySpace.hasSpace) {
+          return res.json({
+            error:
+              `Inventory full (${inventorySpace.used}/${inventorySpace.capacity})`
+          });
+        }
       }
 
       const [r]: any =

@@ -192,8 +192,11 @@ export async function addItemWithConn(
     itemType === "herbalism_tool" ||
     itemType === "woodcutting_tool";
 
+  const isBackpack = itemType === "backpack";
+
   const isStackable =
     !isTool &&
+    !isBackpack &&
     STACKABLE_CATEGORIES.has(category);
 
   if (isStackable) {
