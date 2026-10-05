@@ -1892,47 +1892,38 @@ function professionActionLabel(professionName) {
 }
 
 function playGatheringSound(professionName) {
-  let file;
+  const keyByProfession = {
+    mining: "gathering_mining",
+    herbalism: "gathering_herbalism",
+    woodcutting: "gathering_woodcutting"
+  };
 
-  switch (String(professionName || "").toLowerCase()) {
-    case "mining":
-      file = "/sounds/gathering/mining2.ogg";
-      break;
+  const key =
+    keyByProfession[String(professionName || "").toLowerCase()];
 
-    case "herbalism":
-      file = "/sounds/gathering/herbalism2.ogg";
-      break;
-
-    case "woodcutting":
-      file = "/sounds/gathering/woodcutting2.ogg";
-      break;
-
-    default:
-      return null;
+  if (!key || !window.GFAudio?.playLoopingSfx) {
+    return null;
   }
 
-
-
-  const audio = new Audio(file);
-  audio.volume = 0.5;
-  audio.loop = true;
-
-  audio.play().catch(() => {});
-
-  return audio;
+  return window.GFAudio.playLoopingSfx(key, {
+    volume: 0.5
+  });
 }
 
 function playGatherCompleteSound() {
-  const audio = new Audio("/sounds/gathering/collected.ogg");
-  audio.volume = 0.6;
-  audio.play().catch(() => {});
+  window.GFAudio?.playSfx(
+    "gathering_collected",
+    { volume: 0.6 }
+  );
 }
 
 function playProfessionLevelSound() {
-  const audio = new Audio("/sounds/profession-level.ogg");
-  audio.volume = 0.65;
-  audio.play().catch(() => {});
+  window.GFAudio?.playSfx(
+    "profession_level",
+    { volume: 0.65 }
+  );
 }
+
 function showGatheringModal({ professionName, nodeName, durationMs }) {
   const modal = document.getElementById("gatheringModal");
   const icon = document.getElementById("gatheringModalIcon");
@@ -5303,9 +5294,7 @@ async function gatherResourceNode(spawnedNodeId) {
     showErrorToast("Gathering failed.");
   } finally {
     if (sound) {
-      sound.pause();
-      sound.currentTime = 0;
-      sound.loop = false;
+      window.GFAudio?.stopLoopingSfx(sound);
     }
 
     hideGatheringModal();

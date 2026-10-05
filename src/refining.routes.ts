@@ -342,16 +342,16 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
 
   const stationSounds: Record<string, { work: string; done: string }> = {
     smithing: {
-      work: "/sounds/crafting/smelting.ogg",
-      done: "/sounds/crafting/smelting-done.ogg"
+      work: "refining_smelting",
+      done: "refining_smelting_done"
     },
     carpentry: {
-      work: "/sounds/crafting/milling.ogg",
-      done: "/sounds/crafting/milling-done.ogg"
+      work: "refining_milling",
+      done: "refining_milling_done"
     },
     alchemy: {
-      work: "/sounds/crafting/distilling.ogg",
-      done: "/sounds/crafting/distilling-done.ogg"
+      work: "refining_distilling",
+      done: "refining_distilling_done"
     }
   };
 
@@ -423,13 +423,13 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
     </div>
   </div>
 
+  <script src="/audioManager.js"></script>
   <script src="/ui/toast.js"></script>
-  <audio id="workAudio" preload="auto" src="${sounds.work}"></audio>
-  <audio id="doneAudio" preload="auto" src="${sounds.done}"></audio>
-  <audio id="professionLevelAudio" preload="auto" src="/sounds/profession-level.ogg"></audio>
 
   <script>
   let refiningBusy = false;
+  const refiningWorkSoundKey = "${esc(sounds.work)}";
+  const refiningDoneSoundKey = "${esc(sounds.done)}";
 
   function updateRefiningUI(data) {
     const gold =
@@ -635,8 +635,7 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
 
     const modal = document.getElementById("refiningModal");
     const fill = document.getElementById("refiningProgressFill");
-    const workSound = document.getElementById("workAudio");
-    const doneSound = document.getElementById("doneAudio");
+    let workSound = null;
     const durationMs = 1600;
 
     if (modal && fill) {
@@ -651,11 +650,10 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
       });
     }
 
-    if (workSound) {
-      workSound.volume = 0.6;
-      workSound.currentTime = 0;
-      workSound.play().catch(() => {});
-    }
+    workSound = window.GFAudio?.playLoopingSfx(
+      refiningWorkSoundKey,
+      { volume: 0.6 }
+    );
 
     await new Promise(resolve => setTimeout(resolve, durationMs));
 
@@ -668,8 +666,8 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
       const data = await res.json();
 
       if (workSound) {
-        workSound.pause();
-        workSound.currentTime = 0;
+        window.GFAudio?.stopLoopingSfx(workSound);
+        workSound = null;
       }
 
       if (modal) modal.classList.add("hidden");
@@ -684,11 +682,10 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
         return;
       }
 
-      if (doneSound) {
-        doneSound.volume = 0.7;
-        doneSound.currentTime = 0;
-        doneSound.play().catch(() => {});
-      }
+      window.GFAudio?.playSfx(
+        refiningDoneSoundKey,
+        { volume: 0.7 }
+      );
 
       GFToast.show(
         "Refining Complete",
@@ -697,12 +694,10 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
       );
 
       if (data.professionResult?.leveledUp) {
-        const levelSound = document.getElementById("professionLevelAudio");
-        if (levelSound) {
-          levelSound.volume = 0.8;
-          levelSound.currentTime = 0;
-          levelSound.play().catch(() => {});
-        }
+        window.GFAudio?.playSfx(
+          "profession_level",
+          { volume: 0.8 }
+        );
 
         GFToast.show(
           data.professionResult.professionName + " Level Up!",
@@ -717,8 +712,8 @@ router.get("/refining/:profession", requireLogin, async (req: any, res: any) => 
       console.error("Refining failed", err);
 
       if (workSound) {
-        workSound.pause();
-        workSound.currentTime = 0;
+        window.GFAudio?.stopLoopingSfx(workSound);
+        workSound = null;
       }
 
       if (modal) modal.classList.add("hidden");

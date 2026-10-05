@@ -227,11 +227,33 @@ let lastAudioLocation = null;
 // REGION MUSIC SYNC
 // =======================
 
+const GUILDFORGE_REGION_MUSIC_LOCATIONS = new Set([
+  "Coastal Lowlands",
+  "Greenreach Wilds",
+  "Blackfen Marsh",
+  "Eastern Highlands",
+  "Stormbound Peaks"
+]);
+
 async function syncPlayerLocationAudio(location) {
   const normalizedLocation =
     String(location || "").trim();
 
   if (!normalizedLocation) return;
+
+  /*
+   * player.location can contain towns/interiors such as
+   * "Sanctuary of Light". Those are display locations, not
+   * world-region soundtrack keys. Only actual world regions
+   * should drive playRegionMusic().
+   *
+   * Interior/page-specific music (for example Sanctuary death
+   * music or Tavern music) is owned by that page instead.
+   */
+  if (!GUILDFORGE_REGION_MUSIC_LOCATIONS.has(normalizedLocation)) {
+    lastAudioLocation = null;
+    return;
+  }
 
   if (normalizedLocation === lastAudioLocation) {
     return;

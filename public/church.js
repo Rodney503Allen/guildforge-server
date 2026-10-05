@@ -3,48 +3,61 @@
   // =========================
   // DEATH MUSIC (sanctuary)
   // =========================
-  const isDead = !!window.__SANCTUARY_IS_DEAD__;
-  const audio = document.getElementById("sanctuaryDeathMusic");
+  async function configureSanctuaryDeathMusic() {
+    const isDead = !!window.__SANCTUARY_IS_DEAD__;
 
-  function tryPlay() {
-    if (!audio) return;
+    const audioManager =
+      window.GFAudio ||
+      (window.GFAudioReady ? await window.GFAudioReady : null);
 
-    audio.volume = 0.0;
-    audio.muted = true;
+    if (!audioManager) {
+      console.warn("[Sanctuary] GFAudio was not available.");
+      return;
+    }
 
-    audio.play().then(() => {
-      // unmute + fade in
-      audio.muted = false;
+    /*
+     * Sanctuary death music is page-state music, not persistent world music.
+     * If the player is alive, clear any active or restored death soundtrack
+     * so it cannot follow them into town or another non-world page.
+     */
+    if (!isDead) {
+      if (typeof audioManager.releasePageMusic === "function") {
+        audioManager.releasePageMusic("sanctuary_death", 250);
+      } else {
+        audioManager.stopMusic?.(250);
+      }
+      return;
+    }
 
-      let v = 0;
-      const target = 0.1;
-      const step = 0.05;
+    const playDeathMusic =
+      typeof audioManager.playPageMusic === "function"
+        ? audioManager.playPageMusic.bind(audioManager)
+        : audioManager.playMusic.bind(audioManager);
 
-      const fade = setInterval(() => {
-        v = Math.min(target, v + step);
-        audio.volume = v;
-        if (v >= target) clearInterval(fade);
-      }, 180);
-    }).catch(() => {
-      // Autoplay blocked — play on first user interaction
-      const onFirst = () => {
-        audio.muted = false;
-        audio.volume = 0.65;
-        audio.play().catch(() => {});
-        document.removeEventListener("click", onFirst);
-        document.removeEventListener("keydown", onFirst);
-      };
-      document.addEventListener("click", onFirst);
-      document.addEventListener("keydown", onFirst);
+    await playDeathMusic(
+      "sanctuary_death",
+      {
+        volume: 0.18,
+        crossfadeMs: 900,
+        loop: true
+      }
+    );
+  }
+
+  function startSanctuaryDeathMusic() {
+    configureSanctuaryDeathMusic().catch(err => {
+      console.warn("[Sanctuary] Death music failed:", err);
     });
   }
 
-  if (isDead && audio) {
-    tryPlay();
-  } else if (audio) {
-    // Ensure no bleed if reused
-    audio.pause();
-    audio.currentTime = 0;
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      startSanctuaryDeathMusic,
+      { once: true }
+    );
+  } else {
+    startSanctuaryDeathMusic();
   }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -133,6 +146,12 @@ if (reviveForm) {
         }
 
         return;
+      }
+
+      if (typeof window.GFAudio?.releasePageMusic === "function") {
+        window.GFAudio.releasePageMusic("sanctuary_death", 350);
+      } else {
+        window.GFAudio?.stopMusic?.(350);
       }
 
       window.GFToast.show(

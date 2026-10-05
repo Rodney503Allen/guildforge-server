@@ -156,6 +156,7 @@ res.send(`
   <script defer src="/ui/toast.js"></script>
 
   <link rel="stylesheet" href="/church.css">
+  <script src="/audioManager.js"></script>
   <script defer src="/church.js"></script>
 </head>
 
@@ -165,10 +166,6 @@ res.send(`
   <script>
     window.__SANCTUARY_IS_DEAD__ = ${isDead ? "true" : "false"};
   </script>
-
-  <audio id="sanctuaryDeathMusic" loop preload="auto">
-    <source src="/music/sanctuary_dead.mp3" type="audio/mpeg">
-  </audio>
 
   <main class="sanctuary-page">
     <div class="sanctuary-shell frame-host">

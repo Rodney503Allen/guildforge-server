@@ -256,6 +256,7 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
   <link rel="stylesheet" href="/crafting.css">
   <link rel="stylesheet" href="/ui/toast.css">
   <script defer src="/statpanel.js"></script>
+  <script src="/audioManager.js"></script>
 </head>
 
 <body>
@@ -397,13 +398,18 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
 
   <script src="/ui/toast.js"></script>
 
-  <audio id="workAudio" preload="auto" src="${sounds.work}"></audio>
-  <audio id="doneAudio" preload="auto" src="${sounds.done}"></audio>
-  <audio id="professionLevelAudio" preload="auto" src="/sounds/profession-level.ogg"></audio>
-
   <script>
     const recipeData = ${safeJson(sortedRecipes)};
     const catalystData = ${safeJson(catalystData)};
+
+    const craftingWorkSfxKey = "crafting_${esc(profession)}_work";
+    const craftingDoneSfxKey = "crafting_${esc(profession)}_done";
+
+    if (window.GFAudio) {
+      window.GFAudio.registerTrack("sfx", craftingWorkSfxKey, "${sounds.work}");
+      window.GFAudio.registerTrack("sfx", craftingDoneSfxKey, "${sounds.done}");
+    }
+
     let currentGold = ${Number(player.gold || 0)};
     let selectedRecipeId = null;
     let showLockedRecipes = false;
@@ -675,8 +681,7 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
 
       const modal = document.getElementById("craftingModal");
       const fill = document.getElementById("craftingProgressFill");
-      const workSound = document.getElementById("workAudio");
-      const doneSound = document.getElementById("doneAudio");
+      let workSoundHandle = null;
       const durationMs = Number(recipe.craftTimeMs || 1600);
 
       detailCraftButton.disabled = true;
@@ -695,10 +700,11 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
         });
       }
 
-      if (workSound) {
-        workSound.volume = 0.6;
-        workSound.currentTime = 0;
-        workSound.play().catch(() => {});
+      if (window.GFAudio?.playLoopingSfx) {
+        workSoundHandle = await window.GFAudio.playLoopingSfx(
+          craftingWorkSfxKey,
+          { volume: 0.6 }
+        );
       }
 
       await new Promise(resolve => setTimeout(resolve, durationMs));
@@ -718,9 +724,9 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
 
         const data = await response.json();
 
-        if (workSound) {
-          workSound.pause();
-          workSound.currentTime = 0;
+        if (workSoundHandle?.stop) {
+          workSoundHandle.stop();
+          workSoundHandle = null;
         }
 
         if (modal) modal.classList.add("hidden");
@@ -748,11 +754,10 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
           return;
         }
 
-        if (doneSound) {
-          doneSound.volume = 0.7;
-          doneSound.currentTime = 0;
-          doneSound.play().catch(() => {});
-        }
+        window.GFAudio?.playSfx(
+          craftingDoneSfxKey,
+          { volume: 0.7 }
+        ).catch(() => {});
 
         const qualityLabel = data.craftingQuality?.quality
           ? String(data.craftingQuality.quality)
@@ -798,13 +803,10 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
         }
 
         if (data.professionResult?.leveledUp) {
-          const levelSound = document.getElementById("professionLevelAudio");
-
-          if (levelSound) {
-            levelSound.volume = 0.8;
-            levelSound.currentTime = 0;
-            levelSound.play().catch(() => {});
-          }
+          window.GFAudio?.playSfx(
+            "profession_level",
+            { volume: 0.8 }
+          ).catch(() => {});
 
           GFToast.show(
             data.professionResult.professionName + " Level Up!",
@@ -821,9 +823,9 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
       } catch (error) {
         console.error("Crafting failed", error);
 
-        if (workSound) {
-          workSound.pause();
-          workSound.currentTime = 0;
+        if (workSoundHandle?.stop) {
+          workSoundHandle.stop();
+          workSoundHandle = null;
         }
 
         if (modal) modal.classList.add("hidden");

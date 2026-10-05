@@ -12,6 +12,7 @@
     music: {
       valewynn: "/music/valewynn.ogg",
       tavern: "/music/tavern.ogg",
+      sanctuary_death: "/music/sanctuary_dead.ogg",
       // combat: "/music/combat.ogg",
     },
     ambience: {
@@ -19,8 +20,17 @@
       // tavern: "/ambience/tavern.ogg",
     },
     sfx: {
-      // ui_click: "/audio/sfx/ui/click.wav",
-      // coin: "/audio/sfx/items/coin.wav",
+      gathering_mining: "/sounds/gathering/mining2.ogg",
+      gathering_herbalism: "/sounds/gathering/herbalism2.ogg",
+      gathering_woodcutting: "/sounds/gathering/woodcutting2.ogg",
+      gathering_collected: "/sounds/gathering/collected.ogg",
+      profession_level: "/sounds/profession-level.ogg",
+      refining_smelting: "/sounds/crafting/smelting.ogg",
+      refining_smelting_done: "/sounds/crafting/smelting-done.ogg",
+      refining_milling: "/sounds/crafting/milling.ogg",
+      refining_milling_done: "/sounds/crafting/milling-done.ogg",
+      refining_distilling: "/sounds/crafting/distilling.ogg",
+      refining_distilling_done: "/sounds/crafting/distilling-done.ogg",
     }
   };
 
@@ -96,10 +106,12 @@
   };
 
   const sfxPools = new Map();
+  const loopingSfx = new Set();
   let unlocked = false;
   let unlocking = false;
   let currentRegionMusicKey = null;
   let currentTerrainAmbienceKey = null;
+  let pageMusicOwnerKey = null;
   let worldRegionHookInstalled = false;
 
   function categoryVolume(kind) {
@@ -181,10 +193,13 @@
         err?.name !== "NotAllowedError" &&
         err?.name !== "AbortError"
       ) {
-        console.warn(
-          "[GFAudio] Playback failed:",
-          err
-        );
+console.warn(
+  "[GFAudio] Playback failed:",
+  {
+    src: audio.currentSrc || audio.src,
+    error: err
+  }
+);
       }
 
       return false;
@@ -381,11 +396,26 @@
 
     if (music) {
       pending.music = null;
+
+      // Region music is normally registered by playRegionMusic(), but a
+      // persisted request can be restored before that helper runs.
+      if (!TRACKS.music[music.key]) {
+        TRACKS.music[music.key] = `/music/${music.key}.ogg`;
+      }
+
       await crossfade("music", music.key, music.options);
     }
 
     if (ambience) {
       pending.ambience = null;
+
+      // Terrain ambience is normally registered by playTerrainAmbience(),
+      // but persisted playback can restore the key before terrain setup.
+      if (!TRACKS.ambience[ambience.key]) {
+        TRACKS.ambience[ambience.key] =
+          `/sounds/environment/${ambience.key}.ogg`;
+      }
+
       await crossfade("ambience", ambience.key, ambience.options);
     }
   }
@@ -428,6 +458,55 @@
       console.warn(`[GFAudio] SFX "${key}" failed:`, err);
       return false;
     }
+  }
+
+  function playLoopingSfx(key, options = {}) {
+    const path = getPath("sfx", key);
+    if (!path) return null;
+
+    const handle = {
+      key,
+      audio: new Audio(path),
+      requestedVolume: clamp01(options.volume ?? 1),
+      stopped: false
+    };
+
+    handle.audio.preload = "auto";
+    handle.audio.loop = true;
+    handle.audio.playbackRate = Number(options.playbackRate) || 1;
+    handle.audio.volume = targetVolume("sfx", handle.requestedVolume);
+    loopingSfx.add(handle);
+
+    (async () => {
+      if (!unlocked) await unlock();
+      if (!unlocked || handle.stopped) return;
+
+      handle.audio.volume = targetVolume("sfx", handle.requestedVolume);
+
+      try {
+        await handle.audio.play();
+      } catch (err) {
+        if (err?.name !== "AbortError") {
+          console.warn(`[GFAudio] Looping SFX "${key}" failed:`, err);
+        }
+      }
+    })();
+
+    return handle;
+  }
+
+  function stopLoopingSfx(handle) {
+    if (!handle) return;
+
+    handle.stopped = true;
+    loopingSfx.delete(handle);
+
+    try {
+      handle.audio.pause();
+      handle.audio.currentTime = 0;
+      handle.audio.removeAttribute("src");
+      handle.audio.load();
+    } catch {}
   }
 
 
@@ -589,6 +668,13 @@
         );
       }
     }
+
+    for (const handle of loopingSfx) {
+      handle.audio.volume = targetVolume(
+        "sfx",
+        handle.requestedVolume
+      );
+    }
   }
 
   function saveSettings() {
@@ -610,7 +696,93 @@
       .replace(/[^a-z0-9]/g, "");
   }
 
+  function playPageMusic(key, options = {}) {
+    /*
+     * Page-specific music owns the music group until explicitly released.
+     * While this lock exists, late stat-panel/world region updates are not
+     * allowed to replace the page soundtrack.
+     */
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) return Promise.resolve(false);
+
+    pageMusicOwnerKey = normalizedKey;
+    currentRegionMusicKey = null;
+    pending.music = null;
+
+    return crossfade(
+      "music",
+      normalizedKey,
+      {
+        ...options,
+        pageOverride: true
+      }
+    );
+  }
+
+  function releasePageMusic(key, fadeMs = 350) {
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) return false;
+
+    if (pageMusicOwnerKey === normalizedKey) {
+      pageMusicOwnerKey = null;
+    }
+
+    // Cancel this page track if it is waiting for browser audio unlock.
+    if (pending.music?.key === normalizedKey) {
+      pending.music = null;
+    }
+
+    let released = false;
+
+    for (const channel of musicChannels) {
+      if (channel.key !== normalizedKey) continue;
+
+      released = true;
+
+      const finish = () => {
+        channel.audio.pause();
+        channel.audio.removeAttribute("src");
+        channel.audio.load();
+        channel.key = null;
+        channel.requestedVolume = 1;
+      };
+
+      if (channel.audio.paused || Number(fadeMs) <= 0) {
+        finish();
+      } else {
+        fade(
+          channel,
+          channel.audio.volume,
+          0,
+          Math.max(0, Number(fadeMs) || 0),
+          finish
+        );
+      }
+    }
+
+    /*
+     * Invalidate any in-flight music crossfade for this page track so an
+     * older async play() completion cannot reclaim the channel afterward.
+     */
+    crossfadeRequestId.music++;
+
+    if (currentRegionMusicKey === normalizedKey) {
+      currentRegionMusicKey = null;
+    }
+
+    persistPlaybackState();
+    return released;
+  }
+
   function playRegionMusic(regionName, options = {}) {
+    /*
+     * A page soundtrack (Sanctuary, Tavern, dungeon, etc.) has priority
+     * over asynchronous region updates from the shared stat panel.
+     */
+    if (pageMusicOwnerKey) {
+      return Promise.resolve(false);
+    }
+
     const key = regionNameToMusicKey(regionName);
 
     if (!key) return Promise.resolve(false);
@@ -759,6 +931,9 @@
     playMusic: (key, options) =>
       crossfade("music", key, options),
 
+    playPageMusic,
+    releasePageMusic,
+
     playRegionMusic,
     regionNameToMusicKey,
 
@@ -775,6 +950,8 @@
       stopGroup("ambience", fadeMs),
 
     playSfx,
+    playLoopingSfx,
+    stopLoopingSfx,
     playSpellSfx,
     normalizeSpellSfxKey,
 
@@ -824,6 +1001,7 @@
         unlocked,
         settings: { ...settings },
         music: musicChannels[activeMusicIndex]?.key || null,
+        pageMusicOwner: pageMusicOwnerKey,
         ambience: ambienceChannels[activeAmbienceIndex]?.key || null
       };
     }

@@ -193,7 +193,7 @@ export const decapitateHandler: SpellHandlerDefinition = {
     const { playerId, spell, player, enemy } = context;
     if (!enemy) throw new Error("Decapitate received no enemy");
     const healthPercent = Number(enemy.hp) / Math.max(1, Number(enemy.maxhp) || 1) * 100;
-    const threshold = configNumber(spell, "executeThresholdPercent", 20);
+    const threshold = configNumber(spell, "executeThresholdPercent", 40);
     const multiplier = configNumber(spell, "executeMultiplier", 2);
     const executeActive = healthPercent <= threshold;
     const result = await dealBerserkerDamage(spell, player, enemy, executeActive ? multiplier : 1, executeActive ? configNumber(spell, "executeDefensePenetrationPercent") : 0);

@@ -928,7 +928,7 @@ router.get("/character", requireLogin, async (req, res) => {
             </div>
 
             <div class="summary-row">
-              <span>Skill Points</span>
+              <span>Mana</span>
               <strong>${p.spoints} / ${p.maxspoints}</strong>
             </div>
 
