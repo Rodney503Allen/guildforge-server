@@ -269,6 +269,8 @@ router.get("/shop", async (req, res) => {
           i.category,
           i.type,
           i.item_type,
+          i.slot,
+          i.inventory_slots,
 
           i.attack,
           i.defense,
@@ -289,7 +291,10 @@ router.get("/shop", async (req, res) => {
           ON i.id = si.item_id
 
         WHERE si.shop_id IN (?)
-          AND i.category = 'consumable'
+          AND (
+            i.category = 'consumable'
+            OR i.slot = 'backpack'
+          )
         `,
         [shopIds]
       );
@@ -697,6 +702,7 @@ router.get("/shop", async (req, res) => {
           data-type="${escapeHtml(i.type || i.category || "")}"
           data-item-type="${escapeHtml(i.item_type || "")}"
           data-slot="${escapeHtml(i.slot || "")}"
+          data-inventory-slots="${Number(i.inventory_slots || 0)}"
           data-armor-weight="${escapeHtml(i.armor_weight || "")}"
           data-weapon-class="${escapeHtml(i.weapon_class || "")}"
           data-item-level="${i.sourceType === "base" ? Number(i.display_item_level || i.required_level || 1) : ""}"
