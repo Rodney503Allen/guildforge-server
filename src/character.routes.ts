@@ -10,7 +10,7 @@ import {
   hasInventorySpace,
   canUseBackpackCapacity
 } from "./services/inventoryCapacityService";
-import { addItemWithConn } from "./services/inventoryService";
+import { addItemWithConn, DEFAULT_MAX_STACK_SIZE } from "./services/inventoryService";
 
 const router = Router();
 
@@ -1554,6 +1554,7 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
       SELECT
         inv.inventory_id,
         inv.player_id,
+        inv.item_id,
         inv.quantity,
         inv.equipped,
         i.type,
@@ -1564,6 +1565,7 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
       WHERE inv.inventory_id = ?
         AND inv.player_id = ?
       LIMIT 1
+      FOR UPDATE
       `,
       [inventoryId, pid]
     );
@@ -1596,6 +1598,75 @@ router.post("/character/equip-potion", requireLogin, async (req, res) => {
       await conn.rollback();
       conn.release();
       return res.json({ error: "Potion doesn't match that slot" });
+    }
+
+    // If this slot already has the same potion equipped, top off the
+    // equipped stack instead of replacing it with the clicked stack.
+    if (oldInventoryId && oldInventoryId !== inventoryId) {
+      const [[equippedPotion]]: any = await conn.query(
+        `
+        SELECT
+          inventory_id,
+          item_id,
+          quantity,
+          equipped
+        FROM inventory
+        WHERE inventory_id = ?
+          AND player_id = ?
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [oldInventoryId, pid]
+      );
+
+      if (
+        equippedPotion &&
+        Number(equippedPotion.equipped) === 1 &&
+        Number(equippedPotion.item_id) === Number(row.item_id)
+      ) {
+        const equippedQty = Math.max(0, Number(equippedPotion.quantity) || 0);
+        const incomingQty = Math.max(0, Number(row.quantity) || 0);
+        const room = Math.max(0, DEFAULT_MAX_STACK_SIZE - equippedQty);
+        const transferQty = Math.min(room, incomingQty);
+
+        if (transferQty > 0) {
+          await conn.query(
+            `
+            UPDATE inventory
+            SET quantity = quantity + ?
+            WHERE inventory_id = ?
+              AND player_id = ?
+            `,
+            [transferQty, oldInventoryId, pid]
+          );
+
+          if (incomingQty === transferQty) {
+            await conn.query(
+              `DELETE FROM inventory WHERE inventory_id = ? AND player_id = ?`,
+              [inventoryId, pid]
+            );
+          } else {
+            await conn.query(
+              `
+              UPDATE inventory
+              SET quantity = quantity - ?
+              WHERE inventory_id = ?
+                AND player_id = ?
+              `,
+              [transferQty, inventoryId, pid]
+            );
+          }
+        }
+
+        await conn.commit();
+        conn.release();
+
+        if (slot === "health") {
+          await advanceTutorial(Number(pid), TutorialStep.ASSIGN_HEALTH_POTION, TutorialStep.VISIT_TRAINER);
+        }
+
+        return res.json({ success: true });
+      }
     }
 
     if (oldInventoryId && oldInventoryId !== inventoryId) {
