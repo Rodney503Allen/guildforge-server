@@ -32,78 +32,63 @@ function requireLoginApi(req: any, res: any, next: any) {
 
 
 // =======================
-// JOURNAL PAGE (HTML)
+// JOURNAL MODAL + FALLBACK PAGE
 // =======================
-router.get("/journal", requireLogin, async (req, res) => {
+const journalModalMarkup = `
+<div class="gf-reference-modal__header">
+  <div>
+    <div class="gf-reference-modal__kicker">Quest Log</div>
+    <h2 class="gf-reference-modal__title">Adventurer's Journal</h2>
+    <p class="gf-reference-modal__subtitle">Review active contracts, objectives, rumors, and completed adventures.</p>
+  </div>
+  <button class="gf-reference-modal__close" type="button" data-gf-reference-close aria-label="Close Quest Log">×</button>
+</div>
+
+<div class="gf-reference-layout gf-reference-layout--journal">
+  <aside class="gf-reference-sidebar">
+    <div id="journal-filters" class="gf-reference-filters">
+      <button class="gf-reference-chip is-active" type="button" data-filter="active">Active</button>
+      <button class="gf-reference-chip" type="button" data-filter="completed">Completed</button>
+      <button class="gf-reference-chip" type="button" data-filter="claimed">Claimed</button>
+      <button class="gf-reference-chip" type="button" data-filter="rumors">Rumors</button>
+      <button class="gf-reference-chip" type="button" data-filter="all">All</button>
+    </div>
+    <div id="journal-status" class="gf-reference-status">Loading quest records…</div>
+    <div id="quest-list" class="gf-reference-list"></div>
+  </aside>
+
+  <section class="gf-reference-detail">
+    <div id="quest-detail" class="gf-reference-detail__inner">
+      <div class="gf-reference-empty">
+        <div class="gf-reference-empty__sigil">☉</div>
+        <div>Choose a quest to inspect its details.</div>
+      </div>
+    </div>
+  </section>
+</div>`;
+
+router.get("/ui/journal-modal", requireLogin, async (_req, res) => {
+  res.type("html").send(journalModalMarkup);
+});
+
+router.get("/journal", requireLogin, async (_req, res) => {
   res.send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Guildforge | Journal</title>
-    <link rel="stylesheet" href="/statpanel.css" />
-    <link rel="stylesheet" href="/journal.css" />
-  <link rel="stylesheet" href="/journal.css" />
+  <title>Guildforge | Quest Log</title>
+  <link rel="stylesheet" href="/guildforge-reference-modal.css" />
   <link rel="stylesheet" href="/ui/toast.css" />
-
 </head>
-
-<body>
-<div id="statpanel-root"></div>
-<main class="gf-wrap">
-  <section class="gf-panel">
-    <header class="gf-panel__header">
-      <div class="gf-title">
-        <div class="gf-journalbar">
-            <button id="btn-return" class="gf-btn gf-btn--return" type="button">← Return</button>
-        </div>
-        <div class="gf-title__kicker">Codex</div>
-        <h1 class="gf-title__h1">The Journal</h1>
-        <div class="gf-title__sub">A record of contracts, triumphs, and whispers.</div>
-
-      </div>
-    </header>
-
-    <div class="gf-panel__body">
-      <div id="journal-status" class="gf-status">Loading…</div>
-
-      <!-- Open-book layout -->
-      <div id="journal-book" class="gf-book" hidden>
-        <!-- LEFT PAGE -->
-        <aside class="gf-page gf-page--left">
-          <div class="gf-page__head">
-            <h2 class="gf-page__title">Quests</h2>
-            <div class="gf-page__hint">Select an entry to read details.</div>
-          </div>
-
-          <div class="gf-filter">
-            <button class="gf-chip is-active" type="button" data-filter="active">Active</button>
-            <button class="gf-chip" type="button" data-filter="completed">Completed</button>
-            <button class="gf-chip" type="button" data-filter="claimed">Claimed</button>
-            <button class="gf-chip" type="button" data-filter="rumors">Rumors</button>
-            <button class="gf-chip" type="button" data-filter="all">All</button>
-          </div>
-
-          <div id="quest-list" class="gf-list"></div>
-        </aside>
-
-        <!-- RIGHT PAGE -->
-        <section class="gf-page gf-page--right">
-          <div id="quest-detail" class="gf-detail">
-            <div class="gf-detail__empty">
-              <div class="gf-detail__sigil">☉</div>
-              <div class="gf-detail__msg">Choose a quest from the left page.</div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
-  </section>
-
-  <script src="/statpanel.js" defer></script>
+<body class="gf-reference-fallback">
   <script src="/ui/toast.js"></script>
-  <script src="/journal.js" defer></script>
-</main>
+  <script src="/guildforge-reference-modal.js"></script>
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      window.GFReferenceModal?.open("journal");
+    });
+  </script>
 </body>
 </html>`);
 });

@@ -256,40 +256,61 @@
 
       const state = await res.json();
 
-      if (state.completed) {
-        clearHighlight();
+    if (state.completed) {
+      clearHighlight();
 
-        // A completed tutorial should show its ending exactly once in this
-        // browser. Do not depend on lastKnownStep: victory can complete on the
-        // server before this page gets another step-11 refresh.
-        const completionAlreadyShown =
-          window.sessionStorage.getItem(COMPLETION_CARD_KEY) === "1";
+      const justCompletedTutorial =
+        lastKnownStep === TOTAL_STEPS - 1;
 
-        if (!completionAlreadyShown) {
-          const panel = ensurePanel();
-          panel.querySelector(".tutorial-kicker").textContent = "FIRST STEPS COMPLETE";
-          panel.querySelector(".tutorial-title").textContent = "Your Adventure Begins";
-          panel.querySelector(".tutorial-text").textContent =
-            "You have completed the Guildforge tutorial! You can now continue exploring the world, completing quests, and improving your character. Good luck!";
-          panel.querySelector(".tutorial-progress").textContent = "Tutorial complete";
+      const completionAlreadyShown =
+        window.sessionStorage.getItem(COMPLETION_CARD_KEY) === "1";
 
-          const skip = panel.querySelector(".tutorial-skip");
-          if (skip) {
-            skip.textContent = "Close";
-            skip.title = "Close tutorial";
-            skip.onclick = (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              window.sessionStorage.setItem(COMPLETION_CARD_KEY, "1");
-              panel.remove();
-            };
-          }
-        } else {
-          document.getElementById("guildforgeTutorial")?.remove();
+      if (
+        justCompletedTutorial &&
+        !completionAlreadyShown
+      ) {
+        const panel = ensurePanel();
+
+        panel.querySelector(".tutorial-kicker").textContent =
+          "FIRST STEPS COMPLETE";
+
+        panel.querySelector(".tutorial-title").textContent =
+          "Your Adventure Begins";
+
+        panel.querySelector(".tutorial-text").textContent =
+          "You have completed the Guildforge tutorial! You can now continue exploring the world, completing quests, and improving your character. Good luck!";
+
+        panel.querySelector(".tutorial-progress").textContent =
+          "Tutorial complete";
+
+        const skip =
+          panel.querySelector(".tutorial-skip");
+
+        if (skip) {
+          skip.textContent = "Close";
+          skip.title = "Close tutorial";
+
+          skip.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            window.sessionStorage.setItem(
+              COMPLETION_CARD_KEY,
+              "1"
+            );
+
+            lastKnownStep = null;
+            panel.remove();
+          };
         }
-
-        return;
+      } else {
+        document
+          .getElementById("guildforgeTutorial")
+          ?.remove();
       }
+
+      return;
+    }
 
       // If this character is actively in the tutorial again (for example, a
       // developer reset during testing), allow the completion card to appear

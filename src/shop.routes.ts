@@ -180,7 +180,7 @@ function getBasePrice(base: any) {
   const def = Number(base.base_defense ?? 0);
 
   if (sellValue > 0) {
-    return Math.max(1, sellValue * 4);
+    return Math.max(1, sellValue * 8);
   }
 
   return Math.max(

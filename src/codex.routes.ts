@@ -365,87 +365,65 @@ router.post("/api/codex/claim", requireLoginApi, async (req, res) => {
 });
 
 // =======================
-// CODEX PAGE
+// CODEX MODAL + FALLBACK PAGE
 // =======================
-router.get("/codex", requireLogin, async (req, res) => {
+const codexModalMarkup = `
+<div class="gf-reference-modal__header">
+  <div>
+    <div class="gf-reference-modal__kicker">Bestiary</div>
+    <h2 class="gf-reference-modal__title">Creature Codex</h2>
+    <p class="gf-reference-modal__subtitle">Discover creatures, study variants, and claim mastery rewards.</p>
+  </div>
+  <button class="gf-reference-modal__close" type="button" data-gf-reference-close aria-label="Close Bestiary">×</button>
+</div>
+
+<div class="gf-reference-layout gf-reference-layout--codex">
+  <aside class="gf-reference-sidebar">
+    <div id="codex-filters" class="gf-reference-filters">
+      <button class="gf-reference-chip is-active" type="button" data-filter="all">All</button>
+      <button class="gf-reference-chip" type="button" data-filter="seen">Seen</button>
+      <button class="gf-reference-chip" type="button" data-filter="killed">Killed</button>
+      <button class="gf-reference-chip" type="button" data-filter="studied">Studied</button>
+      <button class="gf-reference-chip" type="button" data-filter="mastered">Mastered</button>
+      <button class="gf-reference-chip" type="button" data-filter="unknown">Unknown</button>
+    </div>
+    <div id="codex-status" class="gf-reference-status">Loading creature records…</div>
+    <div id="codex-creature-list" class="gf-reference-list"></div>
+    <div id="codex-pager" class="gf-reference-pager"></div>
+  </aside>
+
+  <section class="gf-reference-detail">
+    <div id="codex-detail" class="gf-reference-detail__inner">
+      <div class="gf-reference-empty">
+        <div class="gf-reference-empty__sigil">☉</div>
+        <div>Choose a creature to inspect its record.</div>
+      </div>
+    </div>
+  </section>
+</div>`;
+
+router.get("/ui/codex-modal", requireLogin, async (_req, res) => {
+  res.type("html").send(codexModalMarkup);
+});
+
+router.get("/codex", requireLogin, async (_req, res) => {
   res.send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Guildforge | Codex</title>
-  <link rel="stylesheet" href="/statpanel.css" />
-  <script src="/ui/toast.js"></script>
-  <link rel="stylesheet" href="/codex.css" />
+  <title>Guildforge | Bestiary</title>
+  <link rel="stylesheet" href="/guildforge-reference-modal.css" />
   <link rel="stylesheet" href="/ui/toast.css" />
-
 </head>
-
-<body>
-<div id="statpanel-root"></div>
-
-<main class="gf-wrap">
-  <section class="gf-panel">
-    <header class="gf-panel__header">
-      <div class="gf-title">
-        <div class="gf-journalbar">
-          <button id="btn-return" class="gf-btn gf-btn--return" type="button">← Return</button>
-        </div>
-
-        <div class="gf-title__kicker">Bestiary Codex</div>
-        <h1 class="gf-title__h1">The Creature Codex</h1>
-        <div class="gf-title__sub">A record of beasts discovered, studied, and mastered.</div>
-      </div>
-    </header>
-
-    <div class="gf-panel__body">
-      <div id="codex-status" class="gf-status">Loading creature records…</div>
-
-      <div id="codex-book" class="gf-book gf-codex-book" hidden>
-
-        <!-- LEFT PAGE -->
-        <aside class="gf-page gf-page--left">
-          <div class="gf-page__head">
-            <h2 class="gf-page__title">Creatures</h2>
-            <div class="gf-page__hint">Track kills, discoveries, and variant encounters.</div>
-          </div>
-
-          <div id="codex-filters" class="gf-filter">
-            <button class="gf-chip is-active" type="button" data-filter="all">All</button>
-            <button class="gf-chip" type="button" data-filter="seen">Seen</button>
-            <button class="gf-chip" type="button" data-filter="killed">Killed</button>
-            <button class="gf-chip" type="button" data-filter="studied">Studied</button>
-            <button class="gf-chip" type="button" data-filter="mastered">Mastered</button>
-            <button class="gf-chip" type="button" data-filter="unknown">Unknown</button>
-          </div>
-
-          <div id="codex-creature-list" class="gf-list gf-creature-list"></div>
-          <div id="codex-pager" class="gf-codex-pager"></div>
-        </aside>
-
-        <!-- RIGHT PAGE -->
-        <section class="gf-page gf-page--right">
-          <div id="codex-detail" class="gf-detail">
-            <div class="gf-detail__empty">
-              <div class="gf-detail__sigil">☉</div>
-              <div class="gf-detail__msg">Choose a creature from the left page.</div>
-            </div>
-          </div>
-        </section>
-
-      </div>
-    </div>
-
-  </section>
-</main>
-
-<script src="/statpanel.js" defer></script>
-<script src="/codex.js" defer></script>
-<script>
-  document.getElementById("btn-return")?.addEventListener("click", () => {
-    window.location.href = "/world";
-  });
-</script>
+<body class="gf-reference-fallback">
+  <script src="/ui/toast.js"></script>
+  <script src="/guildforge-reference-modal.js"></script>
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      window.GFReferenceModal?.open("codex");
+    });
+  </script>
 </body>
 </html>`);
 });

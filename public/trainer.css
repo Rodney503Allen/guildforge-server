@@ -19,7 +19,9 @@
 }
 
 *{ box-sizing:border-box; }
-html,body{ min-height:100%; }
+html,body{ min-height:100%;
+  position:relative;
+}
 
 body{
   margin:0;
@@ -34,12 +36,58 @@ body{
 body::before{
   content:"";
   position:fixed;
-  inset:0;
+  z-index:-1;
+  top:64px;
+  left:50%;
+  width:92vw;
+  max-width:2200px;
+  height:min(760px,72vh);
+  transform:translateX(-50%);
   pointer-events:none;
-  opacity:.14;
+  border-radius:34px;
   background:
-    linear-gradient(90deg, rgba(200,163,75,.10), transparent 12%, transparent 88%, rgba(200,163,75,.08)),
-    repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 4px);
+    linear-gradient(
+      180deg,
+      rgba(5,7,10,.08) 0%,
+      rgba(5,7,10,.12) 45%,
+      rgba(5,7,10,.72) 82%,
+      var(--bg0) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(5,7,10,.55) 0%,
+      transparent 10%,
+      transparent 90%,
+      rgba(5,7,10,.55) 100%
+    ),
+    url("/images/backgrounds/background_main.webp") center top / cover no-repeat;
+  box-shadow:
+    inset 0 -90px 110px var(--bg0),
+    0 24px 80px rgba(0,0,0,.48);
+  opacity:.82;
+  -webkit-mask-image:
+    linear-gradient(90deg,transparent 0%,black 7%,black 93%,transparent 100%),
+    linear-gradient(180deg,black 0%,black 68%,transparent 100%);
+  -webkit-mask-composite:source-in;
+  mask-image:
+    linear-gradient(90deg,transparent 0%,black 7%,black 93%,transparent 100%),
+    linear-gradient(180deg,black 0%,black 68%,transparent 100%);
+  mask-composite:intersect;
+}
+
+body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  opacity:.10;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255,255,255,.035) 0 1px,
+      transparent 1px 3px
+    );
   mix-blend-mode:overlay;
 }
 

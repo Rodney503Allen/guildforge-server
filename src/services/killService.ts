@@ -12,9 +12,9 @@ import { advanceTutorial, completeTutorial, TutorialStep } from "./tutorialServi
 
 
 const BACKPACK_DROPS = [
-  { minLevel: 16, itemName: "Merchant's Sack", chance: 0.04 },
-  { minLevel: 11, itemName: "Traveler's Sack", chance: 0.04 },
-  { minLevel: 7, itemName: "Sturdy Pouch", chance: 0.04 },
+  { minLevel: 16, itemName: "Merchant's Sack", chance: 0.015 },
+  { minLevel: 11, itemName: "Traveler's Sack", chance: 0.015 },
+  { minLevel: 7, itemName: "Sturdy Pouch", chance: 0.015 },
 ] as const;
 
 async function rollBackpackChestDrop(
@@ -224,13 +224,12 @@ const regionId =
 
 await recordCreatureKill(playerId, creatureId, Number(row.affix_id) || null);
   // BASE RANGE
-  const base = (2 + (creatureLevel * 3)) * 2;
-  const min = Math.floor(base * 0.85);
-  const max = Math.floor(base * 1.15);
+  const base = 2 + (creatureLevel * 1.15);
+  const min = Math.max(1, Math.floor(base * 0.85));
+  const max = Math.max(min, Math.floor(base * 1.15));
 
-  let rolledGold = Math.floor(
-    Math.random() * (max - min + 1)
-  ) + min;
+  let rolledGold =
+    Math.floor(Math.random() * (max - min + 1)) + min;
 
   // RARITY MULTIPLIER
   const rarityMult =

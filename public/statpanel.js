@@ -60,6 +60,41 @@ loadGuildforgeStylesheetOnce(
   "guildforge-audio-settings-css"
 );
 
+// =======================
+// GLOBAL REFERENCE MODALS
+// Bestiary + Quest Log
+// =======================
+
+loadGuildforgeStylesheetOnce(
+  "/guildforge-reference-modal.css",
+  "guildforge-reference-modal-css"
+);
+
+window.GFReferenceModalReady = loadGuildforgeScriptOnce(
+  "/guildforge-reference-modal.js",
+  "guildforge-reference-modal-js"
+).catch(err => {
+  console.error(
+    "Guildforge reference modal bootstrap failed:",
+    err
+  );
+
+  return null;
+});
+
+
+window.GFProfessionsModalReady = loadGuildforgeScriptOnce(
+  "/guildforge-professions-modal.js",
+  "guildforge-professions-modal-js"
+).catch(err => {
+  console.error(
+    "Guildforge professions modal bootstrap failed:",
+    err
+  );
+
+  return null;
+});
+
 
 // =======================
 // SEASONAL / HOLIDAY THEME
