@@ -8380,48 +8380,519 @@ a[href="/town"].btn{
 }
 
 
-/* ==========================================================
-   WORLD PLAYER CARDS — CLICKABLE NEARBY PLAYERS
-   Other players open the shared GFPlayerCard social card.
-   The local centered player marker remains non-interactive.
-   ========================================================== */
+/* ============================================================================
+   FULL WORLD MAP
+============================================================================ */
+body.world-map-open { overflow: hidden; }
 
-.world-nearby-player{
-  cursor:pointer;
-  pointer-events:auto;
-  outline:none;
-  transition:
-    filter .14s ease,
-    transform .14s ease;
+.full-world-map-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(5, 8, 9, .82);
+  backdrop-filter: blur(6px);
+}
+.full-world-map-modal.hidden { display: none !important; }
+
+.full-world-map-dialog {
+  width: min(1180px, 96vw);
+  height: min(820px, 92vh);
+  display: grid;
+  grid-template-rows: auto minmax(0,1fr) auto;
+  overflow: hidden;
+  border: 1px solid rgba(212, 177, 102, .48);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(31,36,33,.98), rgba(13,18,18,.99));
+  box-shadow: 0 24px 80px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.025);
 }
 
-.world-nearby-player:hover,
-.world-nearby-player:focus-visible{
-  filter:brightness(1.18);
+.full-world-map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(212,177,102,.22);
+}
+.full-world-map-kicker {
+  font-size: 10px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: #b99a61;
+}
+.full-world-map-head h2 {
+  margin: 2px 0 0;
+  font-family: Cinzel, Georgia, serif;
+  font-size: 24px;
+  color: #f0dfb6;
+}
+.full-world-map-head-actions { display:flex; align-items:center; gap:9px; }
+.world-map-tool-btn,
+.world-map-close-btn {
+  border: 1px solid rgba(212,177,102,.35);
+  background: rgba(255,255,255,.045);
+  color: #eadbb9;
+  cursor: pointer;
+}
+.world-map-tool-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 7px;
+}
+.world-map-close-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 24px;
+  line-height: 1;
 }
 
-.world-nearby-player:hover .world-nearby-player__body,
-.world-nearby-player:focus-visible .world-nearby-player__body{
-  transform:translate(-50%, -50%) scale(1.12);
+.full-world-map-viewport {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background:
+    radial-gradient(circle at center, rgba(90,102,80,.12), transparent 60%),
+    #111719;
+}
+.full-world-map-viewport.is-dragging { cursor: grabbing; }
+#fullWorldMapCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.world-nearby-player:hover .world-nearby-player__name,
-.world-nearby-player:focus-visible .world-nearby-player__name{
-  opacity:1;
+.full-world-map-foot {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-top: 1px solid rgba(212,177,102,.18);
+  color: rgba(236,226,203,.72);
+  font-size: 12px;
+}
+.full-world-map-foot > span { display:inline-flex; align-items:center; gap:7px; }
+.world-map-legend-dot {
+  display:inline-block;
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  box-shadow: 0 0 0 2px #171717;
+}
+.world-map-legend-dot.is-you { background:#f3cf67; }
+.world-map-legend-dot.is-party { background:#73c7ff; }
+.world-map-legend-dot.is-location { background:#ead8a2; }
+.full-world-map-help { margin-left:auto; }
+
+@media (max-width: 720px) {
+  .full-world-map-modal { padding: 8px; }
+  .full-world-map-dialog { width:100%; height:96vh; }
+  .full-world-map-help { width:100%; margin-left:0; }
 }
 
-.world-nearby-player:focus-visible::after{
+
+/* WORLD MAP V2 — Guildforge frame treatment */
+.full-world-map-dialog {
+  position: relative;
+  border: 2px solid #8b6b35;
+  outline: 1px solid rgba(223,190,115,.22);
+  outline-offset: -6px;
+  background:
+    linear-gradient(rgba(18,22,20,.965),rgba(9,13,13,.985)),
+    radial-gradient(circle at top,rgba(155,124,64,.12),transparent 48%);
+}
+.full-world-map-dialog::before,
+.full-world-map-dialog::after {
   content:"";
   position:absolute;
-  left:50%;
-  top:50%;
-  width:34px;
-  height:34px;
-  transform:translate(-50%, -50%);
-  border-radius:50%;
-  border:1px solid rgba(201,184,154,.82);
-  box-shadow:
-    0 0 0 2px rgba(0,0,0,.68),
-    0 0 16px rgba(201,184,154,.28);
+  z-index:3;
   pointer-events:none;
+  width:28px;
+  height:28px;
+  border-color:#c4a05c;
+  opacity:.72;
+}
+.full-world-map-dialog::before {
+  left:7px; top:7px;
+  border-left:2px solid;
+  border-top:2px solid;
+}
+.full-world-map-dialog::after {
+  right:7px; bottom:7px;
+  border-right:2px solid;
+  border-bottom:2px solid;
+}
+.full-world-map-head {
+  background: linear-gradient(180deg,rgba(91,70,37,.20),rgba(0,0,0,.04));
+  box-shadow: inset 0 -1px rgba(0,0,0,.55);
+}
+.full-world-map-kicker { color:#d2ad65; }
+.full-world-map-head h2 {
+  text-shadow:0 2px 8px rgba(0,0,0,.75);
+}
+.world-map-tool-btn:hover,
+.world-map-close-btn:hover {
+  border-color:#d4b166;
+  background:rgba(212,177,102,.12);
+  color:#fff1ca;
+}
+.full-world-map-viewport {
+  margin: 8px 10px 0;
+  border: 1px solid rgba(166,133,72,.35);
+  box-shadow:
+    inset 0 0 28px rgba(0,0,0,.55),
+    0 0 0 1px rgba(0,0,0,.65);
+}
+.world-map-hover-card {
+  position:absolute;
+  z-index:5;
+  min-width:150px;
+  max-width:200px;
+  padding:8px 10px;
+  pointer-events:none;
+  border:1px solid rgba(212,177,102,.48);
+  border-radius:6px;
+  background:rgba(15,18,17,.96);
+  box-shadow:0 7px 22px rgba(0,0,0,.55);
+  color:#eadfca;
+}
+.world-map-hover-card strong,
+.world-map-hover-card span,
+.world-map-hover-card small { display:block; }
+.world-map-hover-card strong {
+  color:#f0d79d;
+  font-family:Cinzel,Georgia,serif;
+  font-size:13px;
+}
+.world-map-hover-card span { margin-top:2px; color:#c7baa0; font-size:11px; }
+.world-map-hover-card small { margin-top:4px; color:#887e6b; font-size:10px; }
+
+.full-world-map-foot {
+  padding:12px 18px 15px;
+  background:linear-gradient(0deg,rgba(91,70,37,.12),transparent);
+}
+.world-map-legend {
+  display:flex;
+  align-items:center;
+  gap:15px;
+  flex-wrap:wrap;
+}
+.world-map-legend > span {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+}
+.world-map-legend-title {
+  color:#d5b36f;
+  font-family:Cinzel,Georgia,serif;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.world-map-legend-icon {
+  display:inline-grid;
+  place-items:center;
+  width:17px;
+  height:17px;
+  font-style:normal;
+  font-size:13px;
+  font-weight:900;
+  filter:drop-shadow(0 1px 1px #000);
+}
+.world-map-legend-icon.is-haven { color:#d4b166; }
+.world-map-legend-icon.is-dungeon { color:#b88bcb; }
+
+
+/* ============================================================================
+   FULL WORLD MAP V4 — CURRENT GUILDFORGE FRAME SYSTEM
+   Uses the same image borders as the live World/Town panels.
+============================================================================ */
+
+.full-world-map-modal {
+  background: rgba(3, 5, 8, .84);
+  backdrop-filter: blur(7px);
+}
+
+.full-world-map-dialog {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background:
+    radial-gradient(860px 340px at 15% 0%, rgba(182,75,46,.11), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.22)),
+    rgba(7,10,14,.96);
+  box-shadow: none;
+}
+
+/* Kill the temporary V2 faux corner ornaments. */
+.full-world-map-dialog::before,
+.full-world-map-dialog::after {
+  content: none !important;
+}
+
+/* Ensure the real Guildforge frame artwork wins here. */
+.full-world-map-dialog > .frame-border.main {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-image-source: url("/images/ui/main_border.png");
+  border-image-slice: 16;
+  border-image-width: 18px;
+  border-image-repeat: stretch;
+  border-image-outset: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 18px 34px rgba(0,0,0,.55));
+}
+
+.full-world-map-dialog > *:not(.frame-border) {
+  position: relative;
+  z-index: 1;
+}
+
+.full-world-map-head {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.12));
+  box-shadow: inset 0 -1px rgba(0,0,0,.55);
+}
+
+.full-world-map-kicker {
+  color: rgba(201,184,154,.66);
+  letter-spacing: .20em;
+}
+
+.full-world-map-head h2 {
+  color: #e8e2d8;
+  text-shadow: 0 2px 8px rgba(0,0,0,.78);
+}
+
+/* Current Guildforge button language, not the old gold fantasy button. */
+.world-map-tool-btn,
+.world-map-close-btn {
+  position: relative;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.055), rgba(0,0,0,.14)),
+    rgba(15,18,23,.88);
+  color: #d8d3ca;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.035),
+    0 6px 16px rgba(0,0,0,.24);
+}
+
+.world-map-tool-btn:hover,
+.world-map-close-btn:hover {
+  border-color: rgba(201,184,154,.30);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.075), rgba(0,0,0,.10)),
+    rgba(24,27,31,.92);
+  color: #f1ede6;
+}
+
+.full-world-map-viewport {
+  position: relative;
+  isolation: isolate;
+  margin: 12px 18px 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #080d11;
+  box-shadow:
+    inset 0 0 36px rgba(0,0,0,.72),
+    0 10px 28px rgba(0,0,0,.26);
+}
+
+/* The map surface uses the normal panel_border.png. */
+.full-world-map-viewport > .frame-border.panel {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-image-source: url("/images/ui/panel_border.png");
+  border-image-slice: 16;
+  border-image-width: 13px;
+  border-image-repeat: stretch;
+  border-image-outset: 0;
+  pointer-events: none;
+  filter:
+    brightness(.92)
+    drop-shadow(0 10px 22px rgba(0,0,0,.42));
+}
+
+.full-world-map-viewport > *:not(.frame-border) {
+  position: relative;
+  z-index: 1;
+}
+
+#fullWorldMapCanvas {
+  z-index: 1;
+}
+
+.world-map-hover-card {
+  z-index: 12 !important;
+  border: 1px solid transparent;
+  border-radius: 0;
+  border-image-source: url("/images/ui/panel_border.png");
+  border-image-slice: 16;
+  border-image-width: 8px;
+  border-image-repeat: stretch;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.16)),
+    rgba(8,11,15,.96);
+  color: #d9d4ca;
+}
+
+.world-map-hover-card strong {
+  color: #eee8de;
+}
+
+.world-map-hover-card span {
+  color: #aaa49a;
+}
+
+.world-map-hover-card small {
+  color: #77736d;
+}
+
+.full-world-map-foot {
+  padding: 13px 24px 20px;
+  border-top: 0;
+  background: transparent;
+  color: #99958e;
+}
+
+.world-map-legend-title {
+  color: #d6d0c5;
+}
+
+.world-map-legend-dot,
+.world-map-legend-icon {
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.7));
+}
+
+/* Markers keep meaning through color, but mute them into the current UI. */
+.world-map-legend-dot.is-you { background: #e4d7b8; }
+.world-map-legend-dot.is-party { background: #8db5c9; }
+.world-map-legend-dot.is-location { background: #b4aea3; }
+.world-map-legend-icon.is-haven { color: #d0c3a7; }
+.world-map-legend-icon.is-dungeon { color: #a995b5; }
+
+@media (max-width: 720px) {
+  .full-world-map-head { padding: 18px 20px 14px; }
+  .full-world-map-viewport { margin: 10px 12px 0; }
+  .full-world-map-foot { padding: 12px 20px 18px; }
+}
+
+
+/* ==========================================================
+   ACTIVE QUEST WORLD TARGETS
+   Current incomplete world-object objectives only.
+   ========================================================== */
+.tile.has-quest-target::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  z-index: 9;
+  pointer-events: none;
+  border: 2px solid rgba(230, 190, 86, .82);
+  border-radius: 10px;
+  box-shadow:
+    0 0 8px rgba(230, 190, 86, .58),
+    0 0 18px rgba(230, 190, 86, .28),
+    inset 0 0 12px rgba(230, 190, 86, .16);
+  animation: gfQuestTargetPulse 1.8s ease-in-out infinite;
+}
+
+.quest-target-marker {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.quest-target-marker__diamond {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  display: block;
+  color: #e6be56;
+  font-size: clamp(10px, calc(var(--tile) * .18), 14px);
+  line-height: 1;
+  text-shadow:
+    0 1px 2px rgba(0,0,0,.95),
+    0 0 6px rgba(230,190,86,.8);
+  filter: drop-shadow(0 0 5px rgba(230,190,86,.72));
+  animation: gfQuestDiamondPulse 1.8s ease-in-out infinite;
+}
+
+.quest-target-sparkle {
+  position: absolute;
+  color: #f5d982;
+  line-height: 1;
+  opacity: 0;
+  text-shadow:
+    0 0 4px rgba(255,229,142,.95),
+    0 0 8px rgba(230,190,86,.72);
+  filter: drop-shadow(0 0 3px rgba(230,190,86,.8));
+  animation: gfQuestSparkle 2.7s ease-in-out infinite;
+}
+
+.quest-target-sparkle--one {
+  left: 18%;
+  top: 24%;
+  font-size: clamp(7px, calc(var(--tile) * .12), 10px);
+  animation-delay: -.4s;
+}
+
+.quest-target-sparkle--two {
+  right: 20%;
+  bottom: 22%;
+  font-size: clamp(6px, calc(var(--tile) * .10), 9px);
+  animation-delay: -1.35s;
+}
+
+.quest-target-sparkle--three {
+  left: 42%;
+  bottom: 13%;
+  font-size: clamp(5px, calc(var(--tile) * .09), 8px);
+  animation-delay: -2.05s;
+}
+
+@keyframes gfQuestTargetPulse {
+  0%, 100% { opacity: .58; transform: scale(.96); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes gfQuestDiamondPulse {
+  0%, 100% { opacity: .72; transform: translateY(0) scale(.92); }
+  50% { opacity: 1; transform: translateY(-1px) scale(1.08); }
+}
+
+@keyframes gfQuestSparkle {
+  0%, 58%, 100% { opacity: 0; transform: translateY(2px) scale(.55) rotate(0deg); }
+  68% { opacity: .95; transform: translateY(0) scale(1) rotate(18deg); }
+  78% { opacity: .25; transform: translateY(-3px) scale(.72) rotate(38deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile.has-quest-target::after,
+  .quest-target-marker__diamond,
+  .quest-target-sparkle { animation: none; }
+  .quest-target-sparkle { opacity: .55; }
 }

@@ -2232,6 +2232,28 @@ function getTileVisualData(x, y, objectMap) {
   return { replaceSprite, overlays };
 }
 
+function getQuestTargetVisualData(x, y, objectMap) {
+  const objects = objectMap.get(`${x},${y}`) || [];
+  const questObjects = objects.filter(obj => obj?.isQuestTarget === true);
+
+  if (!questObjects.length) {
+    return null;
+  }
+
+  const labels = [];
+
+  for (const obj of questObjects) {
+    for (const target of obj.questTargets || []) {
+      const label = target?.objectiveText || target?.questTitle || obj?.name || "Quest Objective";
+      if (label && !labels.includes(label)) labels.push(label);
+    }
+  }
+
+  return {
+    title: labels.join(" • ") || "Quest Objective"
+  };
+}
+
 // =======================
 // WORLD RENDER
 // =======================
@@ -2457,6 +2479,13 @@ function renderWorldFromData({
           `${x},${y}`
         ) || [];
 
+      const questTarget =
+        getQuestTargetVisualData(
+          x,
+          y,
+          objectMap
+        );
+
       const {
         replaceSprite,
         overlays
@@ -2606,6 +2635,21 @@ function renderWorldFromData({
           `
           : "";
 
+      const questTargetHtml = questTarget
+        ? `
+          <div
+            class="quest-target-marker"
+            title="${escapeHtml(questTarget.title)}"
+            aria-hidden="true"
+          >
+            <span class="quest-target-sparkle quest-target-sparkle--one">✦</span>
+            <span class="quest-target-sparkle quest-target-sparkle--two">✧</span>
+            <span class="quest-target-sparkle quest-target-sparkle--three">✦</span>
+            <span class="quest-target-marker__diamond">◆</span>
+          </div>
+        `
+        : "";
+
       const overlayHtml = overlays.map(src => `
         <img class="tile-overlay" src="${escapeHtml(src)}" alt="">
       `).join("");
@@ -2632,7 +2676,7 @@ function renderWorldFromData({
 
       html.push(`
         <div
-          class="tile ${escapeHtml(terrainClass)} ${isPlayer ? "player" : ""} ${isPlayer && lastMoveDir ? `moving-${lastMoveDir}` : ""}"
+          class="tile ${escapeHtml(terrainClass)} ${questTarget ? "has-quest-target" : ""} ${isPlayer ? "player" : ""} ${isPlayer && lastMoveDir ? `moving-${lastMoveDir}` : ""}"
           data-x="${x}"
           data-y="${y}"${baseStyle}
         >
@@ -2645,6 +2689,7 @@ function renderWorldFromData({
           ${huntClueHtml}
           ${huntTargetHtml}
           ${worldEventMapHtml}
+          ${questTargetHtml}
         </div>
       `);
     }
@@ -6155,3 +6200,334 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
+
+// ============================================================================
+// FULL WORLD MAP
+// ============================================================================
+(() => {
+  let modal, viewport, canvas, ctx, closeBtn, centerBtn, hoverCard;
+  let mapData = null;
+  let terrainImageCache = new Map();
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let dragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let dragOriginX = 0;
+  let dragOriginY = 0;
+  let resizeObserver = null;
+
+  const MIN_SCALE = 4;
+  const MAX_SCALE = 36;
+
+  const TERRAIN_COLORS = {
+    grass: "#71865a", plains: "#84936a", forest: "#435f42",
+    swamp: "#465a49", marsh: "#465a49", mountain: "#77766f",
+    mountains: "#77766f", snow: "#c6ced0", snow_forest: "#829292",
+    snow_mountain: "#aeb8bb", ice: "#a9c4ca", water: "#405d70",
+    ocean: "#304e63", coast: "#7d856a", sand: "#a69469",
+    desert: "#a98d5d", road: "#88765e", town: "#a47b4f",
+    dungeon: "#66535b", void: "#171b1c"
+  };
+
+  function terrainColor(name) {
+    const key = String(name || "void").toLowerCase();
+    return TERRAIN_COLORS[key] || "#65705a";
+  }
+
+  function bounds() {
+    const tiles = mapData?.tiles || [];
+    if (!tiles.length) return { minX:0,maxX:0,minY:0,maxY:0,width:1,height:1 };
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    for (const t of tiles) {
+      minX=Math.min(minX,Number(t.x)); maxX=Math.max(maxX,Number(t.x));
+      minY=Math.min(minY,Number(t.y)); maxY=Math.max(maxY,Number(t.y));
+    }
+    return { minX,maxX,minY,maxY,width:maxX-minX+1,height:maxY-minY+1 };
+  }
+
+  function resizeCanvas() {
+    if (!canvas || !viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.max(1, Math.floor(rect.width*dpr));
+    canvas.height = Math.max(1, Math.floor(rect.height*dpr));
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
+    ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    draw();
+  }
+
+  function screenPoint(x,y,b) {
+    return {
+      x: offsetX + (Number(x)-b.minX)*scale,
+      y: offsetY + (Number(y)-b.minY)*scale
+    };
+  }
+
+  function fitMap() {
+    if (!mapData || !viewport) return;
+    const b=bounds(), rect=viewport.getBoundingClientRect();
+    const pad=36;
+    scale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,Math.min(
+      (rect.width-pad*2)/b.width,
+      (rect.height-pad*2)/b.height
+    )));
+    offsetX=(rect.width-b.width*scale)/2;
+    offsetY=(rect.height-b.height*scale)/2;
+    draw();
+  }
+
+  function centerOnPlayer() {
+    if (!mapData?.player || !viewport) return;
+    const b=bounds(), rect=viewport.getBoundingClientRect();
+    const p=screenPoint(mapData.player.x,mapData.player.y,b);
+    offsetX += rect.width/2 - (p.x+scale/2);
+    offsetY += rect.height/2 - (p.y+scale/2);
+    draw();
+  }
+
+  function drawMarker(x,y,label,kind,b) {
+    const p=screenPoint(x,y,b);
+    const cx=p.x+scale/2, cy=p.y+scale/2;
+    if (cx < -30 || cy < -30 || cx > viewport.clientWidth+30 || cy > viewport.clientHeight+30) return;
+    const radius=Math.max(4,Math.min(8,scale*.34));
+    ctx.save();
+    ctx.shadowColor="rgba(0,0,0,.8)";
+    ctx.shadowBlur=6;
+
+    if (kind==="haven" || kind==="town") {
+      ctx.fillStyle="#d4b166";
+      ctx.strokeStyle="#211a10";
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(cx,cy-radius-3);
+      ctx.lineTo(cx+radius+3,cy-1);
+      ctx.lineTo(cx+radius-1,cy-1);
+      ctx.lineTo(cx+radius-1,cy+radius+3);
+      ctx.lineTo(cx-radius+1,cy+radius+3);
+      ctx.lineTo(cx-radius+1,cy-1);
+      ctx.lineTo(cx-radius-3,cy-1);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else if (kind==="dungeon") {
+      ctx.fillStyle="#b88bcb";
+      ctx.strokeStyle="#211725";
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(cx,cy-radius-4);
+      ctx.lineTo(cx+radius+4,cy);
+      ctx.lineTo(cx,cy+radius+4);
+      ctx.lineTo(cx-radius-4,cy);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle="#241929";
+      ctx.beginPath(); ctx.arc(cx,cy,Math.max(2,radius*.35),0,Math.PI*2); ctx.fill();
+    } else {
+      ctx.fillStyle=kind==="you" ? "#f3cf67" : kind==="party" ? "#73c7ff" : "#ead8a2";
+      ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle="#171717"; ctx.stroke();
+    }
+
+    ctx.shadowBlur=0;
+    if (label && scale >= 8) {
+      ctx.font="600 12px system-ui, sans-serif";
+      ctx.textAlign="center";
+      ctx.textBaseline="bottom";
+      ctx.lineWidth=3;
+      ctx.strokeStyle="rgba(0,0,0,.9)";
+      ctx.strokeText(label,cx,cy-radius-6);
+      ctx.fillStyle="#f5ead1";
+      ctx.fillText(label,cx,cy-radius-6);
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    if (!ctx || !mapData || !viewport) return;
+    const rect=viewport.getBoundingClientRect();
+    ctx.clearRect(0,0,rect.width,rect.height);
+    ctx.fillStyle="#111719"; ctx.fillRect(0,0,rect.width,rect.height);
+    const b=bounds();
+
+    for (const t of mapData.tiles || []) {
+      const p=screenPoint(t.x,t.y,b);
+      if (p.x+scale<0 || p.y+scale<0 || p.x>rect.width || p.y>rect.height) continue;
+      ctx.fillStyle=terrainColor(t.terrain);
+      ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(scale+.25),Math.ceil(scale+.25));
+      if (scale >= 14) {
+        ctx.strokeStyle="rgba(0,0,0,.12)";
+        ctx.lineWidth=1;
+        ctx.strokeRect(Math.floor(p.x)+.5,Math.floor(p.y)+.5,Math.ceil(scale)-1,Math.ceil(scale)-1);
+      }
+    }
+
+    for (const l of mapData.locations || []) {
+      drawMarker(l.x,l.y,l.name,(l.type==="town" ? "haven" : l.type==="dungeon" ? "dungeon" : "location"),b);
+    }
+    for (const p of mapData.party || []) {
+      drawMarker(p.x,p.y,p.name,"party",b);
+    }
+    drawMarker(mapData.player.x,mapData.player.y,"You","you",b);
+  }
+
+  async function loadMap() {
+    const res=await fetch("/api/world/map",{credentials:"include",cache:"no-store"});
+    if (!res.ok) throw new Error(`World map request failed (${res.status})`);
+    mapData=await res.json();
+  }
+
+  async function open() {
+    if (!modal) init();
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden","false");
+    document.body.classList.add("world-map-open");
+    try {
+      await loadMap();
+      resizeCanvas();
+      fitMap();
+    } catch (err) {
+      console.error(err);
+      if (window.GFToast?.show) GFToast.show("World Map","Unable to load the world map.",{type:"error"});
+    }
+  }
+
+  function close() {
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden","true");
+    document.body.classList.remove("world-map-open");
+  }
+
+  function tileAtPointer(clientX,clientY) {
+    if (!mapData || !viewport) return null;
+    const rect=viewport.getBoundingClientRect();
+    const b=bounds();
+    const sx=clientX-rect.left, sy=clientY-rect.top;
+    const x=Math.floor((sx-offsetX)/scale+b.minX);
+    const y=Math.floor((sy-offsetY)/scale+b.minY);
+    return (mapData.tiles||[]).find(t=>Number(t.x)===x && Number(t.y)===y) || null;
+  }
+
+  function updateHoverCard(e) {
+    if (!hoverCard || dragging) {
+      if (hoverCard) hoverCard.hidden=true;
+      return;
+    }
+    const tile=tileAtPointer(e.clientX,e.clientY);
+    if (!tile) { hoverCard.hidden=true; return; }
+
+    const region=String(tile.regionName || "Unknown Region");
+    const location=(mapData.locations||[]).find(l=>Number(l.x)===Number(tile.x) && Number(l.y)===Number(tile.y));
+    const specialType =
+      region === "Haven" || region === "Dungeon"
+        ? region
+        : null;
+
+    hoverCard.innerHTML =
+      specialType
+        ? `<strong>${escapeHtmlMap(location?.name || specialType)}</strong>` +
+          `<span>${escapeHtmlMap(specialType)}</span>` +
+          `<small>(${Number(tile.x)}, ${Number(tile.y)})</small>`
+        : `<strong>${escapeHtmlMap(region)}</strong>` +
+          (location ? `<span>${escapeHtmlMap(location.name)}</span>` : "") +
+          `<small>(${Number(tile.x)}, ${Number(tile.y)})</small>`;
+
+    const rect=viewport.getBoundingClientRect();
+    const px=e.clientX-rect.left+14, py=e.clientY-rect.top+14;
+    hoverCard.style.left=`${Math.min(px,Math.max(8,rect.width-210))}px`;
+    hoverCard.style.top=`${Math.min(py,Math.max(8,rect.height-82))}px`;
+    hoverCard.hidden=false;
+  }
+
+  function escapeHtmlMap(value) {
+    return String(value ?? "").replace(/[&<>"']/g,ch=>({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    })[ch]);
+  }
+
+  function init() {
+    modal=document.getElementById("fullWorldMapModal");
+    viewport=document.getElementById("fullWorldMapViewport");
+    canvas=document.getElementById("fullWorldMapCanvas");
+    closeBtn=document.getElementById("worldMapCloseBtn");
+    centerBtn=document.getElementById("worldMapCenterBtn");
+    hoverCard=document.getElementById("worldMapHoverCard");
+    if (!modal || !viewport || !canvas) return;
+
+    closeBtn?.addEventListener("click",close);
+    centerBtn?.addEventListener("click",centerOnPlayer);
+    modal.addEventListener("mousedown",e=>{ if(e.target===modal) close(); });
+
+    viewport.addEventListener("wheel",e=>{
+      e.preventDefault();
+      if (!mapData) return;
+      const rect=viewport.getBoundingClientRect();
+      const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+      const old=scale;
+      const next=Math.max(MIN_SCALE,Math.min(MAX_SCALE,old*(e.deltaY<0?1.14:.88)));
+      if(next===old) return;
+      offsetX=mx-(mx-offsetX)*(next/old);
+      offsetY=my-(my-offsetY)*(next/old);
+      scale=next; draw();
+    },{passive:false});
+
+    viewport.addEventListener("pointerdown",e=>{
+      dragging=true; viewport.setPointerCapture(e.pointerId);
+      dragStartX=e.clientX; dragStartY=e.clientY;
+      dragOriginX=offsetX; dragOriginY=offsetY;
+      viewport.classList.add("is-dragging");
+    });
+    viewport.addEventListener("pointermove",e=>{
+      if (dragging) {
+        offsetX=dragOriginX+(e.clientX-dragStartX);
+        offsetY=dragOriginY+(e.clientY-dragStartY);
+        draw();
+        if (hoverCard) hoverCard.hidden=true;
+        return;
+      }
+      updateHoverCard(e);
+    });
+    viewport.addEventListener("pointerleave",()=>{ if(hoverCard) hoverCard.hidden=true; });
+    const endDrag=e=>{
+      dragging=false; viewport.classList.remove("is-dragging");
+      try { viewport.releasePointerCapture(e.pointerId); } catch {}
+    };
+    viewport.addEventListener("pointerup",endDrag);
+    viewport.addEventListener("pointercancel",endDrag);
+
+    resizeObserver=new ResizeObserver(()=>resizeCanvas());
+    resizeObserver.observe(viewport);
+  }
+
+  document.addEventListener("DOMContentLoaded",init);
+  document.addEventListener("keydown",e=>{
+    if (e.key==="Escape" && modal && !modal.classList.contains("hidden")) close();
+    if ((e.key==="m" || e.key==="M") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const tag=String(document.activeElement?.tagName||"").toLowerCase();
+      if (tag==="input" || tag==="textarea" || document.activeElement?.isContentEditable) return;
+      e.preventDefault();
+      if (modal && !modal.classList.contains("hidden")) close(); else void open();
+    }
+  });
+
+  // Keep party markers moving while the map is open using the existing global socket.
+  document.addEventListener("DOMContentLoaded",()=>{
+    const socket=window.GFSocket;
+    if (!socket?.on) return;
+    socket.on("world:player-moved",payload=>{
+      if (!mapData || !modal || modal.classList.contains("hidden")) return;
+      const id=Number(payload?.playerId);
+      const member=(mapData.party||[]).find(p=>Number(p.id)===id);
+      if (!member) return;
+      member.x=Number(payload?.x);
+      member.y=Number(payload?.y);
+      draw();
+    });
+  });
+
+  window.openFullWorldMap=open;
+  window.closeFullWorldMap=close;
+})();

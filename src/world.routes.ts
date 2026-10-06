@@ -848,6 +848,77 @@ router.get("/world/current-region", async (req, res) => {
 
 
 // =======================
+// ACTIVE QUEST WORLD TARGETS
+// =======================
+async function markActiveQuestWorldObjects(
+  playerId: number,
+  worldObjects: any[]
+) {
+  if (!Array.isArray(worldObjects) || !worldObjects.length) {
+    return worldObjects || [];
+  }
+
+  const [rows]: any = await db.query(
+    `
+      SELECT
+        o.target_world_object_id AS worldObjectId,
+        o.objective_text AS objectiveText,
+        q.title AS questTitle,
+        o.step_order AS stepOrder
+      FROM player_quests pq
+      JOIN quests q
+        ON q.id = pq.quest_id
+      JOIN player_quest_objectives pqo
+        ON pqo.player_quest_id = pq.id
+      JOIN quest_objectives o
+        ON o.id = pqo.objective_id
+      WHERE pq.player_id = ?
+        AND pq.status = 'active'
+        AND pqo.is_complete = 0
+        AND COALESCE(o.is_hidden, 0) = 0
+        AND o.target_world_object_id IS NOT NULL
+        AND o.step_order = COALESCE((
+          SELECT MIN(o2.step_order)
+          FROM player_quest_objectives pqo2
+          JOIN quest_objectives o2
+            ON o2.id = pqo2.objective_id
+          WHERE pqo2.player_quest_id = pq.id
+            AND pqo2.is_complete = 0
+            AND COALESCE(o2.is_optional, 0) = 0
+        ), o.step_order)
+    `,
+    [playerId]
+  );
+
+  const targetMap = new Map<number, any[]>();
+
+  for (const row of rows || []) {
+    const worldObjectId = Number(row.worldObjectId);
+    if (!Number.isInteger(worldObjectId) || worldObjectId <= 0) continue;
+
+    if (!targetMap.has(worldObjectId)) {
+      targetMap.set(worldObjectId, []);
+    }
+
+    targetMap.get(worldObjectId)!.push({
+      questTitle: String(row.questTitle || "Quest"),
+      objectiveText: row.objectiveText ? String(row.objectiveText) : null,
+      stepOrder: Math.max(1, Number(row.stepOrder) || 1)
+    });
+  }
+
+  return worldObjects.map((obj: any) => {
+    const questTargets = targetMap.get(Number(obj.id)) || [];
+
+    return {
+      ...obj,
+      isQuestTarget: questTargets.length > 0,
+      questTargets
+    };
+  });
+}
+
+// =======================
 // WORLD VIEW
 // =======================
 router.get("/world", async (req, res) => {
@@ -934,7 +1005,7 @@ router.get("/world", async (req, res) => {
   const maxX = player.map_x + 5;
   const minY = player.map_y - 5;
   const maxY = player.map_y + 5;
-  const [worldObjects]: any = await db.query(`
+  let [worldObjects]: any = await db.query(`
     SELECT
       id,
       name,
@@ -949,6 +1020,8 @@ router.get("/world", async (req, res) => {
       AND y BETWEEN ? AND ?
     ORDER BY z_index ASC, id ASC
   `, [minX, maxX, minY, maxY]);
+
+  worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
 
   const objectMap = buildWorldObjectMap(worldObjects);
   // Load tiles
@@ -1183,6 +1256,15 @@ res.send(`
         </div>
 
         <div class="world-actions">
+          <button
+            id="open-world-map-btn"
+            class="world-action-btn"
+            type="button"
+            onclick="openFullWorldMap()"
+          >
+            World Map
+          </button>
+
           <button
             id="enter-town-btn"
             class="world-action-btn"
@@ -2023,6 +2105,41 @@ res.send(`
     </div>
   </div>
 
+
+  <div id="fullWorldMapModal" class="full-world-map-modal hidden" aria-hidden="true">
+    <div class="full-world-map-dialog frame-host" role="dialog" aria-modal="true" aria-labelledby="fullWorldMapTitle">
+      <span class="frame-border main" aria-hidden="true"></span>
+      <div class="full-world-map-head">
+        <div>
+          <div class="full-world-map-kicker">VALEWYNN</div>
+          <h2 id="fullWorldMapTitle">World Map</h2>
+        </div>
+        <div class="full-world-map-head-actions">
+          <button id="worldMapCenterBtn" class="world-map-tool-btn" type="button">Center on Me</button>
+          <button id="worldMapCloseBtn" class="world-map-close-btn" type="button" aria-label="Close world map">×</button>
+        </div>
+      </div>
+
+      <div id="fullWorldMapViewport" class="full-world-map-viewport frame-host">
+        <span class="frame-border panel" aria-hidden="true"></span>
+        <canvas id="fullWorldMapCanvas"></canvas>
+        <div id="worldMapHoverCard" class="world-map-hover-card" hidden></div>
+      </div>
+
+      <div class="full-world-map-foot">
+        <div class="world-map-legend" aria-label="Map legend">
+          <span class="world-map-legend-title">Legend</span>
+          <span><b class="world-map-legend-dot is-you"></b>You</span>
+          <span><b class="world-map-legend-dot is-party"></b>Party</span>
+          <span><b class="world-map-legend-icon is-haven">⌂</b>Haven</span>
+          <span><b class="world-map-legend-icon is-dungeon">◆</b>Dungeon</span>
+          <span><b class="world-map-legend-dot is-location"></b>Location</span>
+        </div>
+        <span class="full-world-map-help">Hover for region • Drag to pan • Wheel to zoom • M to toggle</span>
+      </div>
+    </div>
+  </div>
+
   <link rel="stylesheet" href="/statpanel.css" />
   <link rel="stylesheet" href="/ui/toast.css" />
 
@@ -2068,6 +2185,108 @@ res.send(`
 
 </html>
 `);
+});
+
+
+/* ============================================================================
+   FULL WORLD MAP — lightweight terrain + player/party positions
+============================================================================ */
+router.get("/api/world/map", async (req, res) => {
+  try {
+    const pid = Number((req.session as any)?.playerId);
+    if (!pid) return res.status(401).json({ error: "not_logged_in" });
+
+    const [[player]]: any = await db.query(
+      `SELECT id, name, map_x, map_y FROM players WHERE id=? LIMIT 1`,
+      [pid]
+    );
+    if (!player) return res.status(404).json({ error: "player_not_found" });
+
+    const [tiles]: any = await db.query(`
+      SELECT
+        wm.x,
+        wm.y,
+        wm.terrain,
+        wm.region_id,
+        CASE
+          WHEN LOWER(COALESCE(wm.terrain, '')) = 'town'
+            THEN 'Haven'
+          WHEN LOWER(COALESCE(wm.terrain, '')) = 'dungeon'
+            THEN 'Dungeon'
+          ELSE COALESCE(r.name, 'Unknown Region')
+        END AS map_region_name
+      FROM world_map wm
+      LEFT JOIN regions r
+        ON r.id = wm.region_id
+      ORDER BY wm.y ASC, wm.x ASC
+    `);
+
+    const [locations]: any = await db.query(`
+      SELECT
+        l.id,
+        l.name,
+        l.map_x,
+        l.map_y,
+        COALESCE(wm.terrain, 'location') AS terrain
+      FROM locations l
+      LEFT JOIN world_map wm
+        ON wm.x = l.map_x
+       AND wm.y = l.map_y
+      WHERE l.map_x IS NOT NULL
+        AND l.map_y IS NOT NULL
+      ORDER BY l.name ASC
+    `);
+
+    const [partyRows]: any = await db.query(`
+      SELECT DISTINCT
+        p.id,
+        p.name,
+        p.level,
+        p.map_x,
+        p.map_y
+      FROM party_members me
+      JOIN party_members pm
+        ON pm.party_id = me.party_id
+       AND pm.player_id <> me.player_id
+      JOIN players p
+        ON p.id = pm.player_id
+      WHERE me.player_id = ?
+      ORDER BY p.name ASC
+    `, [pid]);
+
+    res.json({
+      player: {
+        id: Number(player.id),
+        name: String(player.name || "You"),
+        x: Number(player.map_x),
+        y: Number(player.map_y)
+      },
+      party: (partyRows || []).map((p: any) => ({
+        id: Number(p.id),
+        name: String(p.name || "Party Member"),
+        level: Number(p.level || 1),
+        x: Number(p.map_x),
+        y: Number(p.map_y)
+      })),
+      tiles: (tiles || []).map((t: any) => ({
+        x: Number(t.x),
+        y: Number(t.y),
+        terrain: String(t.terrain || "void"),
+        regionId: t.region_id != null ? Number(t.region_id) : null,
+        regionName: String(t.map_region_name || "Unknown Region")
+      })),
+      locations: (locations || []).map((l: any) => ({
+        id: Number(l.id),
+        name: String(l.name || "Location"),
+        x: Number(l.map_x),
+        y: Number(l.map_y),
+        type: String(l.terrain || "location").toLowerCase()
+      }))
+    });
+  } catch (err) {
+    console.error("world map api failed:", err);
+    res.status(500).json({ error: "server_error" });
+  }
 });
 
 router.get("/town/enter", async (req, res) => {
@@ -2963,7 +3182,7 @@ if (enemy) {
   const minY = newY - 5;
   const maxY = newY + 5;
 
-const [worldObjects]: any = await db.query(`
+let [worldObjects]: any = await db.query(`
 SELECT
   id,
   name,
@@ -2982,6 +3201,8 @@ WHERE is_active = 1
   AND y BETWEEN ? AND ?
 ORDER BY z_index ASC, id ASC
 `, [minX, maxX, minY, maxY]);
+
+worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
 
   const [tiles]: any = await db.query(`
     SELECT *
@@ -3538,7 +3759,7 @@ router.get("/world/partial", async (req, res) => {
      WORLD OBJECTS
   ========================================= */
 
-  const [worldObjects]: any =
+  let [worldObjects]: any =
     await db.query(
       `
         SELECT
@@ -3568,6 +3789,8 @@ router.get("/world/partial", async (req, res) => {
       ]
     );
 
+
+  worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
 
   /* =========================================
      WORLD TILES

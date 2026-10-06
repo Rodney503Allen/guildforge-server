@@ -22,24 +22,38 @@
       .replaceAll("'", "&#039;");
   }
 
-  function fmtObjective(o) {
-    const type = o.objectiveType;
-    const req = Number(o.required_count || 0) || 1;
-    const prog = Number(o.progress_count || 0);
-    const pct = Math.max(0, Math.min(100, Math.round((prog / req) * 100)));
+  function objectiveLabel(o) {
+    const authored = String(o.objective_text || "").trim();
+    if (authored) return authored;
 
-    let label = "";
-    if (type === "KILL") {
-      const region = o.region_name ? ` in ${o.region_name}` : "";
-      label = `Defeat targets${region}`;
-    } else if (type === "TURN_IN") {
-      label = `Deliver required items`;
-    } else {
-      label = `Objective`;
+    const type = String(o.objectiveType || "");
+    if (type === "KILL") return `Defeat ${o.target_creature_name || "the required creature"}`;
+    if (type === "TURN_IN" || type === "COLLECT") return `Collect ${o.target_item_name || "the required item"}`;
+    if (type === "INTERACT") {
+      const target = o.target_world_object_name || "the required object";
+      return `${target} Discovered`;
     }
+    if (type === "ENTER_AREA") return `Enter ${o.region_name || "the required area"}`;
+    if (type === "LOCATION" || type === "REACH_LOCATION") return `Reach ${o.region_name || "the required location"}`;
+
+    const fallback = type.replaceAll("_", " ").toLowerCase() || "objective";
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }
+
+  function fmtObjective(o) {
+    if (Number(o.is_hidden || 0) === 1) return "";
+
+    const req = Number(o.required_count || 0) || 1;
+    const prog = Math.min(req, Math.max(0, Number(o.progress_count || 0)));
+    const pct = Math.max(0, Math.min(100, Math.round((prog / req) * 100)));
+    const optional = Number(o.is_optional || 0) === 1 ? " (Optional)" : "";
+    const stage = Number(o.step_order || 1);
+    const activeClass = Number(o.isActiveStep || 0) === 1 ? " is-current" : "";
+    const region = String(o.region_name || "").trim();
+    const label = `${objectiveLabel(o)}${optional}${region ? ` - ${region}` : ""}`;
 
     return `
-      <div class="gf-obj">
+      <div class="gf-obj${activeClass}" data-quest-step="${stage}">
         <div class="gf-obj__row">
           <div class="gf-obj__label">${esc(label)}</div>
           <div class="gf-obj__count">${esc(prog)} / ${esc(req)}</div>
@@ -48,6 +62,7 @@
       </div>
     `;
   }
+
 
   // Normalize accepted rows (1 row per objective) -> 1 entry per playerQuestId
   function groupAccepted(rows, status) {
@@ -79,10 +94,23 @@
       entry.objectives.push({
         objectiveId: Number(r.objectiveId),
         objectiveType: r.objectiveType,
+        objective_text: r.objective_text ?? null,
+        step_order: Math.max(1, Number(r.step_order || 1)),
+        is_optional: Number(r.is_optional || 0),
+        is_hidden: Number(r.is_hidden || 0),
+        isActiveStep: Number(r.isActiveStep || 0),
         required_count: Number(r.required_count || 1),
         target_item_id: r.target_item_id != null ? Number(r.target_item_id) : null,
         target_creature_id: r.target_creature_id != null ? Number(r.target_creature_id) : null,
         region_name: r.region_name ?? null,
+        target_item_name: r.target_item_name ?? r.item_name ?? null,
+        target_creature_name: r.target_creature_name ?? r.creature_name ?? null,
+        target_world_object_id: r.target_world_object_id != null ? Number(r.target_world_object_id) : null,
+        target_world_object_name: r.target_world_object_name ?? r.world_object_name ?? r.object_name ?? null,
+        target_world_object_icon: r.target_world_object_icon ?? r.world_object_icon ?? null,
+        target_world_object_region_name: r.target_world_object_region_name ?? r.world_object_region_name ?? null,
+        target_object_def_id: r.target_object_def_id != null ? Number(r.target_object_def_id) : null,
+        params_json: r.params_json ?? null,
         progress_count: Number(r.progress_count || 0),
         is_complete: Number(r.is_complete || 0),
       });

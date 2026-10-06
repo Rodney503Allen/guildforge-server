@@ -139,6 +139,9 @@ router.get("/quests/tracked", async (req, res) => {
         o.region_name,
         o.target_item_id,
         o.target_creature_id,
+        o.target_world_object_id,
+        o.target_object_def_id,
+        o.params_json,
         pqo.progress_count,
         pqo.is_complete,
 
@@ -146,7 +149,13 @@ router.get("/quests/tracked", async (req, res) => {
         i.icon AS item_icon,
 
         c.name AS creature_name,
-        c.creatureimage AS creature_icon
+        c.creatureimage AS creature_icon,
+
+        wo.name AS world_object_name,
+        wo.icon AS world_object_icon,
+        wo.region_name AS world_object_region_name,
+        wo.x AS world_object_x,
+        wo.y AS world_object_y
 
       FROM player_tracked_quests ptq
       JOIN player_quests pq
@@ -159,6 +168,7 @@ router.get("/quests/tracked", async (req, res) => {
 
       LEFT JOIN items i ON i.id = o.target_item_id
       LEFT JOIN creatures c ON c.id = o.target_creature_id
+      LEFT JOIN world_objects wo ON wo.id = o.target_world_object_id
 
       WHERE ptq.player_id=?
         AND pq.status IN ('active','accepted','in_progress','completed')

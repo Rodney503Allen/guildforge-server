@@ -39,9 +39,11 @@ function groupQuestLogRows(rows) {
       required: Number(r.required_count || 1),
       progress: Number(r.progress_count || 0),
       isComplete: Number(r.is_complete || 0) === 1,
-      region: r.region_name || null,
+      region: r.region_name || r.world_object_region_name || null,
+      objectiveText: r.objective_text || null,
       itemName: r.item_name || r.target_item_name || null,
-      creatureName: r.creature_name || r.target_creature_name || null
+      creatureName: r.creature_name || r.target_creature_name || null,
+      worldObjectName: r.world_object_name || r.target_world_object_name || null
     });
   }
 
@@ -51,8 +53,18 @@ function groupQuestLogRows(rows) {
 function objectiveLine(o) {
   const cur = String(Math.min(o.progress, o.required));
   const req = String(o.required);
+  const authored = String(o.objectiveText || "").trim();
 
-  if (o.type === "TURN_IN") {
+  if (o.type === "INTERACT") {
+    const name = o.worldObjectName || authored || "Required target";
+    return name + " " + cur + "/" + req;
+  }
+
+  if (authored) {
+    return authored + " " + cur + "/" + req;
+  }
+
+  if (o.type === "TURN_IN" || o.type === "COLLECT") {
     const name = o.itemName || "Item";
     return "Collect " + name + " " + cur + "/" + req;
   }
@@ -62,7 +74,16 @@ function objectiveLine(o) {
     return "Kill " + name + " " + cur + "/" + req;
   }
 
-  return String(o.type) + " " + cur + "/" + req;
+  if (o.type === "ENTER_AREA") {
+    return "Enter " + (o.region || "required area") + " " + cur + "/" + req;
+  }
+
+  if (o.type === "LOCATION" || o.type === "REACH_LOCATION") {
+    return "Reach " + (o.region || "required location") + " " + cur + "/" + req;
+  }
+
+  const label = String(o.type || "Objective").replaceAll("_", " ").toLowerCase();
+  return label.charAt(0).toUpperCase() + label.slice(1) + " " + cur + "/" + req;
 }
 
 async function untrackQuest(playerQuestId) {

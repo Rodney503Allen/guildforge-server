@@ -81,6 +81,11 @@ export type QuestLogRow = {
   target_creature_name: string | null;
   target_creature_icon: string | null;
   target_world_object_id: number | null;
+  target_world_object_name: string | null;
+  target_world_object_icon: string | null;
+  target_world_object_region_name: string | null;
+  target_world_object_x: number | null;
+  target_world_object_y: number | null;
   target_object_def_id: number | null;
   region_name: string | null;
   progress_count: number;
@@ -497,6 +502,11 @@ export async function getQuestLog(pid: number) {
       pqo.progress_count, pqo.is_complete,
       i.name AS target_item_name, i.icon AS target_item_icon,
       c.name AS target_creature_name, c.creatureimage AS target_creature_icon,
+      wo.name AS target_world_object_name,
+      wo.icon AS target_world_object_icon,
+      wo.region_name AS target_world_object_region_name,
+      wo.x AS target_world_object_x,
+      wo.y AS target_world_object_y,
       COALESCE(r.gold, 0) AS reward_gold, COALESCE(r.xp, 0) AS reward_xp
     FROM player_quests pq
     JOIN quests q ON q.id = pq.quest_id
@@ -505,6 +515,7 @@ export async function getQuestLog(pid: number) {
     JOIN quest_objectives o ON o.id = pqo.objective_id
     LEFT JOIN items i ON i.id = o.target_item_id
     LEFT JOIN creatures c ON c.id = o.target_creature_id
+    LEFT JOIN world_objects wo ON wo.id = o.target_world_object_id
     LEFT JOIN quest_rewards r ON r.quest_id = q.id
     WHERE pq.player_id=?
     ORDER BY FIELD(pq.status,'active','completed','claimed','abandoned','expired') ASC,
