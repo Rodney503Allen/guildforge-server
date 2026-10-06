@@ -15,6 +15,7 @@ import {
 } from "./services/tradeService";
 import {
   publishTradeChanged,
+  publishTradeRequest,
   publishTradeRequestsChanged,
   publishTradeCompleted,
   publishTradeCancelled,
@@ -95,6 +96,17 @@ router.post(
       );
 
       publishTradeChanged(trade);
+
+      publishTradeRequest(
+        recipientPlayerId,
+        {
+          tradeId: Number(trade.id),
+          initiatorPlayerId,
+          initiatorName:
+            trade.initiator?.name || undefined,
+        },
+      );
+
       publishTradeRequestsChanged(recipientPlayerId);
 
       return res.json({

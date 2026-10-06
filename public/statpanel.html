@@ -137,6 +137,30 @@
 
       <span>Audio</span>
     </button>
+    <button
+      id="world-chat-toggle"
+      class="nav-action-btn gf-world-chat-nav-btn"
+      type="button"
+      aria-controls="world-chat-drawer"
+      aria-expanded="false"
+      aria-label="Open World Chat"
+    >
+      <span class="nav-action-icon gf-world-chat-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" role="img">
+          <path d="M8 10h32v22H22l-9 7v-7H8z"></path>
+          <path d="M15 18h18"></path>
+          <path d="M15 24h13"></path>
+        </svg>
+      </span>
+
+      <span>World Chat</span>
+
+      <span
+        id="world-chat-unread"
+        class="gf-world-chat-unread"
+        hidden
+      >0</span>
+    </button>
   </div>
 
   <div class="statpanel-utilities">
@@ -146,6 +170,39 @@
   </div>
 </nav>
 </header>
+<div
+  id="world-chat-drawer"
+  class="gf-world-chat-drawer"
+  aria-hidden="true"
+>
+  <header class="gf-world-chat-header">
+    <div class="gf-world-chat-heading">
+      <span class="gf-world-chat-kicker">Guildforge</span>
+      <h2 class="gf-world-chat-title">World Chat</h2>
+    </div>
+    <button id="world-chat-close" class="gf-world-chat-close" type="button" aria-label="Close World Chat">×</button>
+  </header>
+
+  <div id="world-chat-drawer-log" class="gf-world-chat-log" aria-live="polite"></div>
+  <div id="world-chat-drawer-pending" class="gf-world-chat-pending" hidden></div>
+
+  <div class="gf-world-chat-composer">
+    <button id="world-chat-drawer-link" class="gf-world-chat-link" type="button" title="Link an item" aria-label="Link an item">🔗</button>
+    <input id="world-chat-drawer-input" class="gf-world-chat-input" type="text" maxlength="240" autocomplete="off" placeholder="Speak to the world…" aria-label="World Chat message">
+    <button id="world-chat-drawer-send" class="gf-world-chat-send" type="button">Send</button>
+  </div>
+</div>
+
+<div id="world-chat-drawer-picker" class="gf-world-chat-picker" hidden>
+  <section class="gf-world-chat-picker-panel" role="dialog" aria-modal="true" aria-labelledby="world-chat-picker-title">
+    <header class="gf-world-chat-picker-header">
+      <h3 id="world-chat-picker-title">Link an Item</h3>
+      <button id="world-chat-drawer-picker-close" class="gf-world-chat-picker-close" type="button" aria-label="Close item picker">×</button>
+    </header>
+    <div id="world-chat-drawer-picker-list" class="gf-world-chat-picker-list"></div>
+  </section>
+</div>
+
 <div
   id="audio-settings-modal"
   class="gf-audio-modal"

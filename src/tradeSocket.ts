@@ -173,6 +173,37 @@ export function publishTradeChanged(
   }
 }
 
+export function publishTradeRequest(
+  recipientPlayerId: number,
+  payload: {
+    tradeId: number;
+    initiatorPlayerId: number;
+    initiatorName?: string;
+  },
+) {
+  if (
+    !io ||
+    !Number.isInteger(recipientPlayerId) ||
+    recipientPlayerId <= 0
+  ) {
+    return;
+  }
+
+  io
+    .to(playerRoom(recipientPlayerId))
+    .emit(
+      "trade:request",
+      {
+        tradeId: Number(payload.tradeId),
+        initiatorPlayerId:
+          Number(payload.initiatorPlayerId),
+        initiatorName:
+          payload.initiatorName || undefined,
+      },
+    );
+}
+
+
 export function publishTradeRequestsChanged(
   playerId: number,
 ) {

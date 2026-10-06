@@ -47,6 +47,7 @@ import {
   deleteExpiredHavenReports
 } from "./services/havenReportService";
 import tutorialRoutes from "./tutorial.routes";
+import playerCardRoutes from "./playerCard.routes";
 
 const app = express();
 const server = createServer(app);
@@ -169,6 +170,7 @@ app.use("/api/dungeon-combat",dungeonCombatRoutes);
 app.use("/", dungeonPageRoutes);
 app.use(worldEventRoutes);
 app.use(tutorialRoutes);
+app.use("/api", playerCardRoutes);
 
 // =======================
 // MAIN PAGE

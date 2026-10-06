@@ -1327,6 +1327,50 @@ state.socket.on("trade:changed", event => {
     });
   }
 
+  /*
+   * The global social-request toast accepts the request through
+   * the same API as the Tavern request list, then hands the
+   * authoritative trade object back to this page.
+   *
+   * Reuse Tavern's existing trade-window flow so accepting from
+   * a toast behaves exactly like accepting from the request modal.
+   */
+  window.addEventListener(
+    "guildforge:trade-request-accepted",
+    async event => {
+      const trade =
+        event?.detail?.trade;
+
+      if (!trade) {
+        return;
+      }
+
+      try {
+        setTrade(trade);
+
+        closeModal(el.searchModal);
+        showModal(el.windowModal);
+
+        await refreshInventory();
+        renderTrade();
+        refreshRequests();
+
+        setNotice(el.windowNotice);
+      } catch (error) {
+        console.error(
+          "Could not open accepted trade:",
+          error,
+        );
+
+        setNotice(
+          el.windowNotice,
+          error?.message ||
+            "Unable to open the trade window.",
+        );
+      }
+    },
+  );
+
   el.table?.addEventListener("click", () => {
     setNotice(el.searchNotice);
     showModal(el.searchModal);

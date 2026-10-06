@@ -27,4 +27,6 @@ router.get("/tavern/:townId/rumor", async (req, res) => {
   }
 });
 
+
+
 export default router;

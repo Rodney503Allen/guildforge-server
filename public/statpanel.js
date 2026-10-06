@@ -60,6 +60,34 @@ loadGuildforgeStylesheetOnce(
   "guildforge-audio-settings-css"
 );
 
+loadGuildforgeStylesheetOnce(
+  "/worldChatDrawer.css",
+  "guildforge-world-chat-drawer-css"
+);
+
+// =======================
+// GLOBAL PLAYER CARDS
+// =======================
+// Player Cards are a shared social UI used by Tavern, World,
+// Party, Guild, and any future screen that exposes a player ID.
+
+loadGuildforgeStylesheetOnce(
+  "/playerCard.css",
+  "guildforge-player-card-css"
+);
+
+window.GFPlayerCardReady = loadGuildforgeScriptOnce(
+  "/playerCard.js",
+  "guildforge-player-card-js"
+).catch(err => {
+  console.error(
+    "Guildforge Player Card bootstrap failed:",
+    err
+  );
+
+  return null;
+});
+
 // =======================
 // GLOBAL REFERENCE MODALS
 // Bestiary + Quest Log
@@ -886,6 +914,16 @@ function loadHUD() {
     })
     .then(html => {
       root.innerHTML = html;
+
+      loadGuildforgeScriptOnce(
+        "/worldChatDrawer.js",
+        "guildforge-world-chat-drawer-js"
+      ).catch(err => {
+        console.error(
+          "World Chat drawer bootstrap failed:",
+          err
+        );
+      });
 
       initializeAudioSettingsModal()
         .catch(err => {

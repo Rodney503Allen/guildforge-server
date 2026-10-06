@@ -13,6 +13,10 @@ import { advanceHuntObjective } from "./huntService";
 import { publishHuntReadyCheck } from "./huntSocket";
 import { getHuntReadyCheck } from "./services/huntReadyCheckService";
 import { advanceTutorial, TutorialStep } from "./services/tutorialService";
+import {
+  getOnlinePlayerIds,
+  publishWorldPlayerMoved,
+} from "./socketServer";
 
 
 const router = express.Router();
@@ -29,6 +33,158 @@ const ENCOUNTER_GAP_STEPS = 2;     // prevents constant back-to-back
 function normalizeSpritePath(src?: string | null) {
   if (!src) return null;
   return src.startsWith("/") ? src : `/${src}`;
+}
+
+
+async function getWorldPartyMemberIds(
+  playerId: number
+) {
+  const [rows]: any =
+    await db.query(
+      `
+        SELECT DISTINCT
+          other_pm.player_id
+
+        FROM party_members self_pm
+
+        JOIN party_members other_pm
+          ON other_pm.party_id =
+             self_pm.party_id
+
+        WHERE self_pm.player_id = ?
+      `,
+      [playerId]
+    );
+
+  return (rows || [])
+    .map(
+      (row: any) =>
+        Number(
+          row.player_id
+        )
+    )
+    .filter(
+      (memberId: number) =>
+        Number.isInteger(
+          memberId
+        ) &&
+        memberId > 0
+    );
+}
+
+
+async function getNearbyWorldPlayers(
+  viewerPlayerId: number,
+  centerX: number,
+  centerY: number,
+  radius = 5
+) {
+  const [rows]: any =
+    await db.query(
+      `
+        SELECT
+          p.id,
+          p.name,
+          p.level,
+          p.map_x,
+          p.map_y,
+
+          CASE
+            WHEN viewer_pm.party_id IS NOT NULL
+             AND other_pm.party_id = viewer_pm.party_id
+            THEN 1
+            ELSE 0
+          END AS is_party_member
+
+        FROM players p
+
+        LEFT JOIN party_members viewer_pm
+          ON viewer_pm.player_id = ?
+
+        LEFT JOIN party_members other_pm
+          ON other_pm.player_id = p.id
+
+        WHERE p.id <> ?
+          AND p.map_x BETWEEN ? AND ?
+          AND p.map_y BETWEEN ? AND ?
+
+        ORDER BY
+          is_party_member DESC,
+          p.name ASC
+      `,
+      [
+        viewerPlayerId,
+        viewerPlayerId,
+        centerX - radius,
+        centerX + radius,
+        centerY - radius,
+        centerY + radius
+      ]
+    );
+
+  const onlinePlayerIds =
+    getOnlinePlayerIds();
+
+  /*
+   * A player should only appear once even if old party membership rows exist.
+   * Prefer the party-marked copy when duplicates are encountered.
+   */
+  const byPlayerId =
+    new Map<number, any>();
+
+  for (const row of rows || []) {
+    const playerId =
+      Number(row.id);
+
+    if (
+      !Number.isInteger(playerId) ||
+      playerId <= 0 ||
+      !onlinePlayerIds.has(
+        playerId
+      )
+    ) {
+      continue;
+    }
+
+    const candidate = {
+      id: playerId,
+      name: String(
+        row.name ||
+        "Adventurer"
+      ),
+      level: Math.max(
+        1,
+        Number(row.level) || 1
+      ),
+      map_x:
+        Number(row.map_x),
+      map_y:
+        Number(row.map_y),
+      isPartyMember:
+        Number(
+          row.is_party_member
+        ) === 1
+    };
+
+    const existing =
+      byPlayerId.get(
+        playerId
+      );
+
+    if (
+      !existing ||
+      candidate.isPartyMember
+    ) {
+      byPlayerId.set(
+        playerId,
+        candidate
+      );
+    }
+  }
+
+  return Array.from(
+    byPlayerId.values()
+  );
 }
 
 function buildWorldObjectMap(rows: any[]) {
@@ -2236,7 +2392,12 @@ router.get("/world/move/:dir", async (req, res) => {
   }
 const [[player]]: any = await db.query(
   `
-  SELECT map_x, map_y, level, steps_since_encounter
+  SELECT
+    name,
+    map_x,
+    map_y,
+    level,
+    steps_since_encounter
   FROM players
   WHERE id=?
   LIMIT 1
@@ -2427,6 +2588,27 @@ try {
     );
 
   await movementConnection.commit();
+
+  const movingPlayerPartyMemberIds =
+    await getWorldPartyMemberIds(
+      Number(pid)
+    );
+
+  publishWorldPlayerMoved({
+    playerId: Number(pid),
+    name: String(
+      player.name ||
+      "Adventurer"
+    ),
+    level: Math.max(
+      1,
+      Number(player.level) || 1
+    ),
+    x: newX,
+    y: newY,
+    partyMemberIds:
+      movingPlayerPartyMemberIds
+  });
 
   if (
     Number(
@@ -2808,6 +2990,14 @@ ORDER BY z_index ASC, id ASC
       AND y BETWEEN ? AND ?
   `, [minX, maxX, minY, maxY]);
 
+  const nearbyPlayers =
+    await getNearbyWorldPlayers(
+      Number(pid),
+      newX,
+      newY,
+      5
+    );
+
   // =======================
   // BUNDLE: nearby-objects data
   // =======================
@@ -2928,6 +3118,7 @@ world: {
   tiles,
   worldObjects,
   resourceNodes,
+  nearbyPlayers,
 
   huntClues: nearbyHuntClues,
   huntTargets,
@@ -3400,6 +3591,14 @@ router.get("/world/partial", async (req, res) => {
       ]
     );
 
+  const nearbyPlayers =
+    await getNearbyWorldPlayers(
+      Number(pid),
+      px,
+      py,
+      5
+    );
+
 
   /* =========================================
      RESOURCE NODES
@@ -3580,6 +3779,7 @@ const worldEventMapSpawns =
     tiles,
     worldObjects,
     resourceNodes,
+    nearbyPlayers,
     huntClues,
     huntTargets,
     worldEventInteractSpawns,

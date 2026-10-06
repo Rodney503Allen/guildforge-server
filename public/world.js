@@ -28,6 +28,11 @@ let dungeonReadyTransitioning = false;
 let dungeonSocket = null;
 let dungeonSocketBound = false;
 
+let worldPresenceSocket = null;
+let worldPresenceSocketBound = false;
+let nearbyWorldPlayers = new Map();
+let currentWorldPlayerPosition = null;
+
 /*
  * Once a ready check resolves, never allow an older pending snapshot
  * for that same check to render again. This protects against an
@@ -1340,6 +1345,7 @@ async function initWorldPage() {
    * party ready checks can appear as soon as possible.
    */
   void connectDungeonSocket();
+  void connectWorldPresenceSocket();
 
   try {
     const res = await fetch("/combat/state", {
@@ -1892,38 +1898,47 @@ function professionActionLabel(professionName) {
 }
 
 function playGatheringSound(professionName) {
-  const keyByProfession = {
-    mining: "gathering_mining",
-    herbalism: "gathering_herbalism",
-    woodcutting: "gathering_woodcutting"
-  };
+  let file;
 
-  const key =
-    keyByProfession[String(professionName || "").toLowerCase()];
+  switch (String(professionName || "").toLowerCase()) {
+    case "mining":
+      file = "/sounds/gathering/mining2.ogg";
+      break;
 
-  if (!key || !window.GFAudio?.playLoopingSfx) {
-    return null;
+    case "herbalism":
+      file = "/sounds/gathering/herbalism2.ogg";
+      break;
+
+    case "woodcutting":
+      file = "/sounds/gathering/woodcutting2.ogg";
+      break;
+
+    default:
+      return null;
   }
 
-  return window.GFAudio.playLoopingSfx(key, {
-    volume: 0.5
-  });
+
+
+  const audio = new Audio(file);
+  audio.volume = 0.5;
+  audio.loop = true;
+
+  audio.play().catch(() => {});
+
+  return audio;
 }
 
 function playGatherCompleteSound() {
-  window.GFAudio?.playSfx(
-    "gathering_collected",
-    { volume: 0.6 }
-  );
+  const audio = new Audio("/sounds/gathering/collected.ogg");
+  audio.volume = 0.6;
+  audio.play().catch(() => {});
 }
 
 function playProfessionLevelSound() {
-  window.GFAudio?.playSfx(
-    "profession_level",
-    { volume: 0.65 }
-  );
+  const audio = new Audio("/sounds/profession-level.ogg");
+  audio.volume = 0.65;
+  audio.play().catch(() => {});
 }
-
 function showGatheringModal({ professionName, nodeName, durationMs }) {
   const modal = document.getElementById("gatheringModal");
   const icon = document.getElementById("gatheringModalIcon");
@@ -2278,10 +2293,29 @@ function renderWorldFromData({
   guildMap,
   worldObjects,
   resourceNodes,
+  nearbyPlayers = [],
   huntClues = [],
   huntTargets = [],
   worldEventMapSpawns = []
 }) {
+  currentWorldPlayerPosition = {
+    x: Number(player?.map_x),
+    y: Number(player?.map_y)
+  };
+
+  nearbyWorldPlayers =
+    new Map(
+      (nearbyPlayers || [])
+        .map(otherPlayer => [
+          Number(otherPlayer.id),
+          otherPlayer
+        ])
+        .filter(([playerId]) =>
+          Number.isInteger(playerId) &&
+          playerId > 0
+        )
+    );
+
   const tileMap = {};
 
   for (const t of tiles || []) {
@@ -2618,6 +2652,8 @@ function renderWorldFromData({
 
   grid.innerHTML = html.join("");
 
+  renderNearbyWorldPlayers();
+
   // Draw every road cell as one continuous world-level layer. Because the
   // canvas lives inside #Grid it moves through the exact same camera transform
   // as the terrain during continuous WASD travel.
@@ -2681,6 +2717,445 @@ function renderWorldFromData({
   }
 
   renderCurrentResourcePanel(player, resourceNodes || []);
+}
+
+
+function isWorldCoordinateInLoadedBuffer(x, y) {
+  if (
+    !currentWorldPlayerPosition ||
+    !Number.isFinite(Number(x)) ||
+    !Number.isFinite(Number(y))
+  ) {
+    return false;
+  }
+
+  return (
+    Math.abs(
+      Number(x) -
+      Number(
+        currentWorldPlayerPosition.x
+      )
+    ) <= WORLD_BUFFER_RADIUS &&
+    Math.abs(
+      Number(y) -
+      Number(
+        currentWorldPlayerPosition.y
+      )
+    ) <= WORLD_BUFFER_RADIUS
+  );
+}
+
+function createNearbyWorldPlayerMarker(otherPlayer) {
+  const marker =
+    document.createElement(
+      "div"
+    );
+
+  marker.className =
+    "world-nearby-player";
+
+  if (
+    otherPlayer.isPartyMember
+  ) {
+    marker.classList.add(
+      "is-party-member"
+    );
+  }
+
+  marker.dataset.playerId =
+    String(
+      otherPlayer.id
+    );
+
+  // Other players are social interaction targets. Keep our own centered
+  // player marker separate/non-interactive, but make nearby players fully
+  // accessible from mouse, touch, and keyboard.
+  marker.setAttribute(
+    "role",
+    "button"
+  );
+
+  marker.setAttribute(
+    "tabindex",
+    "0"
+  );
+
+  marker.setAttribute(
+    "aria-label",
+    `View ${otherPlayer.name}'s player card, level ${otherPlayer.level}`
+  );
+
+  marker.title =
+    `View ${otherPlayer.name}'s player card`;
+
+  const openPlayerCard = () => {
+    const playerId =
+      Number(
+        marker.dataset.playerId
+      );
+
+    if (
+      !Number.isInteger(playerId) ||
+      playerId <= 0
+    ) {
+      return;
+    }
+
+    if (
+      window.GFPlayerCard &&
+      typeof window.GFPlayerCard.open ===
+        "function"
+    ) {
+      window.GFPlayerCard.open(
+        playerId
+      );
+      return;
+    }
+
+    console.warn(
+      "GFPlayerCard is unavailable on the World page."
+    );
+  };
+
+  marker.addEventListener(
+    "click",
+    event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openPlayerCard();
+    }
+  );
+
+  marker.addEventListener(
+    "keydown",
+    event => {
+      if (
+        event.key !== "Enter" &&
+        event.key !== " "
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      openPlayerCard();
+    }
+  );
+
+  const name =
+    document.createElement(
+      "span"
+    );
+
+  name.className =
+    "world-nearby-player__name";
+
+  name.textContent =
+    String(
+      otherPlayer.name ||
+      "Adventurer"
+    );
+
+  const shadow =
+    document.createElement(
+      "span"
+    );
+
+  shadow.className =
+    "world-nearby-player__shadow";
+
+  const body =
+    document.createElement(
+      "span"
+    );
+
+  body.className =
+    "world-nearby-player__body";
+
+  body.textContent =
+    "◆";
+
+  marker.append(
+    name,
+    shadow,
+    body
+  );
+
+  return marker;
+}
+
+function renderNearbyWorldPlayer(otherPlayer) {
+  const playerId =
+    Number(
+      otherPlayer?.id
+    );
+
+  if (
+    !Number.isInteger(playerId) ||
+    playerId <= 0 ||
+    playerId ===
+      Number(
+        window.__PLAYER_ID__
+      )
+  ) {
+    return;
+  }
+
+  const existing =
+    document.querySelector(
+      `.world-nearby-player[data-player-id="${playerId}"]`
+    );
+
+  existing?.remove();
+
+  const x =
+    Number(
+      otherPlayer.map_x ??
+      otherPlayer.x
+    );
+
+  const y =
+    Number(
+      otherPlayer.map_y ??
+      otherPlayer.y
+    );
+
+  if (
+    !isWorldCoordinateInLoadedBuffer(
+      x,
+      y
+    )
+  ) {
+    nearbyWorldPlayers.delete(
+      playerId
+    );
+    return;
+  }
+
+  const tile =
+    document.querySelector(
+      `#Grid .tile[data-x="${x}"][data-y="${y}"]`
+    );
+
+  if (!tile) {
+    return;
+  }
+
+  const normalized = {
+    ...otherPlayer,
+    id: playerId,
+    map_x: x,
+    map_y: y,
+    name:
+      String(
+        otherPlayer.name ||
+        "Adventurer"
+      ),
+    level:
+      Math.max(
+        1,
+        Number(
+          otherPlayer.level
+        ) || 1
+      ),
+    isPartyMember:
+      Boolean(
+        otherPlayer.isPartyMember
+      )
+  };
+
+  nearbyWorldPlayers.set(
+    playerId,
+    normalized
+  );
+
+  tile.appendChild(
+    createNearbyWorldPlayerMarker(
+      normalized
+    )
+  );
+}
+
+function renderNearbyWorldPlayers() {
+  document
+    .querySelectorAll(
+      ".world-nearby-player"
+    )
+    .forEach(marker =>
+      marker.remove()
+    );
+
+  for (
+    const otherPlayer of
+    nearbyWorldPlayers.values()
+  ) {
+    renderNearbyWorldPlayer(
+      otherPlayer
+    );
+  }
+}
+
+async function connectWorldPresenceSocket() {
+  if (
+    worldPresenceSocketBound &&
+    worldPresenceSocket
+  ) {
+    return worldPresenceSocket;
+  }
+
+  try {
+    let socket =
+      window.GFSocket;
+
+    if (
+      !socket &&
+      window.GFSocketReady
+    ) {
+      socket =
+        await window.GFSocketReady;
+    }
+
+    if (
+      !socket ||
+      typeof socket.on !==
+        "function"
+    ) {
+      console.warn(
+        "World presence websocket is unavailable."
+      );
+
+      return null;
+    }
+
+    worldPresenceSocket =
+      socket;
+
+    if (
+      !worldPresenceSocketBound
+    ) {
+      worldPresenceSocketBound =
+        true;
+
+      socket.on(
+        "world:player-presence",
+        payload => {
+          const playerId =
+            Number(
+              payload?.playerId
+            );
+
+          if (
+            !Number.isInteger(
+              playerId
+            ) ||
+            playerId <= 0 ||
+            playerId ===
+              Number(
+                window.__PLAYER_ID__
+              )
+          ) {
+            return;
+          }
+
+          if (
+            payload?.online === false
+          ) {
+            nearbyWorldPlayers.delete(
+              playerId
+            );
+
+            document
+              .querySelector(
+                `.world-nearby-player[data-player-id="${playerId}"]`
+              )
+              ?.remove();
+
+            return;
+          }
+
+          /*
+           * A newly connected player may already be standing inside our
+           * current 11x11 buffer. Refresh once so their location and party
+           * relationship come from the authoritative nearby-player query.
+           */
+          if (
+            payload?.online === true
+          ) {
+            void refreshWorld();
+          }
+        }
+      );
+
+      socket.on(
+        "world:player-moved",
+        payload => {
+          const playerId =
+            Number(
+              payload?.playerId
+            );
+
+          if (
+            !Number.isInteger(
+              playerId
+            ) ||
+            playerId <= 0 ||
+            playerId ===
+              Number(
+                window.__PLAYER_ID__
+              )
+          ) {
+            return;
+          }
+
+          const existing =
+            nearbyWorldPlayers.get(
+              playerId
+            );
+
+          renderNearbyWorldPlayer({
+            id: playerId,
+            name:
+              payload?.name ??
+              existing?.name ??
+              "Adventurer",
+            level:
+              payload?.level ??
+              existing?.level ??
+              1,
+            map_x:
+              Number(
+                payload?.x
+              ),
+            map_y:
+              Number(
+                payload?.y
+              ),
+            isPartyMember:
+              Array.isArray(
+                payload?.partyMemberIds
+              )
+                ? payload.partyMemberIds.includes(
+                    Number(
+                      window.__PLAYER_ID__
+                    )
+                  )
+                : Boolean(
+                    existing?.isPartyMember
+                  )
+          });
+        }
+      );
+    }
+
+    return socket;
+  } catch (err) {
+    console.warn(
+      "Unable to bind World presence websocket:",
+      err
+    );
+
+    return null;
+  }
 }
 
 // Initial page load — still fetches /world/partial directly
@@ -5294,7 +5769,9 @@ async function gatherResourceNode(spawnedNodeId) {
     showErrorToast("Gathering failed.");
   } finally {
     if (sound) {
-      window.GFAudio?.stopLoopingSfx(sound);
+      sound.pause();
+      sound.currentTime = 0;
+      sound.loop = false;
     }
 
     hideGatheringModal();

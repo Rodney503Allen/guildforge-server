@@ -8271,3 +8271,157 @@ a[href="/town"].btn{
     border-radius: 999px;
   }
 }
+
+
+/* ==========================================================
+   WORLD PAGE — NEARBY PLAYER PRESENCE
+   Other adventurers live inside their logical terrain tile,
+   so the existing 11x11 camera animation moves them naturally.
+   ========================================================== */
+
+.tile{
+  position:relative;
+}
+
+.world-nearby-player{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:0;
+  height:0;
+  z-index:60;
+  pointer-events:none;
+  user-select:none;
+  opacity:.78;
+}
+
+.world-nearby-player__body{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:22px;
+  height:22px;
+  transform:translate(-50%, -50%);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  box-sizing:border-box;
+  border-radius:50%;
+  border:2px solid rgba(191,198,210,.82);
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255,255,255,.16), transparent 24%),
+    linear-gradient(180deg, rgba(82,91,105,.96), rgba(31,37,47,.98));
+  color:rgba(230,235,241,.90);
+  font-size:12px;
+  line-height:1;
+  text-shadow:0 1px 2px rgba(0,0,0,.95);
+  box-shadow:
+    0 2px 8px rgba(0,0,0,.72),
+    0 0 0 1px rgba(0,0,0,.5);
+}
+
+.world-nearby-player__shadow{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:18px;
+  height:6px;
+  transform:
+    translate(-50%, -50%)
+    translateY(8px);
+  border-radius:50%;
+  background:rgba(0,0,0,.36);
+  filter:blur(1.5px);
+}
+
+.world-nearby-player__name{
+  position:absolute;
+  left:50%;
+  bottom:17px;
+  transform:translateX(-50%);
+  max-width:calc(var(--tile) * .92);
+  padding:2px 5px;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  border-radius:4px;
+  background:rgba(5,8,12,.76);
+  border:1px solid rgba(156,165,179,.24);
+  color:rgba(231,235,241,.84);
+  font-size:9px;
+  font-weight:700;
+  line-height:1.15;
+  text-shadow:0 1px 2px rgba(0,0,0,.95);
+  box-shadow:0 2px 5px rgba(0,0,0,.32);
+}
+
+/* Party members stay visually prominent and easy to follow. */
+.world-nearby-player.is-party-member{
+  opacity:1;
+  z-index:70;
+}
+
+.world-nearby-player.is-party-member .world-nearby-player__body{
+  border-color:rgba(104,181,255,.98);
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255,255,255,.22), transparent 24%),
+    linear-gradient(180deg, rgba(48,119,181,.98), rgba(24,57,103,.98));
+  color:#dff2ff;
+  box-shadow:
+    0 2px 8px rgba(0,0,0,.72),
+    0 0 0 1px rgba(0,0,0,.52),
+    0 0 11px rgba(76,164,255,.52);
+}
+
+.world-nearby-player.is-party-member .world-nearby-player__name{
+  border-color:rgba(104,181,255,.48);
+  color:#dff2ff;
+  background:rgba(10,31,52,.86);
+}
+
+
+/* ==========================================================
+   WORLD PLAYER CARDS — CLICKABLE NEARBY PLAYERS
+   Other players open the shared GFPlayerCard social card.
+   The local centered player marker remains non-interactive.
+   ========================================================== */
+
+.world-nearby-player{
+  cursor:pointer;
+  pointer-events:auto;
+  outline:none;
+  transition:
+    filter .14s ease,
+    transform .14s ease;
+}
+
+.world-nearby-player:hover,
+.world-nearby-player:focus-visible{
+  filter:brightness(1.18);
+}
+
+.world-nearby-player:hover .world-nearby-player__body,
+.world-nearby-player:focus-visible .world-nearby-player__body{
+  transform:translate(-50%, -50%) scale(1.12);
+}
+
+.world-nearby-player:hover .world-nearby-player__name,
+.world-nearby-player:focus-visible .world-nearby-player__name{
+  opacity:1;
+}
+
+.world-nearby-player:focus-visible::after{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:34px;
+  height:34px;
+  transform:translate(-50%, -50%);
+  border-radius:50%;
+  border:1px solid rgba(201,184,154,.82);
+  box-shadow:
+    0 0 0 2px rgba(0,0,0,.68),
+    0 0 16px rgba(201,184,154,.28);
+  pointer-events:none;
+}

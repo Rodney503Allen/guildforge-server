@@ -24,6 +24,95 @@ export function playerRoom(playerId: number) {
   return `player:${playerId}`;
 }
 
+
+/*
+ * Lightweight world-presence broadcast.
+ *
+ * Movement remains authoritative in world.routes.ts. This event only tells
+ * connected World clients that an authenticated player successfully moved.
+ * Clients decide whether the player falls inside their current 11x11 buffer.
+ */
+export function isPlayerOnline(
+  playerId: number
+) {
+  if (
+    !io ||
+    !Number.isInteger(playerId) ||
+    playerId <= 0
+  ) {
+    return false;
+  }
+
+  const room =
+    io.sockets.adapter.rooms.get(
+      playerRoom(playerId)
+    );
+
+  return Boolean(
+    room &&
+    room.size > 0
+  );
+}
+
+export function getOnlinePlayerIds() {
+  if (!io) {
+    return new Set<number>();
+  }
+
+  const online =
+    new Set<number>();
+
+  for (
+    const [
+      roomName,
+      sockets
+    ] of
+    io.sockets.adapter.rooms
+  ) {
+    if (
+      !roomName.startsWith(
+        "player:"
+      ) ||
+      sockets.size <= 0
+    ) {
+      continue;
+    }
+
+    const playerId =
+      Number(
+        roomName.slice(
+          "player:".length
+        )
+      );
+
+    if (
+      Number.isInteger(
+        playerId
+      ) &&
+      playerId > 0
+    ) {
+      online.add(
+        playerId
+      );
+    }
+  }
+
+  return online;
+}
+
+export function publishWorldPlayerMoved(payload: {
+  playerId: number;
+  name: string;
+  level: number;
+  x: number;
+  y: number;
+  partyMemberIds?: number[];
+}) {
+  if (!io) return;
+
+  io.emit("world:player-moved", payload);
+}
+
 export function initializeSocketServer(
   server: HttpServer,
   sessionMiddleware: any,
@@ -107,6 +196,18 @@ export function initializeSocketServer(
     // their own private socket room.
     socket.join(playerRoom(playerId));
 
+    /*
+     * Presence is based on authenticated socket connectivity, not stale
+     * database coordinates. A player with at least one connected tab is online.
+     */
+    io!.emit(
+      "world:player-presence",
+      {
+        playerId,
+        online: true,
+      },
+    );
+
     console.log(
       "Socket connected:",
       socket.id,
@@ -123,6 +224,21 @@ export function initializeSocketServer(
     registerDungeonSocket(io!, socket);
 
     socket.on("disconnect", reason => {
+      /*
+       * Socket.IO has already removed this socket from its rooms when the
+       * disconnect event fires. Only announce offline when no other tab/socket
+       * for this authenticated player remains connected.
+       */
+      if (!isPlayerOnline(playerId)) {
+        io!.emit(
+          "world:player-presence",
+          {
+            playerId,
+            online: false,
+          },
+        );
+      }
+
       console.log(
         "Socket disconnected:",
         socket.id,
