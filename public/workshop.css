@@ -914,3 +914,66 @@ body::before{
     justify-content:flex-start;
   }
 }
+
+/* =========================================
+   GUILDFORGE MAIN PAGE BACKGROUND
+   Matches the Town page background treatment.
+========================================= */
+
+body{
+  position:relative;
+}
+
+body::after{
+  content:"";
+  position:fixed;
+  z-index:-1;
+  top:64px;
+  left:50%;
+  width:92vw;
+  max-width:2200px;
+  height:min(760px, 72vh);
+  transform:translateX(-50%);
+  pointer-events:none;
+  border-radius:34px;
+  background:
+    linear-gradient(180deg,
+      rgba(5,7,10,.08) 0%,
+      rgba(5,7,10,.12) 45%,
+      rgba(5,7,10,.72) 82%,
+      var(--bg0) 100%),
+    linear-gradient(90deg,
+      rgba(5,7,10,.55) 0%,
+      transparent 10%,
+      transparent 90%,
+      rgba(5,7,10,.55) 100%),
+    url("/images/backgrounds/background_main.webp") center top / cover no-repeat;
+  box-shadow:
+    inset 0 -90px 110px var(--bg0),
+    0 24px 80px rgba(0,0,0,.48);
+  opacity:.82;
+
+  -webkit-mask-image:
+    linear-gradient(90deg,
+      transparent 0%,
+      black 7%,
+      black 93%,
+      transparent 100%),
+    linear-gradient(180deg,
+      black 0%,
+      black 68%,
+      transparent 100%);
+  -webkit-mask-composite:source-in;
+
+  mask-image:
+    linear-gradient(90deg,
+      transparent 0%,
+      black 7%,
+      black 93%,
+      transparent 100%),
+    linear-gradient(180deg,
+      black 0%,
+      black 68%,
+      transparent 100%);
+  mask-composite:intersect;
+}
