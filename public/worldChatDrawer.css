@@ -640,3 +640,51 @@ button.gfWorldChatName:hover {
     transition: none !important;
   }
 }
+
+
+/* =========================================================
+   WORLD CHAT ITEM PICKER — EQUIPPED PRIORITY + TOOLTIP LAYER
+========================================================= */
+
+/*
+  Global Guildforge tooltips normally sit at z-index 100000.
+  The World Chat item picker is intentionally above that, so
+  lift tooltips above the picker whenever this stylesheet is loaded.
+*/
+.gf-tooltip {
+  z-index: 1000010 !important;
+}
+
+.gfWorldChatPickerItem.is-equipped {
+  box-shadow:
+    inset 0 0 0 1px rgba(230, 197, 122, .18),
+    0 0 10px rgba(230, 197, 122, .06);
+}
+
+.gfWorldChatPickerEquipped {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  z-index: 3;
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  color: #17130b;
+  font-family: Georgia, serif;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: none;
+  border: 1px solid #f0d99a;
+  border-radius: 2px;
+  background:
+    linear-gradient(
+      180deg,
+      #f1d58b,
+      #b88b3f
+    );
+  box-shadow:
+    0 2px 5px rgba(0, 0, 0, .72),
+    0 0 7px rgba(230, 197, 122, .2);
+}

@@ -66,6 +66,31 @@ loadGuildforgeStylesheetOnce(
 );
 
 // =======================
+// GLOBAL TOOLTIP SYSTEM
+// =======================
+// The statpanel exists across Guildforge, so it owns the shared tooltip
+// bootstrap too. This guarantees World Chat item links/pickers work on
+// pages such as Town and Workshop even when those pages do not load
+// tooltip assets themselves.
+
+loadGuildforgeStylesheetOnce(
+  "/ui/tooltip.css",
+  "guildforge-global-tooltip-css"
+);
+
+window.GFTooltipReady = loadGuildforgeScriptOnce(
+  "/ui/tooltip.js",
+  "guildforge-global-tooltip-js"
+).catch(err => {
+  console.error(
+    "Guildforge tooltip bootstrap failed:",
+    err
+  );
+
+  return null;
+});
+
+// =======================
 // GLOBAL PLAYER CARDS
 // =======================
 // Player Cards are a shared social UI used by Tavern, World,

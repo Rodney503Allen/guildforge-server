@@ -33,7 +33,6 @@ router.get("/players/:playerId/card", async (req, res) => {
           p.name,
           p.level,
           p.pclass,
-          p.guildid,
           a.image_url AS portrait_url,
           g.name AS guild_name
 
@@ -43,8 +42,11 @@ router.get("/players/:playerId/card", async (req, res) => {
           ON a.id = p.equipped_avatar_id
           AND a.is_active = 1
 
+        LEFT JOIN guild_members gm
+          ON gm.player_id = p.id
+
         LEFT JOIN guilds g
-          ON g.id = NULLIF(p.guildid, 0)
+          ON g.id = gm.guild_id
 
         WHERE p.id = ?
 

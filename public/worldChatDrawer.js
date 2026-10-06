@@ -648,7 +648,23 @@
       return;
     }
 
-    items.forEach(item => {
+    const sortedItems = [...items].sort((a, b) => {
+      const aEquipped =
+        a?.equipped === true ||
+        Number(a?.equipped) === 1;
+
+      const bEquipped =
+        b?.equipped === true ||
+        Number(b?.equipped) === 1;
+
+      if (aEquipped !== bEquipped) {
+        return aEquipped ? -1 : 1;
+      }
+
+      return 0;
+    });
+
+    sortedItems.forEach(item => {
       const alreadyLinked =
         pendingItemLinks.some(
           linked =>
@@ -660,6 +676,10 @@
             )
         );
 
+      const isEquipped =
+        item?.equipped === true ||
+        Number(item?.equipped) === 1;
+
       const button =
         document.createElement(
           "button"
@@ -669,7 +689,7 @@
       button.className =
         `gfWorldChatPickerItem ${rarityClass(
           item.rarity
-        )}`;
+        )}${isEquipped ? " is-equipped" : ""}`;
 
       button.disabled =
         alreadyLinked;
@@ -677,8 +697,8 @@
       button.setAttribute(
         "aria-label",
         alreadyLinked
-          ? `${getItemDisplayName(item)} already linked`
-          : `Link ${getItemDisplayName(item)}`
+          ? `${getItemDisplayName(item)}${isEquipped ? ", equipped" : ""} already linked`
+          : `Link ${getItemDisplayName(item)}${isEquipped ? ", equipped" : ""}`
       );
 
       const tooltipTemplate =
@@ -708,6 +728,18 @@
 
       button.innerHTML = `
         <span class="gfWorldChatPickerIcon">
+          ${
+            isEquipped
+              ? `
+                <span
+                  class="gfWorldChatPickerEquipped"
+                  aria-hidden="true"
+                  title="Equipped"
+                >E</span>
+              `
+              : ""
+          }
+
           ${
             item.icon
               ? `
