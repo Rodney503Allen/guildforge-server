@@ -1120,7 +1120,12 @@ export async function advanceDungeonAfterRestForPlayer(
 
         SET
           current_phase = 'complete',
-          status = 'completed',
+          /*
+           * Keep the instance active while members view/claim their
+           * personal completion chests. The final member leaving the
+           * completion screen will archive the instance as completed.
+           */
+          status = 'active',
           completed_at =
             COALESCE(
               completed_at,
@@ -1134,25 +1139,14 @@ export async function advanceDungeonAfterRestForPlayer(
       ],
     );
 
-    await connection.query(
-      `
-        UPDATE dungeon_instance_members
-
-        SET
-          is_active = 0,
-          left_at =
-            COALESCE(
-              left_at,
-              NOW()
-            )
-
-        WHERE instance_id = ?
-          AND is_active = 1
-      `,
-      [
-        active.instanceId
-      ],
-    );
+    /*
+     * Do not deactivate members here.
+     *
+     * Every participant must remain attached to the completed instance
+     * long enough to receive the completion lifecycle event and view/claim
+     * their own personal chest. Each player leaves independently through
+     * the completion-leave endpoint.
+     */
 
     await connection.commit();
 
@@ -1165,7 +1159,7 @@ export async function advanceDungeonAfterRestForPlayer(
       phase:
         "complete" as const,
       status:
-        "completed" as const,
+        "active" as const,
       rewards: {
         xp:
           completionXp,

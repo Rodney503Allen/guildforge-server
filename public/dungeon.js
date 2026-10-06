@@ -4377,6 +4377,13 @@ async function renderDungeonPhasePanel(
   if (
     phase === "complete"
   ) {
+    /*
+     * Completion is a stable post-run state. Do not keep polling while
+     * the player is viewing/claiming their personal chest.
+     */
+    stopDungeonPolling();
+    stopSmoothDungeonTimers();
+
     await renderDungeonCompletePanel(
       panel
     );
@@ -4685,25 +4692,36 @@ async function submitDungeonLootChoice(
 }
 
 async function renderDungeonRestPanel(
-  panel
+  panel,
+  restOverride = null
 ) {
-  const wipeResponse =
-    await fetch(
-      "/api/dungeons/active/wipe",
-      {
-        credentials:
-          "include",
-        cache:
-          "no-store"
-      }
-    );
-
-  const wipeData =
-    await wipeResponse.json();
-
-  const wipe =
-    wipeData?.wipe ??
+  /*
+   * Socket rest snapshots bypass the HTTP rest fetch entirely. The initial
+   * render still checks wipe/rest endpoints so reconnects and page loads
+   * remain catch-up safe.
+   */
+  let wipe =
     null;
+
+  if (!restOverride) {
+    const wipeResponse =
+      await fetch(
+        "/api/dungeons/active/wipe",
+        {
+          credentials:
+            "include",
+          cache:
+            "no-store"
+        }
+      );
+
+    const wipeData =
+      await wipeResponse.json();
+
+    wipe =
+      wipeData?.wipe ??
+      null;
+  }
 
   if (wipe) {
     dungeonRestState =
@@ -4762,10 +4780,11 @@ async function renderDungeonRestPanel(
   }
 
   let rest =
-    null;
+    restOverride;
 
   try {
-    const restResponse =
+    if (!rest) {
+      const restResponse =
       await fetch(
         "/api/dungeons/active/rest",
         {
@@ -4789,9 +4808,10 @@ async function renderDungeonRestPanel(
       );
     }
 
-    rest =
-      restData.rest ??
-      null;
+      rest =
+        restData.rest ??
+        null;
+    }
 
     dungeonRestState =
       rest;
@@ -5258,22 +5278,80 @@ async function renderDungeonCompletePanel(
     ?.addEventListener(
       "click",
       async () => {
-        if (
+        const button =
           document.getElementById(
-            "dungeonModal"
-          )
-        ) {
-          closeDungeonModalView();
+            "dungeonReturnWorldBtn"
+          );
+
+        if (button) {
+          button.disabled =
+            true;
+
+          button.textContent =
+            "Returning...";
+        }
+
+        try {
+          const response =
+            await fetch(
+              "/api/dungeons/completion/leave",
+              {
+                method:
+                  "POST",
+                credentials:
+                  "include"
+              }
+            );
+
+          const data =
+            await response.json();
 
           if (
-            typeof refreshWorld ===
-            "function"
+            !response.ok ||
+            data.ok === false
           ) {
-            await refreshWorld();
+            throw new Error(
+              data.error ||
+              "Unable to leave the completed dungeon."
+            );
           }
-        } else {
-          window.location.href =
-            "/world";
+
+          if (
+            document.getElementById(
+              "dungeonModal"
+            )
+          ) {
+            closeDungeonModalView();
+
+            if (
+              typeof refreshWorld ===
+              "function"
+            ) {
+              await refreshWorld();
+            }
+          } else {
+            window.location.href =
+              "/world";
+          }
+        } catch (error) {
+          console.error(
+            "Dungeon completion leave failed:",
+            error
+          );
+
+          if (button) {
+            button.disabled =
+              false;
+
+            button.textContent =
+              "Return to World";
+          }
+
+          setDungeonText(
+            "dungeonActionStatus",
+            error?.message ||
+            "Unable to return to the world."
+          );
         }
       }
     );
@@ -5451,6 +5529,63 @@ async function connectDungeonRealtimeSocket() {
           renderDungeonCombat(
             snapshot
           );
+        }
+      );
+
+      socket.on(
+        "dungeon:rest-state",
+        payload => {
+          const incomingInstanceId =
+            Number(
+              payload?.instanceId ??
+              0
+            );
+
+          const activeInstanceId =
+            getDungeonActiveInstanceId();
+
+          if (
+            activeInstanceId &&
+            incomingInstanceId &&
+            incomingInstanceId !==
+              activeInstanceId
+          ) {
+            return;
+          }
+
+          const rest =
+            payload?.rest ??
+            null;
+
+          if (!rest) {
+            return;
+          }
+
+          dungeonRestState =
+            rest;
+
+          /*
+           * Render directly from the socket snapshot. No HTTP request is
+           * needed for each second of the countdown.
+           */
+          const panel =
+            document.getElementById(
+              "dungeonPhasePanel"
+            );
+
+          if (
+            panel &&
+            String(
+              dungeonEncounter?.phase ??
+              dungeonActive?.phase ??
+              ""
+            ) === "rest"
+          ) {
+            void renderDungeonRestPanel(
+              panel,
+              rest
+            );
+          }
         }
       );
 

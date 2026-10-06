@@ -4,6 +4,7 @@ import {
   abandonDungeon,
   createDungeonInstance,
   getActiveDungeonForPlayer,
+  leaveCompletedDungeonForPlayer,
   listAvailableDungeons,
 } from "./services/dungeonService";
 
@@ -548,6 +549,51 @@ router.post("/completion-chest/:chestId/claim", async (req: any, res) => {
     });
   }
 });
+
+
+router.post("/completion/leave", async (req: any, res) => {
+  try {
+    const playerId =
+      Number(
+        req.session.playerId
+      );
+
+    /*
+     * Leaving a completed dungeon is per-player.
+     * It must not tear the completed state away from party members who
+     * are still viewing or claiming their personal completion chest.
+     */
+    const result =
+      await leaveCompletedDungeonForPlayer(
+        playerId
+      );
+
+    publishDungeonInstanceChanged(
+      Number(result.instanceId),
+      {
+        reason: "completion-member-left",
+        instanceId:
+          Number(result.instanceId),
+        playerId,
+      },
+    );
+
+    res.json(result);
+  } catch (err: any) {
+    console.error(
+      "POST /api/dungeons/completion/leave failed:",
+      err
+    );
+
+    res.status(400).json({
+      ok: false,
+      error:
+        err?.message ||
+        "Unable to leave the completed dungeon.",
+    });
+  }
+});
+
 
 router.post("/abandon", async (req: any, res) => {
   try {

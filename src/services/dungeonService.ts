@@ -310,6 +310,139 @@ export async function createDungeonInstance(playerId: number, dungeonId: number)
   return snapshot;
 }
 
+
+export async function leaveCompletedDungeonForPlayer(
+  playerId: number,
+) {
+  const connection =
+    await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [[membership]]: any =
+      await connection.query(
+        `
+          SELECT
+            dim.instance_id,
+            dim.is_active,
+            di.current_phase,
+            di.status
+
+          FROM dungeon_instance_members dim
+
+          JOIN dungeon_instances di
+            ON di.id = dim.instance_id
+
+          WHERE dim.player_id = ?
+            AND dim.is_active = 1
+            AND di.status = 'active'
+            AND di.current_phase = 'complete'
+
+          ORDER BY dim.instance_id DESC
+
+          LIMIT 1
+
+          FOR UPDATE
+        `,
+        [playerId],
+      );
+
+    if (!membership) {
+      throw new Error(
+        "You do not have a completed dungeon to leave.",
+      );
+    }
+
+    const instanceId =
+      Number(
+        membership.instance_id
+      );
+
+    await connection.query(
+      `
+        UPDATE dungeon_instance_members
+
+        SET
+          is_active = 0,
+          left_at =
+            COALESCE(
+              left_at,
+              NOW()
+            )
+
+        WHERE instance_id = ?
+          AND player_id = ?
+          AND is_active = 1
+      `,
+      [
+        instanceId,
+        playerId,
+      ],
+    );
+
+    const [[remaining]]: any =
+      await connection.query(
+        `
+          SELECT COUNT(*) AS active_count
+
+          FROM dungeon_instance_members
+
+          WHERE instance_id = ?
+            AND is_active = 1
+        `,
+        [instanceId],
+      );
+
+    const activeCount =
+      Number(
+        remaining?.active_count ??
+        0
+      );
+
+    if (activeCount <= 0) {
+      await connection.query(
+        `
+          UPDATE dungeon_instances
+
+          SET
+            status = 'completed',
+            completed_at =
+              COALESCE(
+                completed_at,
+                NOW()
+              )
+
+          WHERE id = ?
+            AND current_phase = 'complete'
+            AND status = 'active'
+        `,
+        [instanceId],
+      );
+    }
+
+    await connection.commit();
+
+    return {
+      ok: true,
+      instanceId,
+      left: true,
+      instanceArchived:
+        activeCount <= 0,
+    };
+  } catch (err) {
+    try {
+      await connection.rollback();
+    } catch {
+      // Preserve original error.
+    }
+
+    throw err;
+  } finally {
+    connection.release();
+  }
+}
+
 export async function abandonDungeon(playerId: number) {
   const active =
     await getActiveDungeonForPlayer(

@@ -34,6 +34,10 @@ import {
   setDungeonCombatLifecyclePublisher,
 } from "./services/dungeonCombatSessionService";
 
+import {
+  getDungeonRestStateForPlayer,
+} from "./services/dungeonRestService";
+
 let io:
   SocketIOServer | null =
   null;
@@ -43,6 +47,155 @@ const readyCheckExpiryTimers =
     number,
     NodeJS.Timeout
   >();
+
+
+/*
+ * One authoritative realtime rest ticker per Dungeon instance.
+ *
+ * The rest service remains timestamp-based and catch-up safe. This ticker
+ * simply asks that service for the current authoritative snapshot once per
+ * second and broadcasts it to the instance room.
+ */
+const dungeonRestRealtimeTimers =
+  new Map<
+    number,
+    NodeJS.Timeout
+  >();
+
+async function ensureDungeonRestRealtime(
+  instanceIdRaw: number,
+) {
+  const instanceId =
+    Number(instanceIdRaw);
+
+  if (
+    !io ||
+    !Number.isInteger(instanceId) ||
+    instanceId <= 0 ||
+    dungeonRestRealtimeTimers.has(instanceId)
+  ) {
+    return;
+  }
+
+  const tick =
+    async () => {
+      try {
+        const [[member]]: any =
+          await db.query(
+            `
+              SELECT
+                dim.player_id,
+                di.current_phase,
+                di.status
+
+              FROM dungeon_instance_members dim
+
+              JOIN dungeon_instances di
+                ON di.id = dim.instance_id
+
+              WHERE dim.instance_id = ?
+                AND dim.is_active = 1
+                AND di.status = 'active'
+
+              ORDER BY
+                dim.was_leader DESC,
+                dim.id ASC
+
+              LIMIT 1
+            `,
+            [instanceId]
+          );
+
+        if (
+          !member ||
+          String(member.current_phase) !== "rest"
+        ) {
+          const timer =
+            dungeonRestRealtimeTimers.get(
+              instanceId
+            );
+
+          if (timer) {
+            clearTimeout(timer);
+          }
+
+          dungeonRestRealtimeTimers.delete(
+            instanceId
+          );
+
+          return;
+        }
+
+        const rest =
+          await getDungeonRestStateForPlayer(
+            Number(member.player_id)
+          );
+
+        io
+          ?.to(
+            instanceRoom(instanceId)
+          )
+          .emit(
+            "dungeon:rest-state",
+            {
+              instanceId,
+              rest,
+            }
+          );
+
+        /*
+         * The final zero-second snapshot is useful to clients because it
+         * enables the leader's Continue button immediately.
+         */
+        if (rest.complete) {
+          dungeonRestRealtimeTimers.delete(
+            instanceId
+          );
+
+          return;
+        }
+
+        const timer =
+          setTimeout(
+            () => {
+              void tick();
+            },
+            1000
+          );
+
+        dungeonRestRealtimeTimers.set(
+          instanceId,
+          timer
+        );
+      } catch (error) {
+        console.error(
+          "Dungeon realtime rest tick failed:",
+          error
+        );
+
+        dungeonRestRealtimeTimers.delete(
+          instanceId
+        );
+      }
+    };
+
+  /*
+   * Reserve the instance immediately so simultaneous joins/lifecycle
+   * broadcasts cannot start duplicate tickers.
+   */
+  const starter =
+    setTimeout(
+      () => {
+        void tick();
+      },
+      0
+    );
+
+  dungeonRestRealtimeTimers.set(
+    instanceId,
+    starter
+  );
+}
 
 function partyRoom(
   partyId: number,
@@ -225,6 +378,14 @@ export function registerDungeonSocket(
 
       await socket.join(
         instanceRoom(instanceId)
+      );
+
+      /*
+       * If this instance is currently resting, make sure its single
+       * authoritative realtime rest broadcaster is running.
+       */
+      void ensureDungeonRestRealtime(
+        instanceId
       );
 
       ack({
@@ -571,87 +732,39 @@ export function publishDungeonChanged(
 }
 
 export function publishDungeonInstanceState(
-  instanceId: number,
-  snapshot: any,
+  instanceId:
+    number,
+  snapshot:
+    any,
 ) {
-  const finalInstanceId =
-    Number(instanceId);
-
   if (
     !io ||
-    !Number.isInteger(finalInstanceId) ||
-    finalInstanceId <= 0
+    !Number.isInteger(
+      Number(
+        instanceId
+      )
+    ) ||
+    Number(
+      instanceId
+    ) <= 0
   ) {
     return;
   }
 
-  /*
-   * Fast path: broadcast to the live instance room.
-   */
   io
     .to(
       instanceRoom(
-        finalInstanceId
+        Number(
+          instanceId
+        )
       )
     )
     .emit(
       "dungeon:state",
       snapshot
     );
-
-  /*
-   * Guaranteed delivery path:
-   * also emit the live combat snapshot directly to every active member's
-   * authenticated player:<id> room.
-   *
-   * This intentionally mirrors the ready-check reliability model. If an
-   * instance-room join is late or broken, party members still receive
-   * real-time combat instead of waiting for the HTTP recovery poll.
-   */
-  void db.query(
-    `
-      SELECT player_id
-      FROM dungeon_instance_members
-      WHERE instance_id = ?
-        AND is_active = 1
-    `,
-    [finalInstanceId]
-  )
-    .then(
-      ([rows]: any) => {
-        for (
-          const row of
-          rows ?? []
-        ) {
-          const memberPlayerId =
-            Number(
-              row.player_id
-            );
-
-          if (
-            Number.isInteger(
-              memberPlayerId
-            ) &&
-            memberPlayerId > 0
-          ) {
-            emitToPlayer(
-              memberPlayerId,
-              "dungeon:state",
-              snapshot
-            );
-          }
-        }
-      }
-    )
-    .catch(
-      error => {
-        console.error(
-          "Dungeon state direct broadcast failed:",
-          error
-        );
-      }
-    );
 }
+
 
 export function publishDungeonInstanceChanged(
   instanceId: number,
@@ -673,6 +786,15 @@ export function publishDungeonInstanceChanged(
       finalInstanceId,
     ...payload,
   };
+
+  /*
+   * Lifecycle transitions can enter rest while every client is already
+   * subscribed, so joining the room is not the only place that can start
+   * the realtime rest ticker.
+   */
+  void ensureDungeonRestRealtime(
+    finalInstanceId
+  );
 
   io
     .to(
