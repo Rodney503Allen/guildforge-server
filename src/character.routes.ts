@@ -421,6 +421,15 @@ router.get("/character", requireLogin, async (req, res) => {
   type StatKey = "attack" | "defense" | "agility" | "vitality" | "intellect" | "crit";
   const STAT_KEYS: StatKey[] = ["attack", "defense", "agility", "vitality", "intellect", "crit"];
 
+  const STAT_DESCRIPTIONS: Record<StatKey, string> = {
+    attack: "Increases the damage dealt by your weapon attacks and physical abilities.",
+    defense: "Reduces the damage you take from enemy attacks. Higher Defense makes you more durable in combat.",
+    agility: "Improves combat speed, Dodge Chance, and Critical Chance. Each point grants 0.2% Dodge Chance and 0.1% Critical Chance.",
+    vitality: "Increases your survivability. Each point of Vitality grants 10 Maximum Health.",
+    intellect: "Increases your spell effectiveness and Mana. Each point grants 5 Maximum Mana and increases Spell Power.",
+    crit: "Increases your chance to critically strike. Each Crit point grants 0.5% Critical Chance before other bonuses."
+  };
+
   const statBreakdown: Record<
     StatKey,
     { base: number; gear: number; buff: number; total: number }
@@ -817,6 +826,7 @@ router.get("/character", requireLogin, async (req, res) => {
   <script defer src="/statpanel.js"></script>
   <script defer src="/character.js?v=8"></script>
   <script defer src="/tutorial.js?v=1"></script>
+
 </head>
 
 <body>
@@ -854,122 +864,75 @@ router.get("/character", requireLogin, async (req, res) => {
       </header>
 
       <div class="left-panel">
-        <section class="char-box frame-host">
+        <section class="char-box character-sheet-card frame-host">
           <span class="frame-border panel" aria-hidden="true"></span>
 
-          <h2>${p.name}</h2>
-
-          <div class="character-avatar-section">
-            <div class="character-avatar-frame">
-              <img
-                id="characterAvatarImage"
-                class="character-avatar-image"
-                src="${equippedAvatarUrl}"
-                alt="${escapeHtml(equippedAvatarName)}"
-                onerror="
-                  this.onerror = null;
-                  this.src = '/images/avatars/default_adventurer.webp';
-                "
-              >
-
-              <div class="character-avatar-shade"></div>
-            </div>
-
-            <div class="character-avatar-meta">
-              <div
-                id="characterAvatarName"
-                class="character-avatar-name"
-              >
-                ${escapeHtml(equippedAvatarName)}
-              </div>
-
-              <button
-                type="button"
-                class="change-avatar-btn"
-                onclick="openAvatarSelector()"
-              >
-                Choose Avatar
-              </button>
-            </div>
-          </div>
-
-          <div class="character-summary">
-            <div class="summary-row">
-              <span>Class</span>
-              <strong>${p.class_name}</strong>
-            </div>
-
-            <div class="summary-row">
-              <span>Level</span>
-              <strong>${p.level}</strong>
-            </div>
-
-            <div class="summary-row">
-              <span>Experience</span>
-              <strong>${p.exper} / ${expToNext}</strong>
-            </div>
-
-            <div class="experience-bar">
-              <div
-                class="experience-bar-fill"
-                style="width:${expPercent}%"
-              ></div>
-            </div>
-
-            <p class="experience-caption">
-              ${expPercent}% to next level
-            </p>
-
-            <div class="summary-divider"></div>
-
-            <div class="summary-row">
-              <span>Health</span>
-
-              <strong
-                data-tooltip="info"
-                data-name="Maximum Health"
-                data-desc="Your maximum health after base stats, equipment, and active buffs."
-              >
-                ${p.hpoints} / ${p.maxhp}
-              </strong>
-            </div>
-
-            <div class="summary-row">
-              <span>Mana</span>
-              <strong>${p.spoints} / ${p.maxspoints}</strong>
-            </div>
-
-            <div class="summary-row">
-              <span>Critical Chance</span>
-              <strong>${(p.crit * 100).toFixed(1)}%</strong>
-            </div>
-
-            <div class="summary-row">
-              <span>Dodge Chance</span>
-
-              <strong
-                data-tooltip="info"
-                data-name="Dodge Chance"
-                data-desc="Chance to completely avoid an incoming attack."
-              >
-                ${(p.dodgeChance * 100).toFixed(1)}%
-              </strong>
-            </div>
-          </div>
-        </section>
-
-        <section class="char-box frame-host">
-          <span class="frame-border panel" aria-hidden="true"></span>
-
-          <div class="character-card-header">
-            <h3>Attributes</h3>
-
+          <div class="character-sheet-heading">
+            <h2>${p.name}</h2>
             <span class="stat-points-pill">
-              <span id="statPoints">${p.stat_points}</span> Available
+              <span id="statPoints">${p.stat_points}</span> Attribute Points Available
             </span>
           </div>
 
-          <div class="stats-list">
+          <div class="character-sheet-layout">
+            <div class="character-sheet-portrait-column">
+              <div class="character-avatar-section">
+                <div class="character-avatar-frame">
+                  <img
+                    id="characterAvatarImage"
+                    class="character-avatar-image"
+                    src="${equippedAvatarUrl}"
+                    alt="${escapeHtml(equippedAvatarName)}"
+                    onerror="
+                      this.onerror = null;
+                      this.src = '/images/avatars/default_adventurer.webp';
+                    "
+                  >
+                  <div class="character-avatar-shade"></div>
+                </div>
+
+                <div class="character-avatar-meta">
+                  <div id="characterAvatarName" class="character-avatar-name">
+                    ${escapeHtml(equippedAvatarName)}
+                  </div>
+                  <button type="button" class="change-avatar-btn" onclick="openAvatarSelector()">
+                    Choose Avatar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="character-sheet-info">
+              <div class="character-sheet-overview">
+                <div class="character-sheet-overview-grid">
+                  <div class="summary-row"><span>Class</span><strong>${p.class_name}</strong></div>
+                  <div class="summary-row"><span>Level</span><strong>${p.level}</strong></div>
+                </div>
+
+                <div class="summary-row character-sheet-exp-row">
+                  <span>Experience</span><strong>${p.exper} / ${expToNext}</strong>
+                </div>
+                <div class="experience-bar"><div class="experience-bar-fill" style="width:${expPercent}%"></div></div>
+                <p class="experience-caption">${expPercent}% to next level</p>
+
+                <div class="character-sheet-resources">
+                  <div class="summary-row">
+                    <span>Health</span>
+                    <strong data-tooltip="info" data-name="Health" data-desc="Your current and maximum Health. Vitality increases Maximum Health by 10 per point. If Health reaches 0, you are defeated.">${p.hpoints} / ${p.maxhp}</strong>
+                  </div>
+                  <div class="summary-row">
+                    <span>Mana</span>
+                    <strong data-tooltip="info" data-name="Mana" data-desc="Your current and maximum Mana, used to cast spells and abilities. Intellect increases Maximum Mana by 5 per point.">${p.spoints} / ${p.maxspoints}</strong>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="character-sheet-stat-columns">
+                <div class="character-sheet-stat-group">
+                  <div class="character-sheet-subheading">Attributes</div>
+          <div class="character-sheet-stat-list">
             ${(STAT_KEYS.filter(
               (s) => s !== "crit"
             ) as Exclude<StatKey, "crit">[])
@@ -985,6 +948,7 @@ router.get("/character", requireLogin, async (req, res) => {
                       id="${stat}"
                       data-tooltip="stat"
                       data-name="${stat.charAt(0).toUpperCase() + stat.slice(1)}"
+                      data-desc="${escapeHtml(STAT_DESCRIPTIONS[stat])}"
                       data-base="${statBreakdown[stat].base}"
                       data-gear="${statBreakdown[stat].gear}"
                       data-buffs="${statBreakdown[stat].buff}"
@@ -1011,6 +975,20 @@ router.get("/character", requireLogin, async (req, res) => {
                 `
               )
               .join("")}
+          </div>
+                </div>
+
+                <div class="character-sheet-stat-group">
+                  <div class="character-sheet-subheading">Combat Stats</div>
+                  <div class="character-sheet-stat-list">
+                    <div class="summary-row"><span>Critical Chance</span><strong data-tooltip="info" data-name="Critical Chance" data-desc="Your chance for an eligible attack or ability to critically strike. Crit grants 0.5% per point and Agility grants an additional 0.1% per point. Critical Chance is capped at 40%.">${(p.crit * 100).toFixed(1)}%</strong></div>
+                    <div class="summary-row"><span>Dodge Chance</span><strong data-tooltip="info" data-name="Dodge Chance" data-desc="Your chance to completely avoid an incoming attack. Agility grants 0.2% Dodge Chance per point. Dodge Chance is capped at 35%.">${(p.dodgeChance * 100).toFixed(1)}%</strong></div>
+                    <div class="summary-row"><span>Life Leech</span><strong data-tooltip="info" data-name="Life Leech" data-desc="Restores Health equal to a percentage of the damage you deal. Life Leech from equipment and active effects stacks up to a maximum of 25%.">${(p.lifesteal * 100).toFixed(1)}%</strong></div>
+                    <div class="summary-row"><span>Critical Damage</span><strong data-tooltip="info" data-name="Critical Damage" data-desc="Determines how much damage a critical strike deals. Your baseline critical strike deals 150% of normal damage before additional Critical Damage bonuses.">${(p.critDamageMult * 100).toFixed(0)}%</strong></div>
+                    <div class="summary-row"><span>Damage Reduction</span><strong data-tooltip="info" data-name="Damage Reduction" data-desc="Reduces incoming damage by this percentage after applicable bonuses and effects are calculated.">${(p.damageReduction * 100).toFixed(1)}%</strong></div>
+                  </div>
+                </div>
+              </div>
           </div>
         </section>
       </div>

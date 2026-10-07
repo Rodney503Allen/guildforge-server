@@ -468,7 +468,10 @@ console.warn(
       key,
       audio: new Audio(path),
       requestedVolume: clamp01(options.volume ?? 1),
-      stopped: false
+      stopped: false,
+      stop() {
+        stopLoopingSfx(handle);
+      }
     };
 
     handle.audio.preload = "auto";

@@ -8290,7 +8290,7 @@ a[href="/town"].btn{
   width:0;
   height:0;
   z-index:60;
-  pointer-events:none;
+  pointer-events:auto;
   user-select:none;
   opacity:.78;
 }
@@ -8896,3 +8896,1153 @@ body.world-map-open { overflow: hidden; }
   .quest-target-sparkle { animation: none; }
   .quest-target-sparkle { opacity: .55; }
 }
+
+
+/* =========================================================
+   WORLD RIGHT RAIL — ACTIVE TRACKING + NEARBY INTERACTABLES
+========================================================= */
+
+.world-rail--right{
+  display:grid;
+  grid-template-rows:minmax(0, 1fr) minmax(0, 1fr);
+  gap:10px;
+  min-height:0;
+  overflow:hidden;
+}
+
+.world-activity-zone,
+.world-nearby-zone{
+  position:relative;
+  z-index:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.world-activity-zone{
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding-right:2px;
+}
+
+.world-nearby-zone{
+  overflow:hidden;
+}
+
+.world-activity-zone__heading{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:0 4px 2px;
+  color:rgba(194,200,208,.72);
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:1.15px;
+  text-transform:uppercase;
+}
+
+.world-activity-zone__icon{
+  color:rgba(200,163,75,.72);
+  font-size:7px;
+}
+
+.world-tracker-card{
+  position:relative;
+  flex:0 0 auto;
+  min-height:0;
+  padding:0 !important;
+  overflow:hidden !important;
+}
+
+.world-tracker-toggle{
+  position:relative;
+  z-index:2;
+  width:100%;
+  min-height:54px;
+  border:0;
+  background:transparent;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:11px 12px;
+  color:inherit;
+  text-align:left;
+}
+
+.world-tracker-toggle:hover{
+  background:rgba(255,255,255,.025);
+}
+
+.world-tracker-toggle__label{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+
+.world-tracker-toggle__kicker,
+.world-event-panel__kicker{
+  color:rgba(154,163,175,.62);
+  font-size:8px;
+  font-weight:800;
+  letter-spacing:1px;
+  text-transform:uppercase;
+}
+
+.world-tracker-toggle__name{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#d9d4ca;
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.15px;
+}
+
+.world-tracker-toggle__chevron{
+  flex:0 0 auto;
+  color:rgba(200,163,75,.72);
+  font-size:13px;
+  transition:transform .16s ease;
+}
+
+.world-tracker-card.is-collapsed .world-tracker-toggle__chevron{
+  transform:rotate(-90deg);
+}
+
+.world-tracker-body{
+  position:relative;
+  z-index:2;
+  padding:0 12px 12px;
+}
+
+.world-tracker-body[hidden]{
+  display:none !important;
+}
+
+.world-tracker-empty{
+  padding:8px 9px;
+  border:1px solid rgba(255,255,255,.055);
+  background:rgba(0,0,0,.14);
+  color:rgba(154,163,175,.68);
+  font-size:10px;
+  line-height:1.45;
+}
+
+.world-event-panel__header{
+  display:none !important;
+}
+
+.world-event-tracker-toggle__right{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:0 0 auto;
+}
+
+.world-event-panel__timer{
+  position:static !important;
+  flex:0 0 auto;
+}
+
+.world-rail--right .world-event-panel{
+  width:100%;
+  max-height:none;
+  overflow:hidden !important;
+}
+
+.hunt-tracker-content{
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+}
+
+.hunt-tracker-status{
+  color:rgba(200,163,75,.9);
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.hunt-tracker-objective{
+  color:#d9d4ca;
+  font-size:11px;
+  font-weight:700;
+  line-height:1.35;
+}
+
+.hunt-tracker-meta{
+  color:rgba(154,163,175,.7);
+  font-size:9px;
+}
+
+.hunt-tracker-progress{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:8px;
+}
+
+.hunt-tracker-progress__bar{
+  height:6px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(0,0,0,.34);
+}
+
+.hunt-tracker-progress__bar > span{
+  display:block;
+  height:100%;
+  background:linear-gradient(90deg, rgba(116,124,92,.86), rgba(200,163,75,.84));
+}
+
+.hunt-tracker-progress__value{
+  color:rgba(217,212,202,.72);
+  font-size:9px;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+/* Destination rows are retired now that the full World Map handles navigation. */
+.world-rail--right .nearby-destinations,
+.world-rail--right .nearby-interactions__heading{
+  display:none !important;
+}
+
+.world-rail--right .nearby-card{
+  min-height:0;
+  height:100% !important;
+  max-height:none !important;
+  flex:1 1 auto;
+  padding:14px;
+  overflow:hidden !important;
+}
+
+.world-rail--right .nearby-interactions{
+  min-height:0;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden !important;
+}
+
+.world-rail--right .world-interact__list{
+  min-height:0 !important;
+  height:auto !important;
+  max-height:none !important;
+  flex:1 1 auto;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  padding-right:4px;
+}
+
+.world-rail--right .resource-panel{
+  flex:0 0 auto;
+  margin:0;
+}
+
+@media (max-width:980px){
+  .world-rail--right{
+    display:flex;
+    flex-direction:column;
+    overflow:visible;
+  }
+
+  .world-activity-zone,
+  .world-nearby-zone{
+    overflow:visible;
+  }
+
+  .world-rail--right .nearby-card{
+    height:auto !important;
+  }
+
+  .world-rail--right .world-interact__list{
+    max-height:320px !important;
+  }
+}
+
+
+/* =========================================================
+   WORLD RIGHT RAIL V2 — INTERACTABLES TOP, TRACKERS BOTTOM
+========================================================= */
+
+.world-rail--right{
+  display:block;
+  min-height:0;
+  overflow:hidden;
+}
+
+.world-nearby-panel{
+  position:relative;
+  z-index:1;
+  height:100%;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  overflow:hidden;
+}
+
+.world-nearby-panel__heading{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:0 4px 2px;
+  color:rgba(194,200,208,.72);
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:1.15px;
+  text-transform:uppercase;
+}
+
+.world-nearby-panel__icon{
+  color:rgba(200,163,75,.72);
+  font-size:9px;
+}
+
+/* The interactables box owns the flexible upper portion of the rail. */
+.world-rail--right .world-interactables-card{
+  position:relative;
+  flex:1 1 auto;
+  min-height:120px;
+  height:auto !important;
+  max-height:none !important;
+  padding:14px !important;
+  overflow:hidden !important;
+  border:1px solid rgba(185,164,116,.24);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(0,0,0,.045)),
+    rgba(10,12,14,.28);
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.28),
+    inset 0 0 18px rgba(0,0,0,.12);
+}
+
+.world-rail--right .world-interactables-card .nav-top{
+  flex:0 0 auto;
+  padding-bottom:9px;
+  margin-bottom:8px;
+  border-bottom:1px solid rgba(255,255,255,.055);
+}
+
+.world-rail--right .world-interactables-card .nearby-interactions{
+  min-height:0;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden !important;
+}
+
+.world-rail--right .world-interactables-card .world-interact__list{
+  min-height:0 !important;
+  height:auto !important;
+  max-height:none !important;
+  flex:1 1 auto;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  padding-right:4px;
+}
+
+/* Trackers are anchored beneath Interactables rather than consuming
+   a fixed half of the rail. Collapsing them gives that room back above. */
+.world-nearby-trackers{
+  flex:0 1 auto;
+  min-height:0;
+  max-height:52%;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding-right:2px;
+}
+
+.world-nearby-trackers .world-tracker-card{
+  flex:0 0 auto;
+}
+
+.world-nearby-trackers .world-tracker-card.is-collapsed{
+  flex:0 0 auto;
+}
+
+.world-nearby-trackers .world-tracker-card.is-collapsed .world-tracker-toggle{
+  min-height:45px;
+  padding-top:8px;
+  padding-bottom:8px;
+}
+
+.world-nearby-panel > .resource-panel{
+  flex:0 0 auto;
+}
+
+/* Retire the separate top/bottom zones from the previous pass. */
+.world-activity-zone,
+.world-nearby-zone{
+  display:contents;
+}
+
+@media (max-width:980px){
+  .world-rail--right{
+    overflow:visible;
+  }
+
+  .world-nearby-panel{
+    height:auto;
+    overflow:visible;
+  }
+
+  .world-nearby-trackers{
+    max-height:none;
+    overflow:visible;
+  }
+
+  .world-rail--right .world-interactables-card{
+    min-height:180px;
+  }
+
+  .world-rail--right .world-interactables-card .world-interact__list{
+    max-height:320px !important;
+  }
+}
+
+
+/* =========================================================
+   WORLD RIGHT RAIL V3 — HARD 50% INTERACTABLES CAP
+========================================================= */
+
+/* Nearby panel fills the usable rail. */
+.world-nearby-panel{
+  height:100%;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  overflow:hidden;
+}
+
+/*
+ * Interactables is explicitly capped to the upper half.
+ * It does NOT flex into tracker space.
+ */
+.world-rail--right .world-interactables-card{
+  box-sizing:border-box;
+  flex:0 0 50% !important;
+  height:50% !important;
+  max-height:50% !important;
+  min-height:0 !important;
+
+  display:flex;
+  flex-direction:column;
+
+  overflow:hidden !important;
+
+  /* Visible outer border even if decorative frame asset is subtle. */
+  border:1px solid rgba(200,163,75,.48) !important;
+  outline:1px solid rgba(0,0,0,.62);
+  outline-offset:-2px;
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.055)),
+    rgba(9,11,13,.42) !important;
+
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.025),
+    inset 0 0 18px rgba(0,0,0,.18) !important;
+}
+
+/* Header stays fixed; only the list beneath it scrolls. */
+.world-rail--right .world-interactables-card .nav-top{
+  flex:0 0 auto;
+}
+
+.world-rail--right .world-interactables-card .nearby-interactions{
+  flex:1 1 auto;
+  min-height:0;
+  overflow:hidden !important;
+}
+
+.world-rail--right .world-interactables-card .world-interact__list{
+  flex:1 1 auto;
+  min-height:0 !important;
+  height:100% !important;
+  max-height:none !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+
+  scrollbar-width:thin;
+  scrollbar-color:rgba(200,163,75,.42) rgba(0,0,0,.2);
+}
+
+.world-rail--right .world-interactables-card .world-interact__list::-webkit-scrollbar{
+  width:7px;
+}
+
+.world-rail--right .world-interactables-card .world-interact__list::-webkit-scrollbar-track{
+  background:rgba(0,0,0,.2);
+}
+
+.world-rail--right .world-interactables-card .world-interact__list::-webkit-scrollbar-thumb{
+  background:rgba(200,163,75,.42);
+  border:1px solid rgba(0,0,0,.42);
+}
+
+/*
+ * Trackers begin immediately after the 50% interactables section.
+ * They use remaining space and scroll themselves only if necessary.
+ */
+.world-nearby-trackers{
+  flex:1 1 0;
+  min-height:0;
+  max-height:none !important;
+  margin:0 !important;
+  padding:0 2px 0 0;
+
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+
+  overflow-y:auto;
+  overflow-x:hidden;
+}
+
+/* Don't allow an old flex rule to create a spacer between sections. */
+.world-nearby-panel > .world-interactables-card + .world-nearby-trackers{
+  margin-top:0 !important;
+}
+
+/* The decorative sub-frame follows the actual interactables box. */
+.world-interactables-card > .frame-border.sub{
+  display:block !important;
+  opacity:1 !important;
+}
+
+@media (max-width:980px){
+  .world-nearby-panel{
+    height:auto;
+    overflow:visible;
+  }
+
+  .world-rail--right .world-interactables-card{
+    flex:0 0 auto !important;
+    height:320px !important;
+    max-height:320px !important;
+  }
+
+  .world-nearby-trackers{
+    flex:0 0 auto;
+    overflow:visible;
+  }
+}
+
+
+/* =========================================================
+   WORLD RIGHT RAIL V4 — INTERACTABLES BORDER IMAGE
+========================================================= */
+
+.world-rail--right .world-interactables-card{
+  /* Use the same decorative sub-panel frame as the rest of the World UI. */
+  border:12px solid transparent !important;
+  border-image-source:url("/images/ui/sub_border.png") !important;
+  border-image-slice:32 fill !important;
+  border-image-width:12px !important;
+  border-image-outset:0 !important;
+  border-image-repeat:stretch !important;
+
+  outline:none !important;
+
+  /* Keep content clear of the decorative frame. */
+  padding:10px 12px !important;
+
+  /* Preserve the requested hard 50% sizing. */
+  box-sizing:border-box !important;
+  flex:0 0 50% !important;
+  height:50% !important;
+  max-height:50% !important;
+  min-height:0 !important;
+}
+
+/*
+ * This card now owns its border-image directly, so hide the extra
+ * absolutely-positioned decorative span to avoid double framing.
+ */
+.world-interactables-card > .frame-border.sub{
+  display:none !important;
+}
+
+
+/* =========================================================
+   WORLD RIGHT RAIL V5 — RESTORE AUTHORITATIVE SUB FRAME
+   Uses the same /images/ui/panel_border.png overlay as the
+   other World sub-panels.
+========================================================= */
+
+.world-rail--right .world-interactables-card{
+  position:relative !important;
+  isolation:isolate !important;
+
+  /* The frame is supplied by the child .frame-border.sub overlay. */
+  border:0 !important;
+  border-image:none !important;
+  outline:0 !important;
+
+  box-sizing:border-box !important;
+  flex:0 0 50% !important;
+  height:50% !important;
+  max-height:50% !important;
+  min-height:0 !important;
+
+  padding:14px !important;
+  overflow:hidden !important;
+}
+
+/* Keep actual card content beneath the decorative overlay. */
+.world-rail--right .world-interactables-card > *:not(.frame-border){
+  position:relative;
+  z-index:1;
+}
+
+/* Exact existing Guildforge World sub-panel border treatment. */
+.world-rail--right .world-interactables-card > .frame-border.sub{
+  display:block !important;
+  position:absolute !important;
+  inset:0 !important;
+  z-index:8 !important;
+  box-sizing:border-box !important;
+
+  border:1px solid transparent !important;
+  border-image-source:url("/images/ui/panel_border.png") !important;
+  border-image-slice:16 !important;
+  border-image-width:8px !important;
+  border-image-repeat:stretch !important;
+  border-image-outset:0 !important;
+
+  filter:brightness(.84) drop-shadow(0 6px 14px rgba(0,0,0,.30)) !important;
+  pointer-events:none !important;
+  opacity:1 !important;
+  visibility:visible !important;
+}
+
+
+/* =========================================================
+   WORLD HUNT TRACKER — OBJECTIVES
+========================================================= */
+
+.hunt-tracker-summary{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.hunt-tracker-summary__top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.hunt-tracker-summary__value{
+  color:rgba(217,212,202,.72);
+  font-size:9px;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.hunt-objectives{
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+  padding-top:2px;
+}
+
+.hunt-objectives__heading{
+  padding-bottom:3px;
+  color:rgba(154,163,175,.62);
+  font-size:8px;
+  font-weight:800;
+  letter-spacing:1px;
+  text-transform:uppercase;
+}
+
+.hunt-objective{
+  display:flex;
+  align-items:flex-start;
+  gap:7px;
+  padding:6px 7px;
+  border:1px solid rgba(255,255,255,.05);
+  background:rgba(0,0,0,.14);
+}
+
+.hunt-objective__state{
+  flex:0 0 auto;
+  width:12px;
+  padding-top:1px;
+  color:rgba(200,163,75,.76);
+  font-size:8px;
+  text-align:center;
+}
+
+.hunt-objective__body{
+  min-width:0;
+  flex:1 1 auto;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:8px;
+}
+
+.hunt-objective__description{
+  min-width:0;
+  color:rgba(217,212,202,.88);
+  font-size:10px;
+  font-weight:650;
+  line-height:1.35;
+}
+
+.hunt-objective__progress{
+  flex:0 0 auto;
+  color:rgba(217,212,202,.64);
+  font-size:9px;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.hunt-objective__optional{
+  display:inline-block;
+  margin-left:5px;
+  color:rgba(154,163,175,.54);
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.55px;
+  text-transform:uppercase;
+}
+
+.hunt-objective.is-complete{
+  opacity:.58;
+}
+
+.hunt-objective.is-complete .hunt-objective__state{
+  color:rgba(116,155,103,.9);
+}
+
+.hunt-objective.is-complete .hunt-objective__description{
+  text-decoration:line-through;
+  text-decoration-color:rgba(217,212,202,.25);
+}
+
+.hunt-tracker-target{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  padding:7px 8px;
+  border:1px solid rgba(200,163,75,.16);
+  background:rgba(200,163,75,.045);
+}
+
+.hunt-tracker-target__label{
+  color:rgba(200,163,75,.9);
+  font-size:8px;
+  font-weight:800;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.hunt-tracker-target__text{
+  color:rgba(217,212,202,.78);
+  font-size:9px;
+  line-height:1.4;
+}
+
+
+/* =========================================================
+   WORLD EVENT TRACKER — SCROLLABLE CONTENT
+========================================================= */
+
+/*
+ * Keep the tracker itself contained inside the right rail.
+ * The header/toggle remains visible while only the expanded
+ * event body scrolls.
+ */
+.world-tracker-card--event{
+  min-height:0 !important;
+  max-height:100% !important;
+  overflow:hidden !important;
+}
+
+/*
+ * Support the current tracker body IDs/classes used by the
+ * World Event panel. Whichever wrapper is present becomes
+ * the scrolling region.
+ */
+.world-tracker-card--event #worldEventTrackerBody,
+.world-tracker-card--event #worldEventBody,
+.world-tracker-card--event .world-tracker-body,
+.world-tracker-card--event .world-event-panel__body,
+.world-tracker-card--event .world-event-content{
+  min-height:0 !important;
+  max-height:320px !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+  padding-right:4px;
+}
+
+/* WebKit / Chromium scrollbar */
+.world-tracker-card--event #worldEventTrackerBody::-webkit-scrollbar,
+.world-tracker-card--event #worldEventBody::-webkit-scrollbar,
+.world-tracker-card--event .world-tracker-body::-webkit-scrollbar,
+.world-tracker-card--event .world-event-panel__body::-webkit-scrollbar,
+.world-tracker-card--event .world-event-content::-webkit-scrollbar{
+  width:6px;
+}
+
+.world-tracker-card--event #worldEventTrackerBody::-webkit-scrollbar-track,
+.world-tracker-card--event #worldEventBody::-webkit-scrollbar-track,
+.world-tracker-card--event .world-tracker-body::-webkit-scrollbar-track,
+.world-tracker-card--event .world-event-panel__body::-webkit-scrollbar-track,
+.world-tracker-card--event .world-event-content::-webkit-scrollbar-track{
+  background:rgba(0,0,0,.16);
+}
+
+.world-tracker-card--event #worldEventTrackerBody::-webkit-scrollbar-thumb,
+.world-tracker-card--event #worldEventBody::-webkit-scrollbar-thumb,
+.world-tracker-card--event .world-tracker-body::-webkit-scrollbar-thumb,
+.world-tracker-card--event .world-event-panel__body::-webkit-scrollbar-thumb,
+.world-tracker-card--event .world-event-content::-webkit-scrollbar-thumb{
+  background:rgba(217,212,202,.22);
+  border-radius:999px;
+}
+
+.world-tracker-card--event #worldEventTrackerBody::-webkit-scrollbar-thumb:hover,
+.world-tracker-card--event #worldEventBody::-webkit-scrollbar-thumb:hover,
+.world-tracker-card--event .world-tracker-body::-webkit-scrollbar-thumb:hover,
+.world-tracker-card--event .world-event-panel__body::-webkit-scrollbar-thumb:hover,
+.world-tracker-card--event .world-event-content::-webkit-scrollbar-thumb:hover{
+  background:rgba(217,212,202,.34);
+}
+
+
+/* =========================================================
+   WORLD EVENT TRACKER — INNER BODY IS THE ONLY SCROLLER
+========================================================= */
+
+@media (min-width:981px){
+
+  /* Keep the lower tracker zone fixed inside the right rail. */
+  .world-nearby-trackers{
+    overflow:hidden !important;
+  }
+
+  /* Hunt remains natural-height above the event tracker. */
+  #huntTrackerPanel.world-tracker-card{
+    flex:0 0 auto !important;
+  }
+
+  /*
+   * Let the World Event card consume only the remaining tracker space.
+   * This is the key fix: it may shrink instead of growing to fit its data.
+   */
+  #worldEventPanel.world-tracker-card--event{
+    flex:1 1 0 !important;
+    min-height:0 !important;
+    max-height:none !important;
+    display:flex !important;
+    flex-direction:column !important;
+    overflow:hidden !important;
+  }
+
+  /* Event header stays fixed. */
+  #worldEventPanel > #worldEventTrackerToggle{
+    flex:0 0 auto !important;
+  }
+
+  /*
+   * This wrapper ALREADY contains:
+   * phase + description + objectives + event state.
+   * It alone gets the scrollbar.
+   */
+  #worldEventPanel > #worldEventTrackerBody{
+    flex:1 1 0 !important;
+    min-height:0 !important;
+    max-height:none !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    overscroll-behavior:contain;
+    padding:0 12px 12px !important;
+
+    scrollbar-width:thin;
+    scrollbar-color:
+      rgba(200,163,75,.46)
+      rgba(0,0,0,.18);
+  }
+
+  #worldEventPanel > #worldEventTrackerBody::-webkit-scrollbar{
+    width:7px;
+  }
+
+  #worldEventPanel > #worldEventTrackerBody::-webkit-scrollbar-track{
+    background:rgba(0,0,0,.18);
+    border-radius:999px;
+  }
+
+  #worldEventPanel > #worldEventTrackerBody::-webkit-scrollbar-thumb{
+    background:rgba(200,163,75,.46);
+    border-radius:999px;
+  }
+
+  #worldEventPanel > #worldEventTrackerBody::-webkit-scrollbar-thumb:hover{
+    background:rgba(200,163,75,.62);
+  }
+}
+
+
+/* =========================================================
+   WORLD EVENT TRACKER — COLLAPSE LIKE HUNT TRACKER
+========================================================= */
+
+@media (min-width:981px){
+
+  /* Expanded event tracker consumes the remaining tracker space. */
+  #worldEventPanel.world-tracker-card--event:not(.is-collapsed){
+    flex:1 1 0 !important;
+    min-height:0 !important;
+  }
+
+  /* Collapsed event tracker shrinks completely to its header row. */
+  #worldEventPanel.world-tracker-card--event.is-collapsed{
+    flex:0 0 auto !important;
+    min-height:0 !important;
+    height:auto !important;
+    max-height:none !important;
+    overflow:hidden !important;
+  }
+
+  /* Match the Hunt tracker's compact collapsed header. */
+  #worldEventPanel.world-tracker-card--event.is-collapsed > #worldEventTrackerToggle{
+    min-height:45px !important;
+    padding-top:8px !important;
+    padding-bottom:8px !important;
+  }
+
+  /* Ensure no event body space remains after collapse. */
+  #worldEventPanel.world-tracker-card--event.is-collapsed > #worldEventTrackerBody{
+    display:none !important;
+    height:0 !important;
+    min-height:0 !important;
+    padding:0 !important;
+    margin:0 !important;
+    overflow:hidden !important;
+  }
+}
+
+
+/* =========================================================
+   WORLD MAP — TOOLTIP ALWAYS ABOVE MAP / MODAL
+========================================================= */
+
+/*
+ * The map hover card is appended to document.body by world.js.
+ * Keep it out of the map/modal stacking context and above every
+ * Guildforge map layer, frame, marker, and modal surface.
+ */
+#worldMapHoverCard,
+.world-map-hover-card{
+  position:fixed !important;
+  z-index:2147483647 !important;
+  pointer-events:none !important;
+  isolation:isolate !important;
+  transform:none;
+}
+
+/* Do not allow decorative map/modal layers to outrank the body tooltip. */
+.world-map-modal,
+.world-map-modal__backdrop,
+.world-map-modal__dialog,
+.world-map-modal__viewport,
+.world-map-modal .frame-border,
+.world-map-modal canvas,
+#worldMapCanvas{
+  z-index:auto;
+}
+
+
+/* =========================================================
+   ALL HALLOWS' EVE — HEADLESS HORSEMAN QUEST
+   Dedicated styling for the seasonal quest block rendered
+   inside the Headless Horseman's vendor.
+========================================================= */
+
+.hallowed-vendor__quest{
+  position: relative;
+  display: block !important;
+  margin: 18px 22px 4px;
+  padding: 18px 18px 17px !important;
+
+  border: 1px solid rgba(226, 139, 55, .38);
+  border-radius: 10px;
+
+  background:
+    radial-gradient(520px 150px at 0% 0%, rgba(224, 112, 28, .17), transparent 62%),
+    radial-gradient(360px 140px at 100% 100%, rgba(105, 54, 122, .13), transparent 68%),
+    linear-gradient(180deg, rgba(55, 31, 28, .72), rgba(20, 15, 22, .88));
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.045),
+    0 10px 26px rgba(0,0,0,.28);
+
+  overflow: hidden;
+}
+
+/* Warm Halloween edge glow without making the panel too ornate. */
+.hallowed-vendor__quest::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+
+  background:
+    linear-gradient(90deg, rgba(240, 145, 55, .09), transparent 24%, transparent 76%, rgba(126, 71, 145, .07));
+
+  opacity: .9;
+}
+
+.hallowed-vendor__quest > *{
+  position: relative;
+  z-index: 1;
+}
+
+.hallowed-vendor__quest .hallowed-vendor__reward-name{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  margin: 0 0 7px;
+
+  color: #ffc06b;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: .025em;
+}
+
+.hallowed-vendor__quest .hallowed-vendor__reward-name::before{
+  content: "🎃";
+  display: inline-block;
+  font-size: 17px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.45));
+}
+
+.hallowed-vendor__quest .hallowed-vendor__desc{
+  margin: 0 0 14px;
+  max-width: 46ch;
+
+  color: #c9bcc5;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* Active objective/progress state. */
+.hallowed-vendor__quest .hallowed-vendor__cost{
+  display: inline-flex;
+  align-items: center;
+
+  margin: 0;
+  padding: 7px 10px;
+
+  border: 1px solid rgba(226, 139, 55, .24);
+  border-radius: 6px;
+
+  background: rgba(7, 5, 8, .34);
+
+  color: #ffd38d;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .03em;
+}
+
+/* Completed state. */
+.hallowed-vendor__quest .hallowed-vendor__owned{
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 7px 10px;
+
+  border: 1px solid rgba(128, 181, 102, .28);
+  border-radius: 6px;
+
+  background: rgba(61, 92, 47, .16);
+
+  color: #a8db91;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.hallowed-vendor__quest .hallowed-vendor__owned::before{
+  content: "✓";
+  font-weight: 1000;
+}
+
+/* Quest acceptance gets a little more visual priority than store purchases. */
+.hallowed-vendor__quest .hallowed-vendor__buy{
+  min-width: 132px;
+  padding: 9px 15px;
+
+  border-color: rgba(215, 126, 42, .65);
+
+  background:
+    linear-gradient(180deg, rgba(151, 74, 25, .98), rgba(83, 36, 14, .98));
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 7px 18px rgba(0,0,0,.25);
+
+  color: #fff0d3;
+  letter-spacing: .025em;
+}
+
+.hallowed-vendor__quest .hallowed-vendor__buy:hover:not(:disabled){
+  transform: translateY(-1px);
+  filter: brightness(1.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.10),
+    0 9px 20px rgba(0,0,0,.30),
+    0 0 16px rgba(222, 125, 37, .12);
+}
+
+.hallowed-vendor__quest .hallowed-vendor__buy:active:not(:disabled){
+  transform: translateY(0);
+}
+
+/* Keep the quest visually connected to the currency/shop below it. */
+.hallowed-vendor__quest + .hallowed-vendor__currency{
+  margin-top: 16px;
+  border-top: 1px solid rgba(222, 139, 58, .15);
+}
+
+@media (max-width: 520px){
+  .hallowed-vendor__quest{
+    margin: 14px 14px 2px;
+    padding: 15px !important;
+  }
+
+  .hallowed-vendor__quest .hallowed-vendor__reward-name{
+    font-size: 16px;
+  }
+
+  .hallowed-vendor__quest .hallowed-vendor__desc{
+    font-size: 12px;
+  }
+
+  .hallowed-vendor__quest .hallowed-vendor__buy{
+    width: 100%;
+  }
+}
+

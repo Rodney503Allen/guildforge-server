@@ -1955,3 +1955,262 @@ body.avatar-selector-open{
     max-width:min(280px,calc(100vw - 32px));
   }
 }
+
+
+/* =========================================
+   UNIFIED CHARACTER SHEET
+   Portrait + overview on top, full-width stats below
+========================================= */
+
+/* Give the character sheet enough room without starving gear/inventory. */
+.page-wrap{
+  grid-template-columns:
+    minmax(390px,.95fr)
+    minmax(480px,1.2fr)
+    minmax(300px,.78fr);
+}
+
+.character-sheet-card{
+  padding:0;
+  overflow:visible;
+}
+
+.character-sheet-heading{
+  min-height:58px;
+  padding:14px 18px 12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  border-bottom:1px solid rgba(255,255,255,.065);
+}
+
+.character-sheet-heading h2{
+  margin:0;
+  color:var(--bone);
+  font-size:18px;
+  letter-spacing:.7px;
+  text-transform:uppercase;
+}
+
+.character-sheet-layout{
+  padding:16px 18px 18px;
+  display:grid;
+  grid-template-columns:132px minmax(0,1fr);
+  gap:14px 18px;
+  align-items:start;
+}
+
+.character-sheet-portrait-column,
+.character-sheet-info,
+.character-sheet-stat-group{
+  min-width:0;
+}
+
+.character-sheet-portrait-column .character-avatar-section{
+  padding:0;
+  gap:8px;
+}
+
+.character-sheet-portrait-column .character-avatar-frame{
+  width:132px;
+  max-width:100%;
+}
+
+.character-sheet-portrait-column .character-avatar-name{
+  width:100%;
+  font-size:10px;
+  line-height:1.25;
+  text-align:center;
+  overflow-wrap:anywhere;
+}
+
+.character-sheet-portrait-column .change-avatar-btn{
+  width:100%;
+  padding:7px 8px;
+}
+
+.character-sheet-overview{
+  padding:0;
+  margin:0;
+  font:12px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+
+.character-sheet-overview-grid,
+.character-sheet-resources{
+  display:grid;
+  grid-template-columns:1fr;
+}
+
+.character-sheet-overview .summary-row{
+  min-height:29px;
+  gap:10px;
+}
+
+.character-sheet-overview .summary-row > span:first-child{
+  flex:0 0 auto;
+}
+
+.character-sheet-overview .summary-row > strong{
+  min-width:0;
+  overflow-wrap:anywhere;
+}
+
+.character-sheet-exp-row{
+  margin-top:2px;
+}
+
+.character-sheet-overview .experience-bar{
+  height:8px;
+  margin-top:6px;
+}
+
+.character-sheet-overview .experience-caption{
+  margin-top:4px;
+}
+
+.character-sheet-resources{
+  margin-top:6px;
+  padding-top:5px;
+  border-top:1px solid rgba(255,255,255,.055);
+}
+
+/* Stats use the entire card width below portrait + overview. */
+.character-sheet-stat-columns{
+  grid-column:1 / -1;
+  width:100%;
+  padding-top:13px;
+  display:grid;
+  grid-template-columns:minmax(0,.78fr) minmax(0,1.22fr);
+  gap:18px;
+  border-top:1px solid rgba(255,255,255,.065);
+}
+
+.character-sheet-stat-group + .character-sheet-stat-group{
+  padding-left:18px;
+  border-left:1px solid rgba(255,255,255,.065);
+}
+
+.character-sheet-subheading{
+  margin:0 0 5px;
+  padding-bottom:7px;
+  border-bottom:1px solid color-mix(in srgb,var(--class-color) 20%,transparent);
+  color:var(--class-color);
+  font:900 10px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  letter-spacing:.75px;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.character-sheet-stat-list{
+  display:grid;
+  gap:0;
+}
+
+.character-sheet-stat-list .stat-row,
+.character-sheet-stat-list .summary-row{
+  min-height:30px;
+  padding:3px 0;
+}
+
+.character-sheet-stat-list .stat-row{
+  grid-template-columns:minmax(0,1fr) auto 26px;
+  gap:6px;
+}
+
+.character-sheet-stat-list .stat-add-btn,
+.character-sheet-stat-list .stat-row button{
+  width:24px;
+  height:24px;
+  border-radius:7px;
+}
+
+.character-sheet-stat-list .stat-button-placeholder{
+  width:24px;
+  height:24px;
+}
+
+.character-sheet-stat-list .summary-row{
+  gap:8px;
+}
+
+.character-sheet-stat-list .summary-row > span:first-child,
+.character-sheet-stat-list .stat-label,
+.character-sheet-stat-list .stat-row > span:first-child{
+  min-width:0;
+  font-size:9px;
+  line-height:1.15;
+  letter-spacing:.2px;
+  white-space:normal;
+}
+
+.character-sheet-stat-list .summary-row > strong,
+.character-sheet-stat-list .stat-value{
+  flex:0 0 auto;
+  font-size:11px;
+  white-space:nowrap;
+}
+
+@media(max-width:1250px){
+  .page-wrap{
+    grid-template-columns:minmax(370px,.9fr) minmax(470px,1.15fr);
+  }
+
+  .right-panel{
+    grid-column:1 / -1;
+  }
+}
+
+@media(max-width:900px){
+  .page-wrap{
+    grid-template-columns:1fr;
+  }
+
+  .left-panel,
+  .center-panel,
+  .right-panel,
+  .skill-loadout-panel{
+    grid-column:1;
+  }
+
+  .character-sheet-layout{
+    grid-template-columns:150px minmax(0,1fr);
+  }
+
+  .character-sheet-portrait-column .character-avatar-frame{
+    width:150px;
+  }
+}
+
+@media(max-width:560px){
+  .character-sheet-heading{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+
+  .character-sheet-layout{
+    grid-template-columns:1fr;
+  }
+
+  .character-sheet-portrait-column{
+    width:100%;
+    max-width:180px;
+    margin:0 auto;
+  }
+
+  .character-sheet-portrait-column .character-avatar-frame{
+    width:160px;
+  }
+
+  .character-sheet-stat-columns{
+    grid-column:1;
+    grid-template-columns:1fr;
+  }
+
+  .character-sheet-stat-group + .character-sheet-stat-group{
+    margin-top:10px;
+    padding:10px 0 0;
+    border-top:1px solid rgba(255,255,255,.065);
+    border-left:0;
+  }
+}

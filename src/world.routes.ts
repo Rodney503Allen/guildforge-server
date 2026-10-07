@@ -7,7 +7,7 @@ import {
   recordPlayerWorldEventSpawnInteraction
 } from "./services/worldEventSpawnService";
 import { recordWorldEventProgress } from "./services/worldEventProgressService";
-import { applyInteractProgress, applyEnterAreaProgress, applyLocationProgress } from "./services/questService";
+import { applyInteractProgress, applyDestroyObjectProgress, applyEnterAreaProgress, applyLocationProgress, acceptQuest, claimQuestRewards } from "./services/questService";
 import { maybeSpawnResourceNodeForPlayer } from "./services/gatheringSpawnService";
 import { advanceHuntObjective } from "./huntService";
 import { publishHuntReadyCheck } from "./huntSocket";
@@ -919,6 +919,57 @@ async function markActiveQuestWorldObjects(
 }
 
 // =======================
+// HALLOWED QUEST PUMPKIN VISIBILITY
+// =======================
+async function filterHallowedPumpkinsForPlayer(
+  playerId: number,
+  worldObjects: any[]
+) {
+  if (!Array.isArray(worldObjects) || !worldObjects.length) return worldObjects || [];
+
+  const hasPumpkins = worldObjects.some(
+    (obj: any) => String(obj?.name || "") === "Halloween Pumpkin"
+  );
+  if (!hasPumpkins) return worldObjects;
+
+  const [[activeQuest]]: any = await db.query(
+    `SELECT pq.id
+     FROM player_quests pq
+     JOIN quests q ON q.id = pq.quest_id
+     WHERE pq.player_id = ?
+       AND q.title = ?
+       AND q.is_active = 1
+       AND pq.status = 'active'
+     ORDER BY pq.id DESC
+     LIMIT 1`,
+    [playerId, HALLOWED_SMASH_QUEST_TITLE]
+  );
+
+  if (!activeQuest) {
+    return worldObjects.filter(
+      (obj: any) => String(obj?.name || "") !== "Halloween Pumpkin"
+    );
+  }
+
+  const [smashedRows]: any = await db.query(
+    `SELECT world_object_id
+     FROM player_seasonal_object_interactions
+     WHERE player_id = ?
+       AND interaction_key = 'smash'`,
+    [playerId]
+  );
+
+  const smashedIds = new Set<number>(
+    (smashedRows || []).map((row: any) => Number(row.world_object_id))
+  );
+
+  return worldObjects.filter((obj: any) => {
+    if (String(obj?.name || "") !== "Halloween Pumpkin") return true;
+    return !smashedIds.has(Number(obj.id));
+  });
+}
+
+// =======================
 // WORLD VIEW
 // =======================
 router.get("/world", async (req, res) => {
@@ -1021,6 +1072,7 @@ router.get("/world", async (req, res) => {
     ORDER BY z_index ASC, id ASC
   `, [minX, maxX, minY, maxY]);
 
+  worldObjects = await filterHallowedPumpkinsForPlayer(Number(pid), worldObjects);
   worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
 
   const objectMap = buildWorldObjectMap(worldObjects);
@@ -1369,181 +1421,147 @@ res.send(`
     </section>
 
 
-    <!-- RIGHT RAIL: things happening around the player -->
+    <!-- RIGHT RAIL: nearby interactables + active trackers -->
     <aside
       class="world-rail world-rail--right frame-host"
       id="nav-hud"
-      aria-label="Nearby world information"
+      aria-label="Nearby interactables and active tracking"
     >
       <span class="frame-border panel world-rail-frame" aria-hidden="true"></span>
 
-      <!-- Active Regional World Event -->
-      <section
-        id="worldEventPanel"
-        class="world-event-panel world-rail-card frame-host"
-        hidden
-        aria-live="polite"
-      >
-        <span class="frame-border sub" aria-hidden="true"></span>
-
-        <div class="world-event-panel__header">
-          <div class="world-event-panel__heading">
-            <div class="world-event-panel__kicker">
-              Regional Event
-            </div>
-
-            <div
-              id="worldEventName"
-              class="world-event-panel__name"
-            >
-              World Event
-            </div>
-          </div>
-
-          <div
-            id="worldEventTimer"
-            class="world-event-panel__timer"
-            aria-label="World event time remaining"
-          >
-            --:--
-          </div>
+      <section class="world-nearby-panel">
+        <div class="world-nearby-panel__heading">
+          <span class="world-nearby-panel__icon" aria-hidden="true">✦</span>
+          <span>Nearby</span>
         </div>
 
-        <div
-          id="worldEventPhase"
-          class="world-event-panel__phase"
-        ></div>
-
-        <div
-          id="worldEventDescription"
-          class="world-event-panel__description"
-        ></div>
-
-        <div
-          id="worldEventObjectives"
-          class="world-event-panel__objectives"
-        ></div>
-
-        <div
-          id="worldEventState"
-          class="world-event-panel__state"
+        <!-- Current Resource -->
+        <section
+          id="currentResourcePanel"
+          class="resource-panel world-rail-card"
           hidden
-        ></div>
-      </section>
+        ></section>
 
-      <!-- Current Resource -->
-      <section
-        id="currentResourcePanel"
-        class="resource-panel world-rail-card"
-        hidden
-      ></section>
+        <!-- Interactables -->
+        <section class="nav-card nearby-card world-rail-card world-interactables-card frame-host">
+          <span class="frame-border sub" aria-hidden="true"></span>
 
-      <!-- Nearby -->
-      <section class="nav-card nearby-card world-rail-card frame-host">
-        <span class="frame-border sub" aria-hidden="true"></span>
+          <div class="nav-top">
+            <div class="nav-title">
+              <span class="nav-icon" aria-hidden="true">✦</span>
+              <span class="nav-label">Interactables</span>
+            </div>
 
-        <div class="nav-top">
-          <div class="nav-title">
-            <span class="nav-icon" aria-hidden="true">✦</span>
-            <span class="nav-label">Nearby</span>
+            <span class="nav-badge" id="nav-nearby-count">0</span>
           </div>
 
-          <span class="nav-badge" id="nav-nearby-count">0</span>
-        </div>
-
-        <div class="nearby-destinations">
-          <div class="nearby-destination">
-            <span
-              class="nearby-destination__icon"
-              aria-hidden="true"
+          <div class="nearby-interactions">
+            <div
+              class="world-interact__list"
+              id="worldInteractList"
             >
-              🏠
-            </span>
-
-            <div class="nearby-destination__details">
-              <div class="nearby-destination__label">
-                Nearest Haven
+              <div class="world-interact__empty">
+                Nothing to interact with nearby.
               </div>
-
-              <div
-                class="nearby-destination__name"
-                id="nav-haven-name"
-              >
-                —
-              </div>
-            </div>
-
-            <div class="nearby-destination__location">
-              <span
-                class="nearby-destination__arrow"
-                id="nav-haven-arrow"
-                aria-hidden="true"
-              >
-                •
-              </span>
-
-              <span
-                class="nearby-destination__distance"
-                id="nav-haven-dist"
-              >
-                — tiles
-              </span>
             </div>
           </div>
+        </section>
 
-          <div class="nearby-destination">
-            <span
-              class="nearby-destination__icon"
-              aria-hidden="true"
-            >
-              🕳
-            </span>
-
-            <div class="nearby-destination__details">
-              <div class="nearby-destination__label">
-                Nearest Dungeon
-              </div>
-
-              <div
-                class="nearby-destination__name"
-                id="nav-dungeon-name"
-              >
-                —
-              </div>
-            </div>
-
-            <div class="nearby-destination__location">
-              <span
-                class="nearby-destination__arrow"
-                id="nav-dungeon-arrow"
-                aria-hidden="true"
-              >
-                •
-              </span>
-
-              <span
-                class="nearby-destination__distance"
-                id="nav-dungeon-dist"
-              >
-                —
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div class="nearby-interactions">
-          <div class="nearby-interactions__heading">
-            Interactions
-          </div>
-
-          <div
-            class="world-interact__list"
-            id="worldInteractList"
+        <!-- Trackers live below interactables inside the Nearby panel -->
+        <div class="world-nearby-trackers">
+          <!-- Active Hunt -->
+          <section
+            id="huntTrackerPanel"
+            class="world-tracker-card world-tracker-card--hunt frame-host"
+            aria-live="polite"
           >
-            <div class="world-interact__empty">
-              Nothing to interact with nearby.
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <button
+              type="button"
+              class="world-tracker-toggle"
+              id="huntTrackerToggle"
+              aria-expanded="true"
+              aria-controls="huntTrackerBody"
+            >
+              <span class="world-tracker-toggle__label">
+                <span class="world-tracker-toggle__kicker">Party Hunt</span>
+                <span id="huntTrackerName" class="world-tracker-toggle__name">
+                  No Active Hunt
+                </span>
+              </span>
+
+              <span class="world-tracker-toggle__chevron" aria-hidden="true">▾</span>
+            </button>
+
+            <div id="huntTrackerBody" class="world-tracker-body">
+              <div id="huntTrackerContent" class="world-tracker-empty">
+                Join or begin a Hunt to track its progress here.
+              </div>
             </div>
-          </div>
+          </section>
+
+          <!-- Active Regional World Event -->
+          <section
+            id="worldEventPanel"
+            class="world-event-panel world-tracker-card world-tracker-card--event frame-host"
+            hidden
+            aria-live="polite"
+          >
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <button
+              type="button"
+              class="world-tracker-toggle world-event-tracker-toggle"
+              id="worldEventTrackerToggle"
+              aria-expanded="true"
+              aria-controls="worldEventTrackerBody"
+            >
+              <span class="world-tracker-toggle__label">
+                <span class="world-event-panel__kicker">Regional Event</span>
+                <span
+                  id="worldEventName"
+                  class="world-event-panel__name world-tracker-toggle__name"
+                >
+                  World Event
+                </span>
+              </span>
+
+              <span class="world-event-tracker-toggle__right">
+                <span
+                  id="worldEventTimer"
+                  class="world-event-panel__timer"
+                  aria-label="World event time remaining"
+                >
+                  --:--
+                </span>
+                <span class="world-tracker-toggle__chevron" aria-hidden="true">▾</span>
+              </span>
+            </button>
+
+            <div id="worldEventTrackerBody" class="world-tracker-body">
+              <div
+                id="worldEventPhase"
+                class="world-event-panel__phase"
+              ></div>
+
+              <div
+                id="worldEventDescription"
+                class="world-event-panel__description"
+              ></div>
+
+              <div
+                id="worldEventObjectives"
+                class="world-event-panel__objectives"
+              ></div>
+
+              <div
+                id="worldEventState"
+                class="world-event-panel__state"
+                hidden
+              ></div>
+            </div>
+          </section>
         </div>
       </section>
     </aside>
@@ -2748,6 +2766,18 @@ if (!tile) {
   return res.json({ success: false });
 }
 
+// Water is a hard world boundary. Enforce this server-side before any
+// movement state, Hunt ready state, encounter, gathering, or quest logic runs.
+if (String(tile.terrain || "").trim().toLowerCase() === "water") {
+  return res.json({
+    success: false,
+    blocked: true,
+    reason: "impassable_terrain",
+    terrain: "water",
+    message: "The water is too deep to cross."
+  });
+}
+
 const movementConnection =
   await db.getConnection();
 
@@ -3055,125 +3085,6 @@ if (enemy) {
   );
 }
 
-  // Nearest Haven
-  let nearestHaven: any = null;
-  let nearestDungeon: any = null;
-
-  try {
-    const [[best]]: any = await db.query(
-      `
-        SELECT
-          x,
-          y,
-          region_name,
-          (ABS(x - ?) + ABS(y - ?)) AS distance
-        FROM world_map
-        WHERE terrain = 'town'
-        ORDER BY distance ASC
-        LIMIT 1
-      `,
-      [
-        newX,
-        newY
-      ]
-    );
-
-    if (best) {
-      const bestD =
-        Number(best.distance ?? 0);
-
-      nearestHaven = {
-        name:
-          best.region_name ||
-          "Town",
-
-        level:
-          zoneLevel ?? 1,
-
-        distance:
-          bestD,
-
-        arrow:
-          dirArrow(
-            Number(best.x) - newX,
-            Number(best.y) - newY
-          )
-      };
-    }
-  } catch (e) {
-    console.warn("nearest town lookup failed", e);
-  }
-
-  // Nearest Dungeon
-  try {
-    const [[bestDungeon]]: any =
-      await db.query(
-        `
-          SELECT
-            wm.x,
-            wm.y,
-            COALESCE(
-              l.name,
-              'Dungeon'
-            ) AS name,
-
-            (
-              ABS(wm.x - ?) +
-              ABS(wm.y - ?)
-            ) AS distance
-
-          FROM world_map wm
-
-          LEFT JOIN locations l
-            ON l.map_x = wm.x
-           AND l.map_y = wm.y
-
-          WHERE wm.terrain = 'dungeon'
-
-          ORDER BY
-            distance ASC
-
-          LIMIT 1
-        `,
-        [
-          newX,
-          newY
-        ]
-      );
-
-    if (bestDungeon) {
-      nearestDungeon = {
-        name:
-          String(
-            bestDungeon.name ||
-            "Dungeon"
-          ),
-
-        distance:
-          Number(
-            bestDungeon.distance ??
-            0
-          ),
-
-        arrow:
-          dirArrow(
-            Number(
-              bestDungeon.x
-            ) - newX,
-            Number(
-              bestDungeon.y
-            ) - newY
-          )
-      };
-    }
-
-  } catch (e) {
-    console.warn(
-      "nearest dungeon lookup failed",
-      e
-    );
-  }
-
   // =======================
   // BUNDLE: world/partial data
   // =======================
@@ -3202,7 +3113,8 @@ WHERE is_active = 1
 ORDER BY z_index ASC, id ASC
 `, [minX, maxX, minY, maxY]);
 
-worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
+worldObjects = await filterHallowedPumpkinsForPlayer(Number(pid), worldObjects);
+  worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
 
   const [tiles]: any = await db.query(`
     SELECT *
@@ -3314,11 +3226,6 @@ const nearbyHuntClues =
     spawnedResourceNode,
     flavor: terrainFlavor(tile.terrain),
 
-    poi: {
-      haven: nearestHaven,
-      dungeon: nearestDungeon
-    },
-
     questProgress: {
       enterArea: enterAreaResult,
       location: locationResult
@@ -3420,7 +3327,7 @@ router.get("/api/world/nearby-objects", async (req, res) => {
        NORMAL WORLD OBJECTS
     ========================================= */
 
-    const [rows]: any =
+    let [rows]: any =
       await db.query(
         `
           SELECT
@@ -3451,6 +3358,8 @@ router.get("/api/world/nearby-objects", async (req, res) => {
           py + 5
         ]
       );
+
+    rows = await filterHallowedPumpkinsForPlayer(Number(pid), rows || []);
 
 
     const objects =
@@ -3790,6 +3699,7 @@ router.get("/world/partial", async (req, res) => {
     );
 
 
+  worldObjects = await filterHallowedPumpkinsForPlayer(Number(pid), worldObjects);
   worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
 
   /* =========================================
@@ -4193,8 +4103,12 @@ router.post("/api/world-event/interact/:spawnId", async (req, res) => {
 const HALLOWED_VENDOR_OBJECT_TYPE = "seasonal_vendor";
 const HALLOWED_VENDOR_KEY = "headless_horseman";
 const HALLOWED_CANDY_CORN_ITEM_ID = 61;
-const HALLOWED_PORTRAIT_AVATAR_ID = 12;
+const HALLOWED_PORTRAIT_AVATAR_ID = 2;
 const HALLOWED_PORTRAIT_COST = 50;
+const HALLOWED_TRICK_OR_TREAT_BAG_NAME = "Trick-or-Treat Bag";
+const HALLOWED_TRICK_OR_TREAT_BAG_COST = 100;
+const HALLOWED_SMASH_QUEST_TITLE = "Smashing Good Fun";
+const HALLOWED_PUMPKIN_KEY = "hallowed_smashable_pumpkin";
 
 async function getHallowedVendorForPlayer(playerId: number, objectId: number, executor: any = db) {
   const [[row]]: any = await executor.query(
@@ -4239,6 +4153,47 @@ async function getHallowedVendorForPlayer(playerId: number, objectId: number, ex
   return row;
 }
 
+async function getHallowedSmashQuestState(playerId: number) {
+  const [[quest]]: any = await db.query(
+    `SELECT id, title, description, dialog_intro, dialog_complete FROM quests WHERE title=? AND is_active=1 LIMIT 1`,
+    [HALLOWED_SMASH_QUEST_TITLE]
+  );
+  if (!quest) return null;
+
+  const [[pq]]: any = await db.query(
+    `SELECT id, status FROM player_quests WHERE player_id=? AND quest_id=? ORDER BY id DESC LIMIT 1`,
+    [playerId, Number(quest.id)]
+  );
+
+  let progress = 0;
+  let required = 10;
+  if (pq?.id) {
+    const [[obj]]: any = await db.query(
+      `SELECT pqo.progress_count, qo.required_count
+       FROM player_quest_objectives pqo
+       JOIN quest_objectives qo ON qo.id=pqo.objective_id
+       WHERE pqo.player_quest_id=? AND qo.type='DESTROY_OBJECT'
+       ORDER BY qo.step_order ASC, qo.id ASC LIMIT 1`,
+      [Number(pq.id)]
+    );
+    progress = Number(obj?.progress_count || 0);
+    required = Math.max(1, Number(obj?.required_count || 10));
+  }
+
+  return {
+    questId: Number(quest.id),
+    playerQuestId: pq?.id ? Number(pq.id) : null,
+    title: String(quest.title),
+    description: quest.description || null,
+    dialogIntro: quest.dialog_intro || null,
+    dialogComplete: quest.dialog_complete || null,
+    status: pq?.status || "available",
+    progress,
+    required,
+    canAccept: !pq
+  };
+}
+
 router.get("/api/seasonal-vendor/:objectId", async (req, res) => {
   try {
     const pid = Number((req.session as any)?.playerId);
@@ -4250,6 +4205,7 @@ router.get("/api/seasonal-vendor/:objectId", async (req, res) => {
     }
 
     const vendor = await getHallowedVendorForPlayer(pid, objectId);
+    const quest = await getHallowedSmashQuestState(pid);
 
     const [[currency]]: any = await db.query(
       `SELECT COALESCE(SUM(quantity), 0) AS quantity FROM inventory WHERE player_id = ? AND item_id = ?`,
@@ -4268,6 +4224,16 @@ router.get("/api/seasonal-vendor/:objectId", async (req, res) => {
 
     if (!avatar) return res.status(404).json({ error: "seasonal_reward_not_found" });
 
+    const [[bag]]: any = await db.query(
+      `SELECT id, name, icon, rarity, description, inventory_slots FROM items WHERE name = ? AND slot = 'backpack' LIMIT 1`,
+      [HALLOWED_TRICK_OR_TREAT_BAG_NAME]
+    );
+
+    const [[bagOwned]]: any = bag ? await db.query(
+      `SELECT 1 AS owned FROM inventory WHERE player_id = ? AND item_id = ? LIMIT 1`,
+      [pid, Number(bag.id)]
+    ) : [[]];
+
     return res.json({
       success: true,
       vendor: {
@@ -4275,6 +4241,7 @@ router.get("/api/seasonal-vendor/:objectId", async (req, res) => {
         name: String(vendor.name || "The Headless Horseman"),
         dialogue: "The silent rider extends a gloved hand toward your collection of Candy Corn..."
       },
+      quest,
       currency: {
         itemId: HALLOWED_CANDY_CORN_ITEM_ID,
         name: "Candy Corn",
@@ -4288,7 +4255,18 @@ router.get("/api/seasonal-vendor/:objectId", async (req, res) => {
         description: avatar.description || "An exclusive portrait from the Guildforge Alpha Hallowed event.",
         cost: HALLOWED_PORTRAIT_COST,
         owned: !!owned
-      }
+      },
+      bag: bag ? {
+        itemId: Number(bag.id),
+        name: String(bag.name || HALLOWED_TRICK_OR_TREAT_BAG_NAME),
+        icon: bag.icon || null,
+        rarity: bag.rarity || "epic",
+        description: bag.description || "A suspiciously spacious sack smelling faintly of caramel, candle wax, and poor decisions.",
+        inventorySlots: Number(bag.inventory_slots || 10),
+        cost: HALLOWED_TRICK_OR_TREAT_BAG_COST,
+        owned: !!bagOwned,
+        unlocked: String(quest?.status || "") === "claimed"
+      } : null
     });
   } catch (err: any) {
     const msg = String(err?.message || "");
@@ -4384,6 +4362,260 @@ router.post("/api/seasonal-vendor/:objectId/purchase", async (req, res) => {
   }
 });
 
+router.post("/api/seasonal-vendor/:objectId/purchase-bag", async (req, res) => {
+  const pid = Number((req.session as any)?.playerId);
+  if (!pid) return res.status(401).json({ error: "not_logged_in" });
+
+  const objectId = Number(req.params.objectId);
+  if (!Number.isInteger(objectId) || objectId <= 0) {
+    return res.status(400).json({ error: "invalid_object_id" });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    await getHallowedVendorForPlayer(pid, objectId, conn);
+
+    const [[questRow]]: any = await conn.query(
+      `SELECT pq.status
+       FROM quests q
+       JOIN player_quests pq ON pq.quest_id = q.id AND pq.player_id = ?
+       WHERE q.title = ? AND q.is_active = 1
+       ORDER BY pq.id DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [pid, HALLOWED_SMASH_QUEST_TITLE]
+    );
+
+    if (String(questRow?.status || "") !== "claimed") {
+      await conn.rollback();
+      return res.status(403).json({ error: "quest_required" });
+    }
+
+    const [[bag]]: any = await conn.query(
+      `SELECT id, name, inventory_slots FROM items WHERE name = ? AND slot = 'backpack' LIMIT 1`,
+      [HALLOWED_TRICK_OR_TREAT_BAG_NAME]
+    );
+    if (!bag) {
+      await conn.rollback();
+      return res.status(404).json({ error: "seasonal_bag_not_found" });
+    }
+
+    const [[owned]]: any = await conn.query(
+      `SELECT 1 AS owned FROM inventory WHERE player_id = ? AND item_id = ? LIMIT 1 FOR UPDATE`,
+      [pid, Number(bag.id)]
+    );
+    if (owned) {
+      await conn.rollback();
+      return res.status(409).json({ error: "already_owned" });
+    }
+
+    const [stacks]: any = await conn.query(
+      `SELECT inventory_id, quantity
+       FROM inventory
+       WHERE player_id = ? AND item_id = ? AND quantity > 0
+       ORDER BY inventory_id ASC
+       FOR UPDATE`,
+      [pid, HALLOWED_CANDY_CORN_ITEM_ID]
+    );
+
+    const total = (stacks || []).reduce((sum: number, stack: any) => sum + Number(stack.quantity || 0), 0);
+    if (total < HALLOWED_TRICK_OR_TREAT_BAG_COST) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: "not_enough_candy_corn",
+        required: HALLOWED_TRICK_OR_TREAT_BAG_COST,
+        current: total
+      });
+    }
+
+    let remaining = HALLOWED_TRICK_OR_TREAT_BAG_COST;
+    for (const stack of stacks || []) {
+      if (remaining <= 0) break;
+      const qty = Number(stack.quantity || 0);
+      const spend = Math.min(qty, remaining);
+      const left = qty - spend;
+
+      if (left <= 0) {
+        await conn.query(`DELETE FROM inventory WHERE inventory_id = ? AND player_id = ?`, [stack.inventory_id, pid]);
+      } else {
+        await conn.query(`UPDATE inventory SET quantity = ? WHERE inventory_id = ? AND player_id = ?`, [left, stack.inventory_id, pid]);
+      }
+      remaining -= spend;
+    }
+
+    await conn.query(
+      `INSERT INTO inventory (player_id, item_id, player_item_id, quantity, equipped, durability, randid)
+       VALUES (?, ?, NULL, 1, 0, NULL, NULL)`,
+      [pid, Number(bag.id)]
+    );
+
+    await conn.commit();
+    return res.json({
+      success: true,
+      message: `${String(bag.name)} purchased!`,
+      itemId: Number(bag.id),
+      inventorySlots: Number(bag.inventory_slots || 10),
+      candyCornSpent: HALLOWED_TRICK_OR_TREAT_BAG_COST,
+      candyCornRemaining: total - HALLOWED_TRICK_OR_TREAT_BAG_COST
+    });
+  } catch (err: any) {
+    try { await conn.rollback(); } catch (_) {}
+    const msg = String(err?.message || "");
+    if (msg === "SEASONAL_VENDOR_NOT_FOUND") return res.status(404).json({ error: "seasonal_vendor_not_found" });
+    if (msg === "TOO_FAR_AWAY") return res.status(400).json({ error: "too_far_away" });
+    console.error("POST /api/seasonal-vendor/:objectId/purchase-bag ERROR:", err);
+    return res.status(500).json({ error: "server_error" });
+  } finally {
+    conn.release();
+  }
+});
+
+router.post("/api/seasonal-vendor/:objectId/quest/accept", async (req, res) => {
+  try {
+    const pid = Number((req.session as any)?.playerId);
+    if (!pid) return res.status(401).json({ error: "not_logged_in" });
+    const objectId = Number(req.params.objectId);
+    if (!Number.isInteger(objectId) || objectId <= 0) return res.status(400).json({ error: "invalid_object_id" });
+
+    await getHallowedVendorForPlayer(pid, objectId);
+    const [[quest]]: any = await db.query(`SELECT id FROM quests WHERE title=? AND is_active=1 LIMIT 1`, [HALLOWED_SMASH_QUEST_TITLE]);
+    if (!quest) return res.status(404).json({ error: "seasonal_quest_not_found" });
+
+    const out = await acceptQuest(pid, Number(quest.id), "tavern");
+    return res.json({ success: true, ...out, quest: await getHallowedSmashQuestState(pid) });
+  } catch (err: any) {
+    const msg = String(err?.message || "");
+    if (String(err?.code) === "ER_DUP_ENTRY") return res.status(409).json({ error: "quest_already_accepted" });
+    if (msg === "SEASONAL_VENDOR_NOT_FOUND") return res.status(404).json({ error: "seasonal_vendor_not_found" });
+    if (msg === "TOO_FAR_AWAY") return res.status(400).json({ error: "too_far_away" });
+    console.error("POST seasonal Halloween quest accept ERROR:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+router.post("/api/seasonal-vendor/:objectId/quest/turn-in", async (req, res) => {
+  try {
+    const pid = Number((req.session as any)?.playerId);
+    if (!pid) return res.status(401).json({ error: "not_logged_in" });
+
+    const objectId = Number(req.params.objectId);
+    if (!Number.isInteger(objectId) || objectId <= 0) {
+      return res.status(400).json({ error: "invalid_object_id" });
+    }
+
+    // The seasonal quest can only be turned in while standing at the Headless Horseman.
+    await getHallowedVendorForPlayer(pid, objectId);
+
+    const [[quest]]: any = await db.query(
+      `SELECT id FROM quests WHERE title=? AND is_active=1 LIMIT 1`,
+      [HALLOWED_SMASH_QUEST_TITLE]
+    );
+    if (!quest) return res.status(404).json({ error: "seasonal_quest_not_found" });
+
+    const [[pq]]: any = await db.query(
+      `SELECT id, status
+       FROM player_quests
+       WHERE player_id=? AND quest_id=?
+       ORDER BY id DESC
+       LIMIT 1`,
+      [pid, Number(quest.id)]
+    );
+
+    if (!pq) return res.status(404).json({ error: "seasonal_quest_not_accepted" });
+    if (String(pq.status) === "claimed") {
+      return res.status(409).json({ error: "quest_already_claimed" });
+    }
+    if (String(pq.status) !== "completed") {
+      return res.status(400).json({ error: "quest_not_completed" });
+    }
+
+    const reward = await claimQuestRewards(pid, Number(pq.id));
+
+    // It no longer needs to occupy a tracked-quest slot after being handed in.
+    await db.query(
+      `DELETE FROM player_tracked_quests WHERE player_id=? AND player_quest_id=?`,
+      [pid, Number(pq.id)]
+    );
+
+    return res.json({
+      ...reward,
+      message: "Smashing Good Fun turned in!",
+      quest: await getHallowedSmashQuestState(pid)
+    });
+  } catch (err: any) {
+    const msg = String(err?.message || "");
+    if (msg === "SEASONAL_VENDOR_NOT_FOUND") return res.status(404).json({ error: "seasonal_vendor_not_found" });
+    if (msg === "TOO_FAR_AWAY") return res.status(400).json({ error: "too_far_away" });
+    if (msg === "PLAYER_QUEST_NOT_FOUND") return res.status(404).json({ error: "seasonal_quest_not_accepted" });
+    if (msg === "QUEST_NOT_COMPLETED") return res.status(400).json({ error: "quest_not_completed" });
+    if (msg === "ALREADY_CLAIMED") return res.status(409).json({ error: "quest_already_claimed" });
+    console.error("POST seasonal Halloween quest turn-in ERROR:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+router.post("/api/world/destroy/:objectId", async (req, res) => {
+  try {
+    const pid = Number((req.session as any)?.playerId);
+    if (!pid) return res.status(401).json({ error: "not_logged_in" });
+    const objectId = Number(req.params.objectId);
+    if (!Number.isInteger(objectId) || objectId <= 0) return res.status(400).json({ error: "invalid_object_id" });
+
+    const [[row]]: any = await db.query(
+      `SELECT wo.id, wo.params_json, wo.interaction_radius, wo.x, wo.y, p.map_x, p.map_y
+       FROM world_objects wo JOIN players p ON p.id=?
+       WHERE wo.id=? AND wo.is_active=1 LIMIT 1`,
+      [pid, objectId]
+    );
+    if (!row) return res.status(404).json({ error: "world_object_not_found" });
+    let params: any = row.params_json || {};
+    if (typeof params === "string") { try { params = JSON.parse(params); } catch { params = {}; } }
+    if (String(params?.seasonal_key || "") !== HALLOWED_PUMPKIN_KEY || params?.destroyable !== true) {
+      return res.status(400).json({ error: "object_not_destroyable" });
+    }
+
+    const [[activeQuest]]: any = await db.query(
+      `SELECT pq.id
+       FROM player_quests pq
+       JOIN quests q ON q.id = pq.quest_id
+       WHERE pq.player_id = ?
+         AND q.title = ?
+         AND q.is_active = 1
+         AND pq.status = 'active'
+       ORDER BY pq.id DESC
+       LIMIT 1`,
+      [pid, HALLOWED_SMASH_QUEST_TITLE]
+    );
+
+    if (!activeQuest) {
+      return res.status(400).json({ error: "no_active_destroy_objective" });
+    }
+    const distance = Math.abs(Number(row.map_x)-Number(row.x)) + Math.abs(Number(row.map_y)-Number(row.y));
+    if (distance > Math.max(0, Number(row.interaction_radius)||1)) return res.status(400).json({ error: "too_far_away" });
+
+    const [[alreadySmashed]]: any = await db.query(
+      `SELECT 1 AS smashed FROM player_seasonal_object_interactions WHERE player_id=? AND world_object_id=? AND interaction_key='smash' LIMIT 1`,
+      [pid, objectId]
+    );
+    if (alreadySmashed) return res.status(409).json({ error: "pumpkin_already_smashed" });
+
+    const out = await applyDestroyObjectProgress(pid, objectId);
+    if (!out.updatedObjectives.length) return res.status(400).json({ error: "no_active_destroy_objective" });
+
+    await db.query(
+      `INSERT INTO player_seasonal_object_interactions (player_id, world_object_id, interaction_key) VALUES (?, ?, 'smash')`,
+      [pid, objectId]
+    );
+    return res.json({ success: true, smashed: true, ...out });
+  } catch (err: any) {
+    const msg = String(err?.message || "");
+    if (msg === "WORLD_OBJECT_NOT_FOUND") return res.status(404).json({ error: "world_object_not_found" });
+    console.error("POST /api/world/destroy/:objectId ERROR:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
 router.post("/api/world/interact/:objectId", async (req, res) => {
   try {
     const pid = (req.session as any)?.playerId;
@@ -4410,3 +4642,4 @@ router.post("/api/world/interact/:objectId", async (req, res) => {
 
 
 export default router;
+

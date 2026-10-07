@@ -2757,3 +2757,90 @@ button.gfWorldChatName:hover {
   left: auto;
   z-index: 2;
 }
+
+
+/* =========================================================
+   GUILDFORGE GLOBAL FANTASY CURSORS
+   Loaded through the global stat panel stylesheet.
+========================================================= */
+
+/* Default Guildforge cursor everywhere. */
+html,
+body,
+body * {
+  cursor: url("/ui/cursor.png") 4 4, auto !important;
+}
+
+/*
+  Clickable controls AND their nested contents.
+  This prevents icons, spans, images, SVGs, etc. inside a clickable
+  control from falling back to the normal fantasy cursor.
+*/
+a,
+a *,
+button,
+button *,
+[role="button"],
+[role="button"] *,
+[onclick],
+[onclick] *,
+label[for],
+label[for] *,
+summary,
+summary *,
+select,
+select *,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+input[type="file"],
+input[type="color"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="time"],
+input[type="week"],
+input[type="number"]::-webkit-inner-spin-button,
+.cursor-pointer,
+.cursor-pointer *,
+.clickable,
+.clickable *,
+[tabindex]:not([tabindex="-1"]),
+[tabindex]:not([tabindex="-1"]) * {
+  cursor: url("/ui/cursor-pointer.png") 4 4, pointer !important;
+}
+
+/* Keep the familiar text caret anywhere the player types/selects text. */
+input:not([type]),
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+input[type="url"],
+input[type="tel"],
+textarea,
+[contenteditable="true"],
+[contenteditable="true"] * {
+  cursor: text !important;
+}
+
+/*
+  Disabled controls and everything inside them should not advertise
+  themselves as clickable. This comes after the clickable rules.
+*/
+button:disabled,
+button:disabled *,
+input:disabled,
+input:disabled *,
+select:disabled,
+select:disabled *,
+textarea:disabled,
+textarea:disabled *,
+[aria-disabled="true"],
+[aria-disabled="true"] * {
+  cursor: url("/ui/cursor.png") 4 4, default !important;
+}
+

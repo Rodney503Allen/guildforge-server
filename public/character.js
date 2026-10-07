@@ -9,7 +9,18 @@ async function addStat(stat) {
   if (data.error) return showErrorToast(data.error);
 
   const el = document.getElementById(stat);
-  if (el) el.childNodes[0].nodeValue = data.value; // keep tooltip intact
+  if (el) {
+    el.childNodes[0].nodeValue = data.value; // keep tooltip intact
+
+    // Keep the stat tooltip breakdown in sync after spending a point.
+    const oldBase = Number(el.dataset.base || 0);
+    const gear = Number(el.dataset.gear || 0);
+    const buffs = Number(el.dataset.buffs || 0);
+    const newBase = oldBase + 1;
+
+    el.dataset.base = String(newBase);
+    el.dataset.total = String(newBase + gear + buffs);
+  }
   document.getElementById("statPoints").innerText = data.stat_points;
 
   if (data.stat_points <= 0) {

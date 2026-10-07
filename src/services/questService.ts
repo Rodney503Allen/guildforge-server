@@ -792,6 +792,25 @@ export async function applyInteractProgress(pid: number, worldObjectId: number):
   }
 }
 
+export async function applyDestroyObjectProgress(pid: number, worldObjectId: number): Promise<any> {
+  const [[obj]]: any = await db.query(
+    `SELECT id, region_name, params_json FROM world_objects WHERE id=? AND is_active=1 LIMIT 1`,
+    [worldObjectId]
+  );
+  if (!obj) throw new Error("WORLD_OBJECT_NOT_FOUND");
+
+  let params = parseParams(obj.params_json);
+  const objectDefId = params.object_def_id != null ? Number(params.object_def_id) : null;
+
+  return advanceQuestObjectives(pid, {
+    type: "WORLD_OBJECT_DESTROYED",
+    worldObjectId,
+    objectDefId: Number.isFinite(objectDefId) ? objectDefId : null,
+    regionName: obj.region_name ?? null,
+    amount: 1
+  });
+}
+
 export async function applyCollectProgress(pid: number, itemId: number, amount = 1, source?: string | null) {
   return advanceQuestObjectives(pid, { type: "ITEM_COLLECTED", itemId, amount, source });
 }

@@ -709,6 +709,13 @@ router.get("/crafting/:profession", requireLogin, async (req: any, res: any) => 
 
       await new Promise(resolve => setTimeout(resolve, durationMs));
 
+      // The visible crafting action is finished now. Stop the looping work
+      // sound before waiting on the server-side craft request.
+      if (workSoundHandle?.stop) {
+        workSoundHandle.stop();
+        workSoundHandle = null;
+      }
+
       try {
         const catalystItemId =
           recipe.outputType === "item_base" && catalystSelect?.value

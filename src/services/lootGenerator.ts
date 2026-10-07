@@ -114,7 +114,7 @@ const DEFAULT_GEAR_DROP_CHANCES = {
 const CATEGORY_WEIGHTS = [
   { key: "armor" as const, weight: 55 },
   { key: "weapon" as const, weight: 35 },
-  { key: "jewelry" as const, weight: 10 }, // future-proof; ignored if no bases
+  { key: "offhand" as const, weight: 10 },
 ];
 
 const SLOT_WEIGHTS_BY_CATEGORY: Record<string, { key: string; weight: number }[]> = {
@@ -130,10 +130,6 @@ const SLOT_WEIGHTS_BY_CATEGORY: Record<string, { key: string; weight: number }[]
   ],
   offhand: [
     { key: "offhand", weight: 100 },
-  ],
-  jewelry: [
-    { key: "ring", weight: 60 },
-    { key: "amulet", weight: 40 },
   ],
 };
 
@@ -433,9 +429,6 @@ async function pickItemBase(args: {
   slot: string;
 }): Promise<ItemBaseRow | null> {
   const { itemLevel, category, slot } = args;
-
-  // jewelry is future content, so skip unless later added
-  if (category === "jewelry") return null;
 
   const [rows]: any = await db.query(
     `

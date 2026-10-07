@@ -522,7 +522,14 @@ function group(rows) {
 
     el.onlineList.innerHTML = players
       .map(player => `
-        <div class="onlinePlayerRow frame-host">
+        <div
+          class="onlinePlayerRow frame-host"
+          data-player-card-id="${Number(player.id)}"
+          role="button"
+          tabindex="0"
+          aria-label="View ${escapeHtml(player.name)}'s player card"
+          title="View ${escapeHtml(player.name)}'s player card"
+        >
           <span class="frame-border sub" aria-hidden="true"></span>
 
           <div class="onlinePlayerInfo">

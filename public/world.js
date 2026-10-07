@@ -102,7 +102,7 @@ const PROCEDURAL_BIOMES = {
   },
 
   water: {
-    terrains: new Set(["void"]),
+    terrains: new Set(["void", "water"]),
     ground: "/images/world/procedural/water/water.webp",
     decorations: []
   }
@@ -1412,37 +1412,319 @@ function bindLoreModal() {
 // HUD / NAV
 // =======================
 function updateNavHUD(data) {
-  const haven = data?.poi?.haven;
-  const dungeon = data?.poi?.dungeon;
+  // Destination guidance now lives on the full World Map.
+  // Keep this HUD hook for movement flavor and future activity state.
+  const flavor = document.getElementById("movement-flavor");
+  if (flavor) {
+    flavor.textContent =
+      data?.flavor ??
+      "You press onward.";
+  }
+}
 
-  // Haven
-  const havenName = document.getElementById("nav-haven-name");
-  const havenDist = document.getElementById("nav-haven-dist");
-  const havenArrow = document.getElementById("nav-haven-arrow");
+function setWorldTrackerCollapsed(panelId, bodyId, toggleId, collapsed) {
+  const panel = document.getElementById(panelId);
+  const body = document.getElementById(bodyId);
+  const toggle = document.getElementById(toggleId);
 
-  if (havenName) havenName.textContent = haven?.name ?? "—";
-  if (havenDist) havenDist.textContent = haven ? `${haven.distance} tiles` : "— tiles";
-  if (havenArrow) havenArrow.textContent = haven?.arrow ?? "•";
+  if (!panel || !body || !toggle) return;
 
-  // Dungeon
-  const dunName = document.getElementById("nav-dungeon-name");
-  const dunDist = document.getElementById("nav-dungeon-dist");
-  const dunArrow = document.getElementById("nav-dungeon-arrow");
+  panel.classList.toggle("is-collapsed", collapsed);
+  body.hidden = collapsed;
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+}
 
-  if (dungeon) {
-    if (dunName) dunName.textContent = dungeon.name ?? "Unknown";
-    if (dunDist) dunDist.textContent = `${dungeon.distance} tiles`;
-    if (dunArrow) dunArrow.textContent = dungeon.arrow ?? "•";
-  } else {
-    if (dunName) dunName.textContent = "Coming Soon";
-    if (dunDist) dunDist.textContent = "—";
-    if (dunArrow) dunArrow.textContent = "•";
+function bindWorldTrackerToggle(panelId, bodyId, toggleId, storageKey) {
+  const toggle = document.getElementById(toggleId);
+  if (!toggle || toggle.dataset.bound === "1") return;
+
+  toggle.dataset.bound = "1";
+
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(storageKey) === "1";
+  } catch (_) {}
+
+  setWorldTrackerCollapsed(panelId, bodyId, toggleId, collapsed);
+
+  toggle.addEventListener("click", () => {
+    const panel = document.getElementById(panelId);
+    const nextCollapsed = !panel?.classList.contains("is-collapsed");
+
+    setWorldTrackerCollapsed(panelId, bodyId, toggleId, nextCollapsed);
+
+    try {
+      localStorage.setItem(storageKey, nextCollapsed ? "1" : "0");
+    } catch (_) {}
+  });
+}
+
+function bindWorldActivityTrackers() {
+  bindWorldTrackerToggle(
+    "huntTrackerPanel",
+    "huntTrackerBody",
+    "huntTrackerToggle",
+    "gf-world-hunt-collapsed"
+  );
+
+  bindWorldTrackerToggle(
+    "worldEventPanel",
+    "worldEventTrackerBody",
+    "worldEventTrackerToggle",
+    "gf-world-event-collapsed"
+  );
+}
+
+async function loadActiveHuntTracker() {
+  try {
+    const res = await fetch("/hunts/active", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json"
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error(
+        `Active Hunt request failed (${res.status})`
+      );
+    }
+
+    const data = await res.json();
+
+    if (!data?.ok) {
+      throw new Error(
+        data?.error ||
+        "Unable to load active Hunt."
+      );
+    }
+
+    updateHuntTracker(
+      data.hunt || null,
+      null
+    );
+
+    return data.hunt || null;
+  } catch (err) {
+    console.warn(
+      "Unable to refresh World Hunt tracker:",
+      err
+    );
+
+    return null;
+  }
+}
+
+function updateHuntTracker(activeHunt = null, nearby = null) {
+  const panel = document.getElementById("huntTrackerPanel");
+  const nameEl = document.getElementById("huntTrackerName");
+  const content = document.getElementById("huntTrackerContent");
+
+  if (!panel || !nameEl || !content) return;
+
+  const nearbyObjects =
+    Array.isArray(nearby?.objects)
+      ? nearby.objects
+      : [];
+
+  const nearbyTarget =
+    nearby?.huntTargets?.[0] ||
+    nearbyObjects.find(
+      obj => obj?.object_type === "hunt_target"
+    ) ||
+    window.__HUNT_TARGETS__?.[0] ||
+    null;
+
+  if (!activeHunt) {
+    nameEl.textContent = "No Active Hunt";
+    content.className = "world-tracker-empty";
+    content.innerHTML =
+      "Join or begin a Hunt to track its progress here.";
+    return;
   }
 
-  // Travel flavor
-  const flavor = document.getElementById("movement-flavor");
-  if (flavor) flavor.textContent = data?.flavor ?? "You press onward.";
+  const huntDefinition =
+    activeHunt.hunt ||
+    {};
+
+  const huntName =
+    huntDefinition.name ||
+    activeHunt.huntName ||
+    "Active Hunt";
+
+  nameEl.textContent = huntName;
+  content.className = "hunt-tracker-content";
+
+  const trackingProgress =
+    Math.max(
+      0,
+      Number(activeHunt.trackingProgress || 0)
+    );
+
+  const trackingRequired =
+    Math.max(
+      0,
+      Number(
+        activeHunt.trackingRequired ??
+        huntDefinition.trackingRequired ??
+        0
+      )
+    );
+
+  const trackingPercent =
+    trackingRequired > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            (trackingProgress / trackingRequired) * 100
+          )
+        )
+      : 0;
+
+  const objectives =
+    Array.isArray(activeHunt.objectives)
+      ? activeHunt.objectives
+      : [];
+
+  const objectiveHtml =
+    objectives.length
+      ? objectives.map(objective => {
+          const progress =
+            Math.max(
+              0,
+              Number(objective.progressCount || 0)
+            );
+
+          const required =
+            Math.max(
+              1,
+              Number(objective.requiredCount || 1)
+            );
+
+          const shownProgress =
+            Math.min(progress, required);
+
+          const complete =
+            Boolean(objective.isComplete) ||
+            shownProgress >= required;
+
+          const description =
+            escapeHtml(
+              objective.description ||
+              "Hunt objective"
+            );
+
+          const optional =
+            objective.isRequired === false
+              ? `<span class="hunt-objective__optional">Optional</span>`
+              : "";
+
+          return `
+            <div class="hunt-objective${complete ? " is-complete" : ""}">
+              <span class="hunt-objective__state" aria-hidden="true">
+                ${complete ? "✓" : "◆"}
+              </span>
+
+              <div class="hunt-objective__body">
+                <div class="hunt-objective__description">
+                  ${description}
+                  ${optional}
+                </div>
+
+                <div class="hunt-objective__progress">
+                  ${shownProgress} / ${required}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("")
+      : `
+          <div class="world-tracker-empty">
+            No Hunt objectives are available.
+          </div>
+        `;
+
+  const status =
+    String(activeHunt.status || "tracking");
+
+  let statusLabel = "Tracking";
+
+  if (
+    activeHunt.targetRevealed ||
+    status === "revealed"
+  ) {
+    statusLabel = "Quarry Located";
+  } else if (status === "engaged") {
+    statusLabel = "Hunt Engaged";
+  }
+
+  const targetHtml =
+    activeHunt.targetRevealed
+      ? `
+          <div class="hunt-tracker-target">
+            <span class="hunt-tracker-target__label">
+              Quarry Located
+            </span>
+            <span class="hunt-tracker-target__text">
+              ${
+                nearbyTarget
+                  ? `${escapeHtml(nearbyTarget.name || huntName)} is nearby.`
+                  : "The Hunt target has been revealed. Track it down."
+              }
+            </span>
+          </div>
+        `
+      : "";
+
+  content.innerHTML = `
+    <div class="hunt-tracker-summary">
+      <div class="hunt-tracker-summary__top">
+        <span class="hunt-tracker-status">
+          ${statusLabel}
+        </span>
+
+        ${
+          trackingRequired > 0
+            ? `
+                <span class="hunt-tracker-summary__value">
+                  ${trackingProgress} / ${trackingRequired}
+                </span>
+              `
+            : ""
+        }
+      </div>
+
+      ${
+        trackingRequired > 0
+          ? `
+              <div
+                class="hunt-tracker-progress__bar"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="${trackingRequired}"
+                aria-valuenow="${Math.min(trackingProgress, trackingRequired)}"
+              >
+                <span style="width:${trackingPercent}%"></span>
+              </div>
+            `
+          : ""
+      }
+    </div>
+
+    <div class="hunt-objectives">
+      <div class="hunt-objectives__heading">
+        Objectives
+      </div>
+
+      ${objectiveHtml}
+    </div>
+
+    ${targetHtml}
+  `;
 }
+
 
 function getWorldTileSize() {
   /*
@@ -1757,10 +2039,13 @@ function normalizeMoveDir(dir) {
     : "";
 }
 function showHuntProgress(progress) {
-  if (
-    !progress ||
-    !progress.advanced
-  ) {
+  if (!progress) {
+    return;
+  }
+
+  loadActiveHuntTracker();
+
+  if (!progress.advanced) {
     return;
   }
 
@@ -2510,11 +2795,17 @@ function renderWorldFromData({
           ? ""
           : t.terrain;
 
+      const normalizedTerrain = String(t.terrain || "")
+        .trim()
+        .toLowerCase();
+
       const baseStyle = replaceSprite
         ? ` style="background-image: url('${escapeHtml(replaceSprite)}');"`
         : proceduralVisuals
           ? ` style="background-image: url('${escapeHtml(proceduralVisuals.ground)}');"`
-          : "";
+          : normalizedTerrain === "water"
+            ? ` style="background-image: url('/images/world/procedural/water/water.webp');"`
+            : "";
 
       const proceduralTransitionHtml =
         renderProceduralTransitions(
@@ -4884,6 +5175,10 @@ function renderNearbyObjects(objects) {
         obj.object_type ===
         "seasonal_vendor";
 
+      const isHalloweenPumpkin =
+        obj.object_type === "seasonal_object" &&
+        String(obj.name || "").toLowerCase().includes("halloween pumpkin");
+
       const rangeText =
         obj.inRange
           ? `
@@ -4968,6 +5263,17 @@ function renderNearbyObjects(objects) {
     </button>
   `;
 
+} else if (isHalloweenPumpkin) {
+
+  btn = `
+    <button
+      class="world-interact__btn world-interact__btn--seasonal"
+      onclick="smashHalloweenPumpkin(${Number(obj.id)})"
+    >
+      Smash Pumpkin
+    </button>
+  `;
+
 } else if (isWorldEventInteract) {
 
   btn = `
@@ -5010,6 +5316,8 @@ function renderNearbyObjects(objects) {
             ? "Hunt Quarry"
             : isWorldEventInteract
               ? "World Event"
+              : isHalloweenPumpkin
+                ? "All Hallows' Eve"
               : isSeasonalVendor
                 ? "Seasonal Merchant"
                 : String(
@@ -5586,8 +5894,10 @@ function renderHallowedVendor(data, objectId) {
   const vendor = data?.vendor || {};
   const currency = data?.currency || {};
   const reward = data?.reward || {};
+  const bag = data?.bag || null;
   const owned = !!reward.owned;
   const canAfford = Number(currency.quantity || 0) >= Number(reward.cost || 0);
+  const canAffordBag = !!bag && Number(currency.quantity || 0) >= Number(bag.cost || 0);
 
   backdrop.innerHTML = `
     <div class="hallowed-vendor" role="dialog" aria-modal="true" aria-label="${escapeHtml(vendor.name || "The Headless Horseman")}">
@@ -5596,6 +5906,7 @@ function renderHallowedVendor(data, objectId) {
         <div class="hallowed-vendor__title">${escapeHtml(vendor.name || "The Headless Horseman")}</div>
         <div class="hallowed-vendor__dialogue">${escapeHtml(vendor.dialogue || "")}</div>
       </div>
+      ${renderHallowedQuestBlock(data?.quest, objectId)}
       <div class="hallowed-vendor__currency">Candy Corn: ${Number(currency.quantity || 0)}</div>
       <div class="hallowed-vendor__reward">
         ${reward.imageUrl ? `<img class="hallowed-vendor__portrait" src="${escapeHtml(reward.imageUrl)}" alt="${escapeHtml(reward.name || "Hallowed Alpha Portrait")}">` : `<div class="hallowed-vendor__portrait"></div>`}
@@ -5608,9 +5919,119 @@ function renderHallowedVendor(data, objectId) {
             : `<button class="hallowed-vendor__buy" ${canAfford ? "" : "disabled"} onclick="purchaseHallowedPortrait(${Number(objectId)})">${canAfford ? "Unlock Portrait" : "Not Enough Candy Corn"}</button>`}
         </div>
       </div>
+      ${bag ? `
+        <div class="hallowed-vendor__reward">
+          ${bag.icon ? `<img class="hallowed-vendor__portrait" src="/${escapeHtml(String(bag.icon).replace(/^\/+/, ""))}" alt="${escapeHtml(bag.name || "Trick-or-Treat Bag")}">` : `<div class="hallowed-vendor__portrait"></div>`}
+          <div>
+            <div class="hallowed-vendor__reward-name">${escapeHtml(bag.name || "Trick-or-Treat Bag")}</div>
+            <div class="hallowed-vendor__desc">${escapeHtml(bag.description || "A suspiciously spacious Halloween sack.")}</div>
+            <div class="hallowed-vendor__cost">+${Number(bag.inventorySlots || 10)} Inventory Slots &bull; Cost: ${Number(bag.cost || 100)} Candy Corn</div>
+            ${bag.owned
+              ? `<div class="hallowed-vendor__owned">Owned</div>`
+              : !bag.unlocked
+                ? `<button class="hallowed-vendor__buy" disabled>Complete Smashing Good Fun</button>`
+                : `<button class="hallowed-vendor__buy" ${canAffordBag ? "" : "disabled"} onclick="purchaseHallowedBag(${Number(objectId)})">${canAffordBag ? "Buy Trick-or-Treat Bag" : "Not Enough Candy Corn"}</button>`}
+          </div>
+        </div>
+      ` : ""}
     </div>
   `;
   backdrop.style.display = "flex";
+}
+
+function renderHallowedQuestBlock(quest, objectId) {
+  if (!quest) return "";
+  const status = String(quest.status || "available").toLowerCase();
+  const progress = Number(quest.progress || 0);
+  const required = Number(quest.required || 10);
+  const done = ["completed", "claimed"].includes(status);
+  return `
+    <div class="hallowed-vendor__reward hallowed-vendor__quest">
+      <div>
+        <div class="hallowed-vendor__reward-name">${escapeHtml(quest.title || "Smashing Good Fun")}</div>
+        <div class="hallowed-vendor__desc">${escapeHtml(quest.description || "Smash ten Halloween pumpkins.")}</div>
+        ${status === "available"
+          ? `<button class="hallowed-vendor__buy" onclick="acceptHallowedSmashQuest(${Number(objectId)})">Accept Quest</button>`
+          : status === "completed"
+            ? `<div class="hallowed-vendor__cost">Pumpkins Smashed: ${required}/${required}</div>
+               <button class="hallowed-vendor__buy" onclick="turnInHallowedSmashQuest(${Number(objectId)})">Turn In Quest</button>`
+            : status === "claimed"
+              ? `<div class="hallowed-vendor__owned">Completed — ${required}/${required} Pumpkins Smashed</div>`
+              : `<div class="hallowed-vendor__cost">Pumpkins Smashed: ${progress}/${required}</div>`}
+      </div>
+    </div>
+  `;
+}
+
+async function acceptHallowedSmashQuest(objectId) {
+  try {
+    const res = await fetch(`/api/seasonal-vendor/${Number(objectId)}/quest/accept`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Quest acceptance failed.");
+    if (window.GFToast?.show) GFToast.show("Quest Accepted", "Smashing Good Fun — smash 10 Halloween Pumpkins.", { type: "success", durationMs: 3200 });
+    await openHallowedVendor(objectId);
+    await refreshWorld();
+    await loadNearbyObjects();
+    if (typeof refreshTrackedQuest === "function") await refreshTrackedQuest();
+  } catch (err) {
+    console.error("Halloween quest acceptance failed", err);
+    showErrorToast("The quest could not be accepted.", "Quest Unavailable");
+  }
+}
+
+
+async function turnInHallowedSmashQuest(objectId) {
+  try {
+    const res = await fetch(`/api/seasonal-vendor/${Number(objectId)}/quest/turn-in`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data?.error === "quest_not_completed") return showErrorToast("You still have pumpkins left to smash.", "Quest Not Complete");
+      if (data?.error === "quest_already_claimed") return showErrorToast("You've already turned this quest in.", "Already Completed");
+      if (data?.error === "too_far_away") return showErrorToast("Move closer to the Headless Horseman.", "Too Far Away");
+      throw new Error(data?.error || "Quest turn-in failed.");
+    }
+
+    if (window.GFToast?.show) {
+      GFToast.show("Quest Complete", "Smashing Good Fun has been turned in to the Headless Horseman.", { type: "success", durationMs: 3400 });
+    }
+
+    await openHallowedVendor(objectId);
+    if (typeof refreshTrackedQuest === "function") await refreshTrackedQuest();
+  } catch (err) {
+    console.error("Halloween quest turn-in failed", err);
+    showErrorToast("The quest could not be turned in.", "Turn In Failed");
+  }
+}
+
+async function smashHalloweenPumpkin(objectId) {
+  if (isInCombat()) return;
+  try {
+    const res = await fetch(`/api/world/destroy/${Number(objectId)}`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data?.error === "pumpkin_already_smashed") return showErrorToast("You've already smashed this pumpkin.", "Already Smashed");
+      if (data?.error === "no_active_destroy_objective") return showErrorToast("The Headless Horseman hasn't asked you to smash pumpkins yet.", "No Active Quest");
+      if (data?.error === "too_far_away") return showErrorToast("Move closer to the pumpkin.", "Too Far Away");
+      throw new Error(data?.error || "Pumpkin smash failed.");
+    }
+    const update = data?.updatedObjectives?.[0];
+    if (window.GFToast?.show && update) {
+      const complete = Number(update.is_complete) === 1;
+      GFToast.show(complete ? "Smashing Good Fun Complete!" : "Pumpkin Smashed!", `${Number(update.progress_count)}/${Number(update.required_count)} pumpkins smashed.`, { type: "success", durationMs: 2600 });
+    }
+    await refreshWorld();
+    await loadNearbyObjects();
+    if (typeof refreshTrackedQuest === "function") await refreshTrackedQuest();
+  } catch (err) {
+    console.error("Halloween pumpkin smash failed", err);
+    showErrorToast("The pumpkin stubbornly refuses to smash.", "Smash Failed");
+  }
 }
 
 async function purchaseHallowedPortrait(objectId) {
@@ -5650,9 +6071,58 @@ async function purchaseHallowedPortrait(objectId) {
   }
 }
 
+async function purchaseHallowedBag(objectId) {
+  try {
+    const res = await fetch(`/api/seasonal-vendor/${Number(objectId)}/purchase-bag`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data?.error === "quest_required") {
+        showErrorToast("Complete and turn in Smashing Good Fun first.", "Quest Required");
+        return;
+      }
+      if (data?.error === "not_enough_candy_corn") {
+        showErrorToast(`You need ${Number(data.required || 100)} Candy Corn.`, "Not Enough Candy Corn");
+        await openHallowedVendor(objectId);
+        return;
+      }
+      if (data?.error === "already_owned") {
+        await openHallowedVendor(objectId);
+        return;
+      }
+      if (data?.error === "too_far_away") {
+        closeHallowedVendor();
+        showErrorToast("You moved too far away from the Headless Horseman.", "Too Far Away");
+        return;
+      }
+      if (data?.error === "seasonal_bag_not_found") {
+        showErrorToast("The Trick-or-Treat Bag item is missing from the item database.", "Bag Unavailable");
+        return;
+      }
+      throw new Error(data?.error || "Bag purchase failed.");
+    }
+
+    if (window.GFToast?.show) {
+      GFToast.show("Trick-or-Treat Bag Purchased!", `The ${Number(data.inventorySlots || 10)}-slot backpack has been added to your inventory.`, { type: "success", durationMs: 3600 });
+    }
+    await openHallowedVendor(objectId);
+  } catch (err) {
+    console.error("Hallowed bag purchase failed", err);
+    showErrorToast("The Trick-or-Treat Bag could not be purchased.", "Purchase Failed");
+  }
+}
+
 window.openHallowedVendor = openHallowedVendor;
 window.closeHallowedVendor = closeHallowedVendor;
 window.purchaseHallowedPortrait = purchaseHallowedPortrait;
+window.purchaseHallowedBag = purchaseHallowedBag;
+window.acceptHallowedSmashQuest = acceptHallowedSmashQuest;
+window.turnInHallowedSmashQuest = turnInHallowedSmashQuest;
+window.smashHalloweenPumpkin = smashHalloweenPumpkin;
 
 async function interactWithWorldObject(objectId) {
   if (isInCombat()) return;
@@ -6411,13 +6881,23 @@ function escapeHtml(value) {
     return (mapData.tiles||[]).find(t=>Number(t.x)===x && Number(t.y)===y) || null;
   }
 
+  function hideHoverCard() {
+    if (!hoverCard) return;
+    hoverCard.hidden = true;
+    hoverCard.style.display = "none";
+  }
+
   function updateHoverCard(e) {
-    if (!hoverCard || dragging) {
-      if (hoverCard) hoverCard.hidden=true;
+    if (!hoverCard || dragging || !mapData) {
+      hideHoverCard();
       return;
     }
+
     const tile=tileAtPointer(e.clientX,e.clientY);
-    if (!tile) { hoverCard.hidden=true; return; }
+    if (!tile) {
+      hideHoverCard();
+      return;
+    }
 
     const region=String(tile.regionName || "Unknown Region");
     const location=(mapData.locations||[]).find(l=>Number(l.x)===Number(tile.x) && Number(l.y)===Number(tile.y));
@@ -6435,11 +6915,25 @@ function escapeHtml(value) {
           (location ? `<span>${escapeHtmlMap(location.name)}</span>` : "") +
           `<small>(${Number(tile.x)}, ${Number(tile.y)})</small>`;
 
-    const rect=viewport.getBoundingClientRect();
-    const px=e.clientX-rect.left+14, py=e.clientY-rect.top+14;
-    hoverCard.style.left=`${Math.min(px,Math.max(8,rect.width-210))}px`;
-    hoverCard.style.top=`${Math.min(py,Math.max(8,rect.height-82))}px`;
-    hoverCard.hidden=false;
+    // The hover card is promoted to <body> in init(), so position it in
+    // viewport coordinates. This keeps it completely outside the map
+    // viewport's overflow:hidden / border stacking context.
+    const cardWidth = 210;
+    const cardHeight = 86;
+    const gap = 14;
+    const px = Math.min(
+      e.clientX + gap,
+      Math.max(8, window.innerWidth - cardWidth - 8)
+    );
+    const py = Math.min(
+      e.clientY + gap,
+      Math.max(8, window.innerHeight - cardHeight - 8)
+    );
+
+    hoverCard.style.left = `${px}px`;
+    hoverCard.style.top = `${py}px`;
+    hoverCard.hidden = false;
+    hoverCard.style.display = "block";
   }
 
   function escapeHtmlMap(value) {
@@ -6456,6 +6950,13 @@ function escapeHtml(value) {
     centerBtn=document.getElementById("worldMapCenterBtn");
     hoverCard=document.getElementById("worldMapHoverCard");
     if (!modal || !viewport || !canvas) return;
+
+    // Keep the hover tooltip outside the viewport. The viewport intentionally
+    // clips the canvas while panning, so a tooltip left inside it can be
+    // clipped or trapped in its stacking context by the decorative frame.
+    if (hoverCard && hoverCard.parentElement !== document.body) {
+      document.body.appendChild(hoverCard);
+    }
 
     closeBtn?.addEventListener("click",close);
     centerBtn?.addEventListener("click",centerOnPlayer);
@@ -6485,15 +6986,28 @@ function escapeHtml(value) {
         offsetX=dragOriginX+(e.clientX-dragStartX);
         offsetY=dragOriginY+(e.clientY-dragStartY);
         draw();
-        if (hoverCard) hoverCard.hidden=true;
-        return;
+        hideHoverCard();
       }
-      updateHoverCard(e);
     });
-    viewport.addEventListener("pointerleave",()=>{ if(hoverCard) hoverCard.hidden=true; });
+
+    // Hover belongs to the actual map surface. Keeping this on the canvas
+    // prevents decorative viewport/frame layers from swallowing tile hover.
+    canvas.addEventListener("pointermove",e=>{
+      if (!dragging) updateHoverCard(e);
+    });
+    canvas.addEventListener("mousemove",e=>{
+      if (!dragging) updateHoverCard(e);
+    });
+    canvas.addEventListener("pointerleave",hideHoverCard);
+    viewport.addEventListener("pointerleave",hideHoverCard);
     const endDrag=e=>{
-      dragging=false; viewport.classList.remove("is-dragging");
+      dragging=false;
+      viewport.classList.remove("is-dragging");
       try { viewport.releasePointerCapture(e.pointerId); } catch {}
+
+      // Re-evaluate the tile immediately after panning ends instead of
+      // requiring the mouse to leave/re-enter the map before hover returns.
+      updateHoverCard(e);
     };
     viewport.addEventListener("pointerup",endDrag);
     viewport.addEventListener("pointercancel",endDrag);
@@ -6531,3 +7045,12 @@ function escapeHtml(value) {
   window.openFullWorldMap=open;
   window.closeFullWorldMap=close;
 })();
+
+
+// =======================
+// WORLD RIGHT-RAIL TRACKERS
+// =======================
+document.addEventListener("DOMContentLoaded", () => {
+  bindWorldActivityTrackers();
+  loadActiveHuntTracker();
+});
