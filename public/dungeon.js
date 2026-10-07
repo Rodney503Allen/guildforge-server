@@ -53,6 +53,14 @@ let dungeonPollingTimer =
 let dungeonBusy =
   false;
 
+/*
+ * Loot choices need their own lock. Do not reuse dungeonBusy here:
+ * refreshDungeonPage() intentionally returns while dungeonBusy is true,
+ * and the final loot choice may need to refresh immediately into Rest.
+ */
+let dungeonLootChoiceBusy =
+  false;
+
 let dungeonRestState =
   null;
 
@@ -4424,6 +4432,35 @@ async function renderDungeonLootPanel(
   const data =
     await response.json();
 
+  if (
+    !response.ok ||
+    data?.ok === false
+  ) {
+    throw new Error(
+      data?.error ||
+      "Unable to load dungeon loot."
+    );
+  }
+
+  /*
+   * A lifecycle socket event and an in-flight loot fetch can cross.
+   * If the authoritative server state has already left Loot, do not
+   * repaint a stale loot panel over the new Rest/Complete state.
+   */
+  const lootPhase =
+    String(
+      data?.loot?.phase ??
+      ""
+    ).toLowerCase();
+
+  if (
+    data?.loot &&
+    lootPhase !== "loot"
+  ) {
+    await refreshDungeonPage();
+    return;
+  }
+
   const rolls =
     data?.loot?.rolls ??
     [];
@@ -4651,44 +4688,111 @@ async function submitDungeonLootChoice(
   rollId,
   choice
 ) {
-  const response =
-    await fetch(
-      `/api/dungeons/active/loot/${
-        rollId
-      }/choice`,
-      {
-        method:
-          "POST",
+  if (
+    dungeonLootChoiceBusy
+  ) {
+    return;
+  }
 
-        credentials:
-          "include",
+  dungeonLootChoiceBusy =
+    true;
 
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
+  const lootButtons =
+    document.querySelectorAll(
+      "[data-loot-choice]"
+    );
 
-        body:
-          JSON.stringify({
-            choice
-          })
+  lootButtons.forEach(
+    button => {
+      button.disabled =
+        true;
+    }
+  );
+
+  try {
+    const response =
+      await fetch(
+        `/api/dungeons/active/loot/${
+          rollId
+        }/choice`,
+        {
+          method:
+            "POST",
+
+          credentials:
+            "include",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              choice
+            })
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      data.ok === false
+    ) {
+      throw new Error(
+        data.error ||
+        "Unable to submit loot choice."
+      );
+    }
+
+    /*
+     * The server resolves Need/Greed/Pass and, when this was the last
+     * outstanding choice on the last open roll, atomically advances
+     * the instance from Loot -> Rest. Refresh immediately so the
+     * resolving player does not wait for the socket or recovery poll.
+     */
+    if (
+      data.movedToRest
+    ) {
+      dungeonCombat =
+        null;
+
+      stopSmoothDungeonTimers();
+    }
+
+    await refreshDungeonPage();
+  } catch (error) {
+    console.error(
+      "Dungeon loot choice failed:",
+      error
+    );
+
+    setDungeonText(
+      "dungeonActionStatus",
+      error?.message ||
+      "Unable to submit loot choice."
+    );
+
+    lootButtons.forEach(
+      button => {
+        if (
+          document.body.contains(
+            button
+          )
+        ) {
+          button.disabled =
+            false;
+        }
       }
     );
 
-  const data =
-    await response.json();
-
-  if (
-    !response.ok ||
-    data.ok === false
-  ) {
-    throw new Error(
-      data.error ||
-      "Unable to submit loot choice."
-    );
+    throw error;
+  } finally {
+    dungeonLootChoiceBusy =
+      false;
   }
-
-  await refreshDungeonPage();
 }
 
 async function renderDungeonRestPanel(

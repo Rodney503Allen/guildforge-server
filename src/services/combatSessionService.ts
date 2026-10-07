@@ -92,6 +92,19 @@ export type CombatDamageEvent = {
   createdAt: number;
 };
 
+export type CombatEnemyEffect = {
+  id: number;
+  kind: "dot" | "debuff";
+  spellId: number | null;
+  spellName: string | null;
+  icon: string | null;
+  stat: string | null;
+  value: number;
+  ticksApplied?: number;
+  totalTicks?: number;
+  remainingMs: number;
+};
+
 export type CombatSession = {
   playerId: number;
   enemyInstanceId: number;
@@ -110,6 +123,10 @@ export type CombatSession = {
 
   nextDamageEventId: number;
   damageEvents: CombatDamageEvent[];
+
+  effects: {
+    enemy: CombatEnemyEffect[];
+  };
 
   rewards?: {
     exp?: number;
@@ -311,6 +328,94 @@ async function refreshSessionEnemy(session: CombatSession) {
 
   return enemyStats;
 }
+
+async function refreshSessionEffects(session: CombatSession) {
+  const [debuffRows]: any = await db.query(
+    `
+    SELECT
+      pcd.id,
+      pcd.stat,
+      pcd.value,
+      pcd.source,
+      GREATEST(
+        0,
+        TIMESTAMPDIFF(MICROSECOND, NOW(3), pcd.expires_at) / 1000
+      ) AS remaining_ms,
+      s.id AS spell_id,
+      s.name AS spell_name,
+      s.icon AS spell_icon
+    FROM player_creature_debuffs pcd
+    LEFT JOIN spells s
+      ON s.id = CAST(
+        SUBSTRING_INDEX(
+          SUBSTRING_INDEX(pcd.source, '|', 1),
+          ':',
+          -1
+        ) AS UNSIGNED
+      )
+    WHERE pcd.player_creature_id = ?
+      AND pcd.expires_at > NOW(3)
+    ORDER BY pcd.expires_at ASC
+    `,
+    [session.enemyInstanceId],
+  );
+
+  const [dotRows]: any = await db.query(
+    `
+    SELECT
+      pcd.id,
+      pcd.source,
+      pcd.ticks_applied,
+      pcd.total_ticks,
+      GREATEST(
+        0,
+        TIMESTAMPDIFF(MICROSECOND, NOW(3), pcd.expires_at) / 1000
+      ) AS remaining_ms,
+      s.id AS spell_id,
+      s.name AS spell_name,
+      s.icon AS spell_icon
+    FROM player_creature_dots pcd
+    LEFT JOIN spells s
+      ON s.id = CAST(
+        SUBSTRING_INDEX(
+          SUBSTRING_INDEX(pcd.source, '|', 1),
+          ':',
+          -1
+        ) AS UNSIGNED
+      )
+    WHERE pcd.player_creature_id = ?
+      AND pcd.expires_at > NOW(3)
+    ORDER BY pcd.expires_at ASC
+    `,
+    [session.enemyInstanceId],
+  );
+
+  session.effects.enemy = [
+    ...(debuffRows || []).map((row: any) => ({
+      id: Number(row.id),
+      kind: "debuff" as const,
+      spellId: row.spell_id != null ? Number(row.spell_id) : null,
+      spellName: row.spell_name ? String(row.spell_name) : null,
+      icon: row.spell_icon ? String(row.spell_icon) : null,
+      stat: row.stat ? String(row.stat) : null,
+      value: Number(row.value || 0),
+      remainingMs: Math.max(0, Number(row.remaining_ms || 0)),
+    })),
+    ...(dotRows || []).map((row: any) => ({
+      id: Number(row.id),
+      kind: "dot" as const,
+      spellId: row.spell_id != null ? Number(row.spell_id) : null,
+      spellName: row.spell_name ? String(row.spell_name) : null,
+      icon: row.spell_icon ? String(row.spell_icon) : null,
+      stat: "damage_over_time",
+      value: 0,
+      ticksApplied: Number(row.ticks_applied || 0),
+      totalTicks: Number(row.total_ticks || 0),
+      remainingMs: Math.max(0, Number(row.remaining_ms || 0)),
+    })),
+  ];
+}
+
 async function processEnemyDots(session: CombatSession) {
   if (session.state !== "active") return;
 
@@ -1145,6 +1250,9 @@ export async function createCombatSession(
     updatedAt: now,
     nextDamageEventId: 1,
     damageEvents: [],
+    effects: {
+      enemy: [],
+    },
     nextPlayerAutoAttackAt: now + PLAYER_AUTO_ATTACK_MS,
     state: "active",
 
@@ -1182,6 +1290,8 @@ export async function createCombatSession(
 
     log: [`⚠ ${enemyDisplayName} engages you!`],
   };
+
+  await refreshSessionEffects(session);
 
   combatSessions.set(playerId, session);
   return session;
@@ -1240,6 +1350,8 @@ export async function advanceCombatSession(session: CombatSession) {
   if (session.state !== "active") return session;
 
   await processEnemyAction(session);
+
+  await refreshSessionEffects(session);
 
   return session;
 }
@@ -1325,6 +1437,12 @@ export function buildCombatSnapshot(session: CombatSession) {
       ready: session.enemy.ready,
       recoveryMs: Math.max(0, session.enemy.recoveryUntil - now),
       readyInMs: getActorReadyInMs(session.enemy),
+    },
+    effects: {
+      enemy: session.effects.enemy.map((effect) => ({
+        ...effect,
+        remainingMs: Math.max(0, Number(effect.remainingMs || 0)),
+      })),
     },
     damageEvents: session.damageEvents,
     log: session.log,

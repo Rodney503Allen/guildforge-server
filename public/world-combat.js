@@ -873,6 +873,169 @@ function syncDamageEvents(snapshot) {
   }
 }
 
+
+function normalizeCombatEffectIcon(icon) {
+  const raw = String(icon || "").trim();
+  if (!raw) return "";
+
+  if (
+    raw.startsWith("/") ||
+    raw.startsWith("http://") ||
+    raw.startsWith("https://")
+  ) {
+    return raw;
+  }
+
+  return `/icons/spells/${raw}`;
+}
+
+function combatEffectEmoji(effect, isPlayerBuff = false) {
+  const stat = String(effect?.stat || "").toLowerCase();
+
+  if (effect?.kind === "dot" || stat.includes("dot") || stat.includes("damage_over_time")) return "🔥";
+  if (stat.includes("defense")) return isPlayerBuff ? "🛡️" : "💔";
+  if (stat.includes("attack_speed") || stat.includes("agility")) return isPlayerBuff ? "💨" : "🕸️";
+  if (stat.includes("attack")) return isPlayerBuff ? "⚔️" : "⬇️";
+  if (stat.includes("crit")) return isPlayerBuff ? "🎯" : "☠️";
+  if (stat.includes("vitality") || stat.includes("health")) return "❤️";
+  if (stat.includes("intellect") || stat.includes("spell")) return "✨";
+  if (stat.includes("shield")) return "🛡️";
+
+  return isPlayerBuff ? "✨" : "☠️";
+}
+
+function formatCombatEffectName(effect, fallback = "Effect") {
+  const raw =
+    effect?.spellName ||
+    effect?.name ||
+    effect?.displayName ||
+    effect?.stat ||
+    fallback;
+
+  return String(raw)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function formatCombatEffectSeconds(effect) {
+  if (Number.isFinite(Number(effect?.remainingMs))) {
+    return Math.max(0, Math.ceil(Number(effect.remainingMs) / 1000));
+  }
+
+  const expiresAt = new Date(effect?.expires_at || 0).getTime();
+  if (Number.isFinite(expiresAt) && expiresAt > 0) {
+    return Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+  }
+
+  return null;
+}
+
+function renderCombatEffects(containerId, effects, options = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const isPlayerBuff = Boolean(options.playerBuff);
+  const active = (Array.isArray(effects) ? effects : [])
+    .filter(effect => {
+      const seconds = formatCombatEffectSeconds(effect);
+      return seconds === null || seconds > 0;
+    });
+
+  container.innerHTML = active.map(effect => {
+    const name = formatCombatEffectName(
+      effect,
+      isPlayerBuff ? "Buff" : "Enemy Effect"
+    );
+    const seconds = formatCombatEffectSeconds(effect);
+    const icon = normalizeCombatEffectIcon(effect?.icon);
+    const emoji = combatEffectEmoji(effect, isPlayerBuff);
+    const kind = isPlayerBuff
+      ? "buff"
+      : (effect?.kind === "dot" ? "dot" : "debuff");
+
+    const value = Number(effect?.value || 0);
+    const detailParts = [];
+
+    if (effect?.stat) {
+      detailParts.push(
+        String(effect.stat).replace(/_/g, " ")
+      );
+    }
+
+    if (value !== 0) {
+      detailParts.push(`${value > 0 ? "+" : ""}${value}`);
+    }
+
+    if (
+      effect?.kind === "dot" &&
+      Number(effect?.totalTicks || 0) > 0
+    ) {
+      detailParts.push(
+        `${Number(effect.ticksApplied || 0)}/${Number(effect.totalTicks)} ticks`
+      );
+    }
+
+    const title = [
+      name,
+      detailParts.length ? ` — ${detailParts.join(" · ")}` : "",
+      seconds !== null ? ` (${seconds}s)` : ""
+    ].join("");
+
+    return `
+      <div
+        class="combat-effect combat-effect--${kind}"
+        data-tooltip="info"
+        data-name="${escapeHtml(name)}"
+        data-sub="${escapeHtml(
+          isPlayerBuff
+            ? "Active Buff"
+            : (effect?.kind === "dot" ? "Damage Over Time" : "Enemy Debuff")
+        )}"
+        data-desc="${escapeHtml(
+          [
+            detailParts.length ? detailParts.join(" · ") : "",
+            seconds !== null ? `${seconds}s remaining` : ""
+          ].filter(Boolean).join(" — ")
+        )}"
+        aria-label="${escapeHtml(title)}"
+        tabindex="0"
+      >
+        ${
+          icon
+            ? `<img src="${escapeHtml(icon)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">`
+            : ""
+        }
+        <span
+          class="combat-effect__emoji"
+          ${icon ? 'style="display:none"' : ""}
+        >${emoji}</span>
+        ${
+          seconds !== null
+            ? `<span class="combat-effect__time">${seconds}</span>`
+            : ""
+        }
+      </div>
+    `;
+  }).join("");
+}
+
+function renderCombatPlayerBuffs(buffs = window.__GF_ACTIVE_BUFFS__) {
+  renderCombatEffects(
+    "playerCombatEffects",
+    buffs,
+    { playerBuff: true }
+  );
+}
+
+window.addEventListener(
+  "guildforge:buffs-updated",
+  event => {
+    renderCombatPlayerBuffs(
+      event?.detail?.buffs
+    );
+  }
+);
+
 function syncCombatSnapshot(snapshot) {
   if (!snapshot) return;
 
@@ -923,6 +1086,13 @@ function syncCombatSnapshot(snapshot) {
     }
   }
 
+  renderCombatPlayerBuffs();
+
+  renderCombatEffects(
+    "enemyCombatEffects",
+    snapshot?.effects?.enemy ?? []
+  );
+
   syncCombatTimingAnchors(
     snapshot
   );
@@ -969,6 +1139,9 @@ loadHotbarSpells();
 
   // ✅ Always show modal immediately (so user sees it)
   document.getElementById("combatModal").classList.remove("hidden");
+
+  renderCombatPlayerBuffs();
+  renderCombatEffects("enemyCombatEffects", []);
 
   // The movement route advances ENTER_FIRST_COMBAT -> CAST_FIRST_SPELL
   // as soon as an enemy is spawned. Refresh now that combat is actually
@@ -1037,6 +1210,30 @@ if (enemyImg) {
     setText("playerMaxHP", player.maxhp);
     setText("playerSP", player.spoints);
     setText("playerMaxSP", player.maxspoints);
+
+    const playerPortrait = document.getElementById("playerPortrait");
+    if (playerPortrait) {
+      let portraitSrc =
+        player.portrait_url ||
+        "/images/avatars/default_adventurer.webp";
+
+      if (
+        portraitSrc &&
+        !portraitSrc.startsWith("/") &&
+        !portraitSrc.startsWith("http://") &&
+        !portraitSrc.startsWith("https://")
+      ) {
+        portraitSrc = "/" + portraitSrc;
+      }
+
+      playerPortrait.src = portraitSrc;
+      playerPortrait.onerror = () => {
+        playerPortrait.onerror = null;
+        playerPortrait.src = "/images/avatars/default_adventurer.webp";
+      };
+    }
+
+    renderCombatPlayerBuffs(player.buffs);
 
     updateBar("playerHPBar", player.hpoints, player.maxhp);
     updateBar("playerSPBar", player.spoints, player.maxspoints);

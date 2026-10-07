@@ -625,11 +625,12 @@ export async function completeCurrentDungeonBoss(
 ========================================================= */
 
 /**
- * Temporary Alpha lifecycle action.
+ * Manual/admin-compatible Loot -> Rest fallback.
  *
- * Later, Need/Greed/Pass resolution will call this automatically
- * after all boss loot has been resolved. Until then, the dungeon
- * leader explicitly closes the loot phase.
+ * Normal dungeon flow now advances automatically when all persistent
+ * Need/Greed/Pass rolls in the room have resolved. Keep this helper
+ * available for controlled recovery/testing without making it part of
+ * the normal player-facing lifecycle.
  */
 export async function beginDungeonRestForPlayer(
   playerId: number,

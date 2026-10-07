@@ -145,6 +145,19 @@ export async function createDungeonCompletionChestsWithConn(
     }
 
     /*
+     * If the chest already existed, its contents were already rolled.
+     * Do not roll again on an idempotent/repeated completion call.
+     */
+    if (
+      Number(
+        insertChest?.affectedRows ??
+        0
+      ) === 0
+    ) {
+      continue;
+    }
+
+    /*
      * Roll each configured personal reward independently.
      * Because Stormvault's temporary seed is four 25% entries,
      * it is possible to get 0+ rewards. If all entries miss,

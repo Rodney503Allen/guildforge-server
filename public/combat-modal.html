@@ -6,6 +6,8 @@
   <title>Combat Modal</title>
 
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/tooltip.css">
+  <script src="/ui/tooltip.js" defer></script>
 
 <style>
   :root{
@@ -99,7 +101,7 @@
     display:grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
-    padding: 12px 12px 0;
+    padding: 8px 12px 0;
   }
 
   .combat-panel{
@@ -127,6 +129,73 @@
   /* =======================
      PORTRAITS
   ======================= */
+
+
+  .combat-portrait-column{
+    width: 96px;
+    flex: 0 0 96px;
+  }
+
+  .combat-effects{
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px;
+    justify-content:flex-start;
+    margin-top:7px;
+    min-height:0;
+  }
+
+  .combat-effects--enemy{
+    justify-content:flex-end;
+  }
+
+  .combat-effect{
+    position:relative;
+    width:28px;
+    height:28px;
+    border-radius:6px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border:1px solid rgba(90,150,220,.55);
+    background:rgba(20,40,65,.86);
+    box-shadow:0 2px 8px rgba(0,0,0,.45);
+    cursor:help;
+  }
+
+  .combat-effect--debuff,
+  .combat-effect--dot{
+    border-color:rgba(190,65,65,.62);
+    background:rgba(70,20,24,.88);
+  }
+
+  .combat-effect img{
+    width:22px;
+    height:22px;
+    object-fit:contain;
+    display:block;
+  }
+
+  .combat-effect__emoji{
+    font-size:17px;
+    line-height:1;
+  }
+
+  .combat-effect__time{
+    position:absolute;
+    right:-4px;
+    bottom:-5px;
+    min-width:17px;
+    padding:1px 3px;
+    border-radius:5px;
+    background:rgba(4,6,9,.94);
+    border:1px solid rgba(255,255,255,.12);
+    color:#f0f2f5;
+    font-size:9px;
+    line-height:12px;
+    text-align:center;
+    font-weight:800;
+  }
 
   .portrait-frame{
     width: 96px;
@@ -544,7 +613,74 @@
   @media (max-width: 860px){
     .combat-panels{ grid-template-columns: 1fr; }
     .combat-panel{ grid-template-columns: 84px 1fr; }
-    .portrait-frame{ width: 84px; height: 84px; }
+  
+  .combat-portrait-column{
+    width: 96px;
+    flex: 0 0 96px;
+  }
+
+  .combat-effects{
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px;
+    justify-content:flex-start;
+    margin-top:7px;
+    min-height:0;
+  }
+
+  .combat-effects--enemy{
+    justify-content:flex-end;
+  }
+
+  .combat-effect{
+    position:relative;
+    width:28px;
+    height:28px;
+    border-radius:6px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border:1px solid rgba(90,150,220,.55);
+    background:rgba(20,40,65,.86);
+    box-shadow:0 2px 8px rgba(0,0,0,.45);
+    cursor:help;
+  }
+
+  .combat-effect--debuff,
+  .combat-effect--dot{
+    border-color:rgba(190,65,65,.62);
+    background:rgba(70,20,24,.88);
+  }
+
+  .combat-effect img{
+    width:22px;
+    height:22px;
+    object-fit:contain;
+    display:block;
+  }
+
+  .combat-effect__emoji{
+    font-size:17px;
+    line-height:1;
+  }
+
+  .combat-effect__time{
+    position:absolute;
+    right:-4px;
+    bottom:-5px;
+    min-width:17px;
+    padding:1px 3px;
+    border-radius:5px;
+    background:rgba(4,6,9,.94);
+    border:1px solid rgba(255,255,255,.12);
+    color:#f0f2f5;
+    font-size:9px;
+    line-height:12px;
+    text-align:center;
+    font-weight:800;
+  }
+
+  .portrait-frame{ width: 84px; height: 84px; }
   }
   /* =======================
    ITEMS GRID (COMBAT)
@@ -1158,6 +1294,292 @@
 }
 
 
+
+/* ==========================================================
+   GUILDFORGE COMBAT FRAMES
+   Four framed regions only:
+   1) outer modal
+   2) player panel
+   3) enemy panel
+   4) unified lower combat section
+   ========================================================== */
+
+.combat-modal,
+.combat-panel,
+.combat-bottom-section {
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: transparent;
+  border-radius: 0;
+}
+
+.combat-modal {
+  border-width: 18px;
+  border-image-source: url("/images/ui/main_border.png");
+  border-image-slice: 16;
+  border-image-width: 18px;
+  border-image-repeat: stretch;
+}
+
+.combat-panel,
+.combat-bottom-section {
+  border-width: 13px;
+  border-image-source: url("/images/ui/panel_border.png");
+  border-image-slice: 16;
+  border-image-width: 13px;
+  border-image-repeat: stretch;
+}
+
+/* The lower area is one visual unit. */
+.combat-bottom-section {
+  position: relative;
+  margin: 8px 12px 10px;
+  padding: 5px 6px 2px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(0,0,0,.16)),
+    rgba(5,8,11,.58);
+}
+
+/* Internal lower sections deliberately have no boxes/borders. */
+.combat-bottom-section .combat-log,
+.combat-bottom-section .combat-hotbar,
+.combat-bottom-section .combat-footer-actions {
+  border: 0;
+  border-image: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.combat-bottom-section .combat-log {
+  margin: 0;
+  padding: 10px 12px;
+  height: 145px;
+  min-height: 145px;
+  background: rgba(0,0,0,.30);
+  box-shadow: inset 0 0 16px rgba(0,0,0,.68);
+}
+
+.combat-bottom-section .combat-hotbar {
+  margin-top: 6px;
+  padding: 6px 10px 5px;
+  background: transparent;
+}
+
+.combat-bottom-section .combat-footer-actions {
+  padding: 0 10px 5px;
+  background: transparent;
+}
+
+/* Portraits and nested dialogs stay understated. */
+.portrait-frame {
+  border: 1px solid rgba(200,163,75,.22);
+  border-radius: 4px;
+  border-image: none;
+}
+
+.sub-modal-box,
+.modal-window {
+  border: 1px solid rgba(200,163,75,.28);
+  border-radius: 4px;
+  border-image: none;
+}
+
+.combat-effect[data-tooltip] {
+  cursor: help;
+}
+
+
+
+
+
+/* ==========================================================
+   COMBAT MODAL SIZE CORRECTION
+   Override the legacy tall/fixed combat window.
+   ========================================================== */
+#combatModal.combat-modal {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: calc(100vh - 110px);
+  overflow: visible;
+}
+
+/* Dungeon-style ornamental frames for interactive hotbar slots only. */
+.combat-hotbar .hotbar-tile {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  border: 1px solid transparent !important;
+  border-radius: 0 !important;
+  background-color: rgba(0,0,0,.42);
+  box-shadow: inset 0 0 14px rgba(0,0,0,.90);
+}
+
+.combat-hotbar .hotbar-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-image-source: url("/images/ui/panel_border.png");
+  border-image-slice: 16;
+  border-image-width: 8px;
+  border-image-repeat: stretch;
+  filter: brightness(.82);
+}
+
+.combat-hotbar .hotbar-tile:not(:disabled):hover::after {
+  filter:
+    brightness(1.08)
+    drop-shadow(0 0 9px rgba(115,153,184,.22));
+}
+
+.combat-hotbar .hotbar-tile img,
+.combat-hotbar .hotbar-cd {
+  border-radius: 0 !important;
+}
+
+
+/* ==========================================================
+   FINAL COMBAT SHELL HEIGHT OVERRIDE
+   The combat window must end immediately after its content.
+   ========================================================== */
+html body #combatModal.combat-modal {
+  height: fit-content !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  block-size: fit-content !important;
+  min-block-size: 0 !important;
+  max-block-size: none !important;
+  align-self: flex-start !important;
+  overflow: visible !important;
+}
+
+/* Prevent any inherited flex/grid growth from stretching the shell. */
+#combatModal > .combat-bottom-section {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+}
+
+#combatModal > .combat-panels,
+#combatModal > .combat-header {
+  flex: 0 0 auto !important;
+}
+
+
+/* ==========================================================
+   COMBAT SURFACE / FRAME SEAM CLEANUP
+   Preserve current sizing while removing border-image seams
+   and translucent background banding.
+   ========================================================== */
+
+/* One continuous opaque combat surface. */
+html body #combatModal.combat-modal {
+  background:
+    radial-gradient(900px 300px at 50% 0%, rgba(182,75,46,.055), transparent 62%),
+    linear-gradient(180deg, rgba(18,22,27,.99), rgba(7,10,13,.995)) !important;
+  background-clip: padding-box !important;
+}
+
+/* Structural panels get their own clean surfaces. */
+#combatModal .combat-panel,
+#combatModal .combat-bottom-section {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(0,0,0,.14)),
+    rgb(8,12,16) !important;
+  background-clip: padding-box !important;
+}
+
+/*
+  Hide the physical transparent border area behind each border-image.
+  This prevents the page/world background from peeking through as
+  1px lines at the image slices.
+*/
+#combatModal.combat-modal,
+#combatModal .combat-panel,
+#combatModal .combat-bottom-section {
+  outline: 1px solid rgba(8,12,16,.98);
+  outline-offset: -1px;
+}
+
+/* Internal lower content should not create additional panel bands. */
+#combatModal .combat-bottom-section .combat-log,
+#combatModal .combat-bottom-section .combat-hotbar,
+#combatModal .combat-bottom-section .combat-footer-actions {
+  background-color: transparent;
+  border: 0 !important;
+  border-image: none !important;
+  outline: 0 !important;
+}
+
+#combatModal .combat-bottom-section .combat-log {
+  background: rgba(0,0,0,.28) !important;
+}
+
+/* Remove old decorative separator shadows/lines that fight the new frames. */
+#combatModal .combat-panel,
+#combatModal .combat-bottom-section,
+#combatModal .combat-log,
+#combatModal .combat-hotbar,
+#combatModal .combat-footer-actions {
+  box-shadow: none;
+}
+
+/* Keep only a very subtle header separator. */
+#combatModal .combat-header {
+  border-bottom: 1px solid rgba(201,184,154,.08) !important;
+  background: rgba(0,0,0,.08) !important;
+}
+
+
+/* ==========================================================
+   OUTER COMBAT FRAME ALIGNMENT
+   Pull the main ornamental artwork inward so it hugs the
+   visible modal surface instead of floating outside it.
+   ========================================================== */
+html body #combatModal.combat-modal {
+  border-width: 10px !important;
+  border-image-source: url("/images/ui/main_border.png") !important;
+  border-image-slice: 16 !important;
+  border-image-width: 12px !important;
+  border-image-outset: 0 !important;
+  border-image-repeat: stretch !important;
+}
+
+
+/* ==========================================================
+   OUTER FRAME EDGE FIX
+   Keep geometry unchanged. Paint the modal surface beneath
+   the transparent portions of main_border.png.
+   ========================================================== */
+html body #combatModal.combat-modal {
+  border-width: 10px !important;
+  border-image-source: url("/images/ui/main_border.png") !important;
+  border-image-slice: 16 !important;
+  border-image-width: 12px !important;
+  border-image-outset: 0 !important;
+  border-image-repeat: stretch !important;
+
+  /* Critical fix: the dark modal surface now extends beneath
+     the ornamental border instead of stopping inside it. */
+  background-clip: border-box !important;
+  background-origin: border-box !important;
+}
+
+
+/* ==========================================================
+   INTERIOR FRAME EDGE FIX
+   Same treatment as the outer modal: extend each panel's
+   surface beneath the transparent ornamental border artwork.
+   No geometry changes.
+   ========================================================== */
+#combatModal .combat-panel,
+#combatModal .combat-bottom-section {
+  background-clip: border-box !important;
+  background-origin: border-box !important;
+}
+
 </style>
 
 </head>
@@ -1180,8 +1602,11 @@
 
   <!-- PLAYER -->
   <div class="combat-panel player-panel">
-    <div class="portrait-frame">
-      <img id="playerPortrait" src="/images/portraits/default.png">
+    <div class="combat-portrait-column">
+      <div class="portrait-frame">
+        <img id="playerPortrait" src="/images/portraits/default.png">
+      </div>
+      <div id="playerCombatEffects" class="combat-effects" aria-label="Active player effects"></div>
     </div>
 
     <div class="panel-info">
@@ -1239,8 +1664,11 @@
 
   <!-- ENEMY -->
   <div class="combat-panel enemy-panel">
-    <div class="portrait-frame enemy">
-      <img id="enemyPortrait" src="/images/portraits/default_enemy.png">
+    <div class="combat-portrait-column">
+      <div class="portrait-frame enemy">
+        <img id="enemyPortrait" src="/images/portraits/default_enemy.png">
+      </div>
+      <div id="enemyCombatEffects" class="combat-effects combat-effects--enemy" aria-label="Active enemy effects"></div>
     </div>
 
     <div class="panel-info right">
@@ -1279,43 +1707,46 @@
 
 </div>
 
-  <!-- COMBAT LOG -->
-  <div id="combatLog" class="combat-log"></div>
-
-
-<!-- NEW: HOTBAR (Potions + 6 spells) -->
-<div class="combat-hotbar" id="combatHotbar">
-  <!-- HP potion -->
-  <button id="hpPotionBtn" type="button" class="hotbar-tile" onclick="useHotbarPotion('health')">
-    <img id="hpPotionImg" src="/icons/potions/health.png" onerror="this.src='/icons/default.png'">
-    <div class="hotbar-cd hidden" id="potion-cd-hp"></div>
-    <span class="hotbar-key">Q</span>
-    <span id="hpPotionQty" class="hotbar-qty hidden"></span>
-    <div class="hotbar-tooltip" id="hpPotionTooltip">
-      <div class="tt-title">Health Potion</div>
-      <div class="tt-muted">No potion equipped</div>
-    </div>
-  </button>
-
-
-  <!-- JS injects 6 spell tiles here -->
-
-  <!-- Mana potion -->
-  <button id="spPotionBtn" type="button" class="hotbar-tile" onclick="useHotbarPotion('mana')">
-    <img id="spPotionImg" src="/icons/potions/mana.png" onerror="this.src='/icons/default.png'">
-    <div class="hotbar-cd hidden" id="potion-cd-sp"></div>
-    <span class="hotbar-key">E</span>
-    <span id="spPotionQty" class="hotbar-qty hidden"></span>
-    <div class="hotbar-tooltip" id="spPotionTooltip">
-      <div class="tt-title">Mana Potion</div>
-      <div class="tt-muted">No potion equipped</div>
-    </div>
-  </button>
-</div>
-
-<div class="combat-footer-actions">
-  <button class="combat-btn flee-btn" onclick="combatFlee()">🏃 Flee</button>
-</div>
+  <!-- LOWER COMBAT SECTION: log + hotbar + actions -->
+  <div class="combat-bottom-section">
+    <!-- COMBAT LOG -->
+    <div id="combatLog" class="combat-log"></div>
+  
+  
+  <!-- NEW: HOTBAR (Potions + 6 spells) -->
+  <div class="combat-hotbar" id="combatHotbar">
+    <!-- HP potion -->
+    <button id="hpPotionBtn" type="button" class="hotbar-tile" onclick="useHotbarPotion('health')">
+      <img id="hpPotionImg" src="/icons/potions/health.png" onerror="this.src='/icons/default.png'">
+      <div class="hotbar-cd hidden" id="potion-cd-hp"></div>
+      <span class="hotbar-key">Q</span>
+      <span id="hpPotionQty" class="hotbar-qty hidden"></span>
+      <div class="hotbar-tooltip" id="hpPotionTooltip">
+        <div class="tt-title">Health Potion</div>
+        <div class="tt-muted">No potion equipped</div>
+      </div>
+    </button>
+  
+  
+    <!-- JS injects 6 spell tiles here -->
+  
+    <!-- Mana potion -->
+    <button id="spPotionBtn" type="button" class="hotbar-tile" onclick="useHotbarPotion('mana')">
+      <img id="spPotionImg" src="/icons/potions/mana.png" onerror="this.src='/icons/default.png'">
+      <div class="hotbar-cd hidden" id="potion-cd-sp"></div>
+      <span class="hotbar-key">E</span>
+      <span id="spPotionQty" class="hotbar-qty hidden"></span>
+      <div class="hotbar-tooltip" id="spPotionTooltip">
+        <div class="tt-title">Mana Potion</div>
+        <div class="tt-muted">No potion equipped</div>
+      </div>
+    </button>
+  </div>
+  
+  <div class="combat-footer-actions">
+    <button class="combat-btn flee-btn" onclick="combatFlee()">🏃 Flee</button>
+  </div>
+  </div>
 
 </body>
 </html>
