@@ -31,6 +31,10 @@ let dungeonSocketBound = false;
 let worldPresenceSocket = null;
 let worldPresenceSocketBound = false;
 let nearbyWorldPlayers = new Map();
+const worldTileCache = new Map();
+const worldObjectCache = new Map();
+let successfulWorldMovesSincePlayerResync = 0;
+const WORLD_PLAYER_RESYNC_EVERY_MOVES = 8;
 let currentWorldPlayerPosition = null;
 
 /*
@@ -2600,7 +2604,9 @@ function renderWorldFromData({
   guildMap,
   worldObjects,
   resourceNodes,
-  nearbyPlayers = [],
+  nearbyPlayers = null,
+  partialTiles = false,
+  partialWorldObjects = false,
   huntClues = [],
   huntTargets = [],
   worldEventMapSpawns = []
@@ -2610,31 +2616,83 @@ function renderWorldFromData({
     y: Number(player?.map_y)
   };
 
-  nearbyWorldPlayers =
-    new Map(
-      (nearbyPlayers || [])
-        .map(otherPlayer => [
-          Number(otherPlayer.id),
-          otherPlayer
-        ])
-        .filter(([playerId]) =>
-          Number.isInteger(playerId) &&
-          playerId > 0
-        )
+  if (Array.isArray(nearbyPlayers)) {
+    nearbyWorldPlayers =
+      new Map(
+        nearbyPlayers
+          .map(otherPlayer => [
+            Number(otherPlayer.id),
+            otherPlayer
+          ])
+          .filter(([playerId]) =>
+            Number.isInteger(playerId) &&
+            playerId > 0
+          )
+      );
+  }
+
+  if (!partialTiles) {
+    worldTileCache.clear();
+  }
+
+  for (const t of tiles || []) {
+    worldTileCache.set(
+      `${Number(t.x)},${Number(t.y)}`,
+      t
     );
+  }
+
+  // Keep only the newly-centered 11x11 window after merging an entering strip.
+  const bufferMinX =
+    Number(player?.map_x) - WORLD_BUFFER_RADIUS;
+  const bufferMaxX =
+    Number(player?.map_x) + WORLD_BUFFER_RADIUS;
+  const bufferMinY =
+    Number(player?.map_y) - WORLD_BUFFER_RADIUS;
+  const bufferMaxY =
+    Number(player?.map_y) + WORLD_BUFFER_RADIUS;
+
+  for (const [key, tile] of worldTileCache.entries()) {
+    const x = Number(tile?.x);
+    const y = Number(tile?.y);
+
+    if (
+      x < bufferMinX ||
+      x > bufferMaxX ||
+      y < bufferMinY ||
+      y > bufferMaxY
+    ) {
+      worldTileCache.delete(key);
+    }
+  }
 
   const tileMap = {};
 
-  for (const t of tiles || []) {
-    tileMap[
-      `${t.x},${t.y}`
-    ] = t;
+  for (const [key, tile] of worldTileCache.entries()) {
+    tileMap[key] = tile;
   }
 
 
+  if (!partialWorldObjects) {
+    worldObjectCache.clear();
+  }
+
+  for (const obj of worldObjects || []) {
+    worldObjectCache.set(Number(obj.id), obj);
+  }
+
+  // Prune objects that left the newly centered 11x11 buffer.
+  for (const [objectId, obj] of worldObjectCache.entries()) {
+    const x = Number(obj?.x);
+    const y = Number(obj?.y);
+    if (x < bufferMinX || x > bufferMaxX || y < bufferMinY || y > bufferMaxY) {
+      worldObjectCache.delete(objectId);
+    }
+  }
+
   const objectMap =
     buildWorldObjectMap(
-      worldObjects || []
+      Array.from(worldObjectCache.values())
     );
 
 
@@ -3331,6 +3389,43 @@ function renderNearbyWorldPlayers() {
   }
 }
 
+async function resyncNearbyWorldPlayers() {
+  try {
+    const res =
+      await fetch("/world/nearby-players", {
+        credentials: "include",
+        cache: "no-store"
+      });
+
+    if (!res.ok) return;
+
+    const data = await res.json();
+
+    if (!Array.isArray(data?.players)) return;
+
+    nearbyWorldPlayers =
+      new Map(
+        data.players
+          .map(otherPlayer => [
+            Number(otherPlayer.id),
+            otherPlayer
+          ])
+          .filter(([playerId]) =>
+            Number.isInteger(playerId) &&
+            playerId > 0
+          )
+      );
+
+    renderNearbyWorldPlayers();
+  } catch (err) {
+    console.warn(
+      "Unable to resync nearby world players:",
+      err
+    );
+  }
+}
+
+
 async function connectWorldPresenceSocket() {
   if (
     worldPresenceSocketBound &&
@@ -3417,7 +3512,7 @@ async function connectWorldPresenceSocket() {
           if (
             payload?.online === true
           ) {
-            void refreshWorld();
+            void resyncNearbyWorldPlayers();
           }
         }
       );
@@ -4891,6 +4986,21 @@ async function moveWorld(dir) {
       renderWorldFromData(
         data.world
       );
+
+      // Movement responses are socket-first for other-player state. Re-render
+      // known players against our new viewport, with an occasional lightweight
+      // authoritative resync for stationary players we may have walked toward.
+      renderNearbyWorldPlayers();
+
+      successfulWorldMovesSincePlayerResync += 1;
+
+      if (
+        successfulWorldMovesSincePlayerResync >=
+        WORLD_PLAYER_RESYNC_EVERY_MOVES
+      ) {
+        successfulWorldMovesSincePlayerResync = 0;
+        void resyncNearbyWorldPlayers();
+      }
     } else {
       resetWorldGridToBase();
     }
@@ -4952,7 +5062,7 @@ async function moveWorld(dir) {
         performance.now();
 
       renderNearbyObjects(
-        data.nearbyObjects
+        buildNearbyObjectsFromWorldCache(data.nearbyObjects)
       );
 
       console.log(
@@ -4977,6 +5087,7 @@ async function moveWorld(dir) {
       );
 
       if (
+        data.regionChanged &&
         window.GFWorldEvents?.setRegion &&
         data.regionData.region_id != null
       ) {
@@ -5123,6 +5234,52 @@ async function loadNearbyObjects() {
     console.error("Failed to load nearby objects", err);
     renderNearbyObjects([]);
   }
+}
+
+function buildNearbyObjectsFromWorldCache(serverObjects = []) {
+  const playerX = Number(currentWorldPlayerPosition?.x);
+  const playerY = Number(currentWorldPlayerPosition?.y);
+
+  // Ordinary world objects come from the merged 11x11 cache. Movement only
+  // receives an entering strip, so using the server movement list alone would
+  // make previously visible interactables disappear from the sidebar.
+  const cachedWorldObjects = Array.from(worldObjectCache.values()).map(obj => {
+    const x = Number(obj?.x);
+    const y = Number(obj?.y);
+    const interactionRadius = Math.max(0, Number(obj?.interaction_radius) || 1);
+    const distance = Math.abs(playerX - x) + Math.abs(playerY - y);
+
+    return {
+      id: Number(obj?.id),
+      name: String(obj?.name || "Unknown Object"),
+      object_type: String(obj?.object_type || "quest"),
+      region_name: obj?.region_name ?? null,
+      x,
+      y,
+      interaction_radius: interactionRadius,
+      inRange: distance <= interactionRadius,
+      distance,
+      icon: obj?.icon ?? null
+    };
+  });
+
+  // Hunt clues/targets and world-event interactions are dynamic collections
+  // that are not stored in worldObjectCache. Keep those from the authoritative
+  // movement response and discard its ordinary strip objects to avoid duplicates.
+  const dynamicTypes = new Set([
+    "hunt_clue",
+    "hunt_target",
+    "world_event_interact"
+  ]);
+
+  const dynamicObjects = Array.isArray(serverObjects)
+    ? serverObjects.filter(obj => dynamicTypes.has(String(obj?.object_type || "")))
+    : [];
+
+  return [
+    ...cachedWorldObjects,
+    ...dynamicObjects
+  ];
 }
 
 function renderNearbyObjects(objects) {

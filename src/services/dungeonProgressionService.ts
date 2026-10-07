@@ -625,12 +625,11 @@ export async function completeCurrentDungeonBoss(
 ========================================================= */
 
 /**
- * Manual/admin-compatible Loot -> Rest fallback.
+ * Temporary Alpha lifecycle action.
  *
- * Normal dungeon flow now advances automatically when all persistent
- * Need/Greed/Pass rolls in the room have resolved. Keep this helper
- * available for controlled recovery/testing without making it part of
- * the normal player-facing lifecycle.
+ * Later, Need/Greed/Pass resolution will call this automatically
+ * after all boss loot has been resolved. Until then, the dungeon
+ * leader explicitly closes the loot phase.
  */
 export async function beginDungeonRestForPlayer(
   playerId: number,
@@ -1115,61 +1114,72 @@ export async function advanceDungeonAfterRestForPlayer(
       );
     }
 
+    /*
+     * The personal completion chests above are intentionally NOT deleted.
+     * They no longer have an FK to dungeon_instances, so they survive the
+     * runtime cleanup and can be claimed from /world after the run is gone.
+     */
     await connection.query(
       `
-        UPDATE dungeon_instances
-
-        SET
-          current_phase = 'complete',
-          /*
-           * Keep the instance active while members view/claim their
-           * personal completion chests. The final member leaving the
-           * completion screen will archive the instance as completed.
-           */
-          status = 'active',
-          completed_at =
-            COALESCE(
-              completed_at,
-              NOW()
-            )
-
-        WHERE id = ?
+        DELETE dlc
+        FROM dungeon_loot_choices dlc
+        JOIN dungeon_loot_rolls dlr ON dlr.id = dlc.roll_id
+        WHERE dlr.instance_id = ?
       `,
-      [
-        active.instanceId
-      ],
+      [active.instanceId],
     );
 
-    /*
-     * Do not deactivate members here.
-     *
-     * Every participant must remain attached to the completed instance
-     * long enough to receive the completion lifecycle event and view/claim
-     * their own personal chest. Each player leaves independently through
-     * the completion-leave endpoint.
-     */
+    await connection.query(
+      `DELETE FROM dungeon_loot_rolls WHERE instance_id = ?`,
+      [active.instanceId],
+    );
+
+    await connection.query(
+      `DELETE FROM dungeon_instance_wipes WHERE instance_id = ?`,
+      [active.instanceId],
+    );
+
+    await connection.query(
+      `DELETE FROM dungeon_instance_enemies WHERE instance_id = ?`,
+      [active.instanceId],
+    );
+
+    await connection.query(
+      `DELETE FROM dungeon_instance_rooms WHERE instance_id = ?`,
+      [active.instanceId],
+    );
+
+    await connection.query(
+      `DELETE FROM dungeon_instance_members WHERE instance_id = ?`,
+      [active.instanceId],
+    );
+
+    const [instanceDelete]: any =
+      await connection.query(
+        `DELETE FROM dungeon_instances WHERE id = ? AND status = 'active'`,
+        [active.instanceId],
+      );
+
+    if (Number(instanceDelete?.affectedRows ?? 0) !== 1) {
+      throw new Error("Completed dungeon instance could not be removed.");
+    }
 
     await connection.commit();
 
     return {
       ok: true,
-      transition:
-        "complete" as const,
-      completedRoomOrder:
-        currentRoomOrder,
-      phase:
-        "complete" as const,
-      status:
-        "active" as const,
+      transition: "complete" as const,
+      instanceId: active.instanceId,
+      completedRoomOrder: currentRoomOrder,
+      phase: "complete" as const,
+      status: "completed" as const,
+      deleted: true,
       rewards: {
-        xp:
-          completionXp,
-        gold:
-          completionGold,
+        xp: completionXp,
+        gold: completionGold,
       },
       completionChests: {
-        created:
-          chestResult.chestsCreated,
+        created: chestResult.chestsCreated,
       },
     };
   } catch (err) {

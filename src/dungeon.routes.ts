@@ -4,7 +4,6 @@ import {
   abandonDungeon,
   createDungeonInstance,
   getActiveDungeonForPlayer,
-  leaveCompletedDungeonForPlayer,
   listAvailableDungeons,
 } from "./services/dungeonService";
 
@@ -51,6 +50,7 @@ const router = express.Router();
 async function publishDungeonLifecycleForPlayer(
   playerId: number,
   reason: string,
+  extra: Record<string, any> = {},
 ) {
   try {
     const dungeon = await getActiveDungeonForPlayer(playerId);
@@ -72,6 +72,7 @@ async function publishDungeonLifecycleForPlayer(
       instanceId,
       dungeon,
       encounter,
+      ...extra,
     });
   } catch (error) {
     console.error("Dungeon lifecycle socket publish failed:", error);
@@ -210,7 +211,15 @@ router.post("/active/loot/:rollId/choice", async (req: any, res) => {
           | "pass",
       );
 
-    await publishDungeonLifecycleForPlayer(playerId, "loot-choice");
+    await publishDungeonLifecycleForPlayer(
+      playerId,
+      "loot-choice",
+      {
+        lootResult:
+          (result as any)?.resolution?.lootResult ??
+          null,
+      },
+    );
     res.json(result);
   } catch (err: any) {
     console.error(
@@ -326,7 +335,21 @@ router.post("/active/rest/advance", async (req: any, res) => {
         playerId
       );
 
-    await publishDungeonLifecycleForPlayer(playerId, "rest-advance");
+    if ((result as any)?.transition === "complete") {
+      const instanceId = Number((result as any).instanceId ?? 0);
+      if (instanceId > 0) {
+        destroyDungeonCombatSession(instanceId);
+        publishDungeonInstanceChanged(instanceId, {
+          reason: "completed",
+          instanceId,
+          dungeonCompleted: true,
+          rewards: (result as any).rewards ?? null,
+          completionChests: (result as any).completionChests ?? null,
+        });
+      }
+    } else {
+      await publishDungeonLifecycleForPlayer(playerId, "rest-advance");
+    }
     res.json(result);
   } catch (err: any) {
     console.error(
@@ -546,50 +569,6 @@ router.post("/completion-chest/:chestId/claim", async (req: any, res) => {
       error:
         err?.message ||
         "Unable to claim dungeon completion chest.",
-    });
-  }
-});
-
-
-router.post("/completion/leave", async (req: any, res) => {
-  try {
-    const playerId =
-      Number(
-        req.session.playerId
-      );
-
-    /*
-     * Leaving a completed dungeon is per-player.
-     * It must not tear the completed state away from party members who
-     * are still viewing or claiming their personal completion chest.
-     */
-    const result =
-      await leaveCompletedDungeonForPlayer(
-        playerId
-      );
-
-    publishDungeonInstanceChanged(
-      Number(result.instanceId),
-      {
-        reason: "completion-member-left",
-        instanceId:
-          Number(result.instanceId),
-        playerId,
-      },
-    );
-
-    res.json(result);
-  } catch (err: any) {
-    console.error(
-      "POST /api/dungeons/completion/leave failed:",
-      err
-    );
-
-    res.status(400).json({
-      ok: false,
-      error:
-        err?.message ||
-        "Unable to leave the completed dungeon.",
     });
   }
 });

@@ -27,8 +27,20 @@ const directions: Record<string, [number, number]> = {
   west: [-1, 0],
   east: [1, 0]
 };
-const ENCOUNTER_CHANCE = 0.18;     // ~5–6 step average
-const ENCOUNTER_GAP_STEPS = 2;     // prevents constant back-to-back
+const ENCOUNTER_CHANCE = 0.18;     // independent roll on every eligible step
+
+// Active quest target metadata changes much less often than player movement.
+// Keep a short-lived per-player cache so rapid movement does not repeat the
+// same multi-join quest query on every tile.
+const QUEST_TARGET_CACHE_TTL_MS = 5000;
+const activeQuestWorldTargetCache = new Map<number, {
+  expiresAt: number;
+  rows: any[];
+}>();
+
+function invalidateActiveQuestWorldTargetCache(playerId: number) {
+  activeQuestWorldTargetCache.delete(Number(playerId));
+}
 
 function normalizeSpritePath(src?: string | null) {
   if (!src) return null;
@@ -36,9 +48,15 @@ function normalizeSpritePath(src?: string | null) {
 }
 
 
+const WORLD_PARTY_CACHE_TTL_MS = 10000;
+const worldPartyMemberCache = new Map<number, { expiresAt: number; ids: number[] }>();
+
 async function getWorldPartyMemberIds(
   playerId: number
 ) {
+  const cached = worldPartyMemberCache.get(Number(playerId));
+  if (cached && cached.expiresAt > Date.now()) return cached.ids;
+
   const [rows]: any =
     await db.query(
       `
@@ -56,20 +74,16 @@ async function getWorldPartyMemberIds(
       [playerId]
     );
 
-  return (rows || [])
-    .map(
-      (row: any) =>
-        Number(
-          row.player_id
-        )
-    )
-    .filter(
-      (memberId: number) =>
-        Number.isInteger(
-          memberId
-        ) &&
-        memberId > 0
-    );
+  const ids = (rows || [])
+    .map((row: any) => Number(row.player_id))
+    .filter((memberId: number) => Number.isInteger(memberId) && memberId > 0);
+
+  worldPartyMemberCache.set(Number(playerId), {
+    expiresAt: Date.now() + WORLD_PARTY_CACHE_TTL_MS,
+    ids
+  });
+
+  return ids;
 }
 
 
@@ -858,7 +872,15 @@ async function markActiveQuestWorldObjects(
     return worldObjects || [];
   }
 
-  const [rows]: any = await db.query(
+  const cached =
+    activeQuestWorldTargetCache.get(Number(playerId));
+
+  let rows: any[];
+
+  if (cached && cached.expiresAt > Date.now()) {
+    rows = cached.rows;
+  } else {
+    const [freshRows]: any = await db.query(
     `
       SELECT
         o.target_world_object_id AS worldObjectId,
@@ -888,7 +910,15 @@ async function markActiveQuestWorldObjects(
         ), o.step_order)
     `,
     [playerId]
-  );
+    );
+
+    rows = freshRows || [];
+
+    activeQuestWorldTargetCache.set(Number(playerId), {
+      expiresAt: Date.now() + QUEST_TARGET_CACHE_TTL_MS,
+      rows
+    });
+  }
 
   const targetMap = new Map<number, any[]>();
 
@@ -986,7 +1016,7 @@ router.get("/world", async (req, res) => {
   // Load player
   const [[player]]: any = await db.query(
     `
-    SELECT id, map_x, map_y, level, steps_since_encounter, location
+    SELECT id, map_x, map_y, level, location
     FROM players
     WHERE id=?
     LIMIT 1
@@ -2630,13 +2660,16 @@ router.get("/world/move/:dir", async (req, res) => {
 const [[player]]: any = await db.query(
   `
   SELECT
-    name,
-    map_x,
-    map_y,
-    level,
-    steps_since_encounter
-  FROM players
-  WHERE id=?
+    p.name,
+    p.map_x,
+    p.map_y,
+    p.level,
+    wm.region_id AS current_region_id
+  FROM players p
+  LEFT JOIN world_map wm
+    ON wm.x = p.map_x
+   AND wm.y = p.map_y
+  WHERE p.id=?
   LIMIT 1
   `,
   [pid]
@@ -2906,9 +2939,7 @@ try {
 }
 
 const spawnedResourceNode =
-  await maybeSpawnResourceNodeForPlayer(
-    pid
-  );
+  await maybeSpawnResourceNodeForPlayer(pid);
 
 const [
   resourceNodes,
@@ -2945,12 +2976,31 @@ const [
   )
 ]);
 
-const enterAreaResult =
-  await applyEnterAreaProgress(
-    pid,
-    tile.region_id ?? null
-  );
+const previousRegionId =
+  player.current_region_id !== null &&
+  player.current_region_id !== undefined
+    ? Number(player.current_region_id)
+    : null;
 
+const nextRegionId =
+  tile.region_id !== null &&
+  tile.region_id !== undefined
+    ? Number(tile.region_id)
+    : null;
+
+const regionChanged =
+  previousRegionId !== nextRegionId;
+
+const enterAreaResult =
+  regionChanged
+    ? await applyEnterAreaProgress(
+        pid,
+        tile.region_id ?? null
+      )
+    : null;
+
+// LOCATION objectives are coordinate-based, so they still need to evaluate
+// after movement even when the player remains inside the same region.
 const locationResult =
   await applyLocationProgress(
     pid,
@@ -2960,27 +3010,43 @@ const locationResult =
     null
   );
 
+const questProgressChanged =
+  Boolean(
+    (enterAreaResult?.updatedObjectives?.length || 0) ||
+    (enterAreaResult?.completedPlayerQuestIds?.length || 0) ||
+    (enterAreaResult?.stageTransitions?.length || 0) ||
+    (locationResult?.updatedObjectives?.length || 0) ||
+    (locationResult?.completedPlayerQuestIds?.length || 0) ||
+    (locationResult?.stageTransitions?.length || 0)
+  );
+
+if (questProgressChanged) {
+  invalidateActiveQuestWorldTargetCache(Number(pid));
+}
+
 let huntProgress = null;
 
-try {
-  huntProgress =
-    await advanceHuntObjective(
-      Number(pid),
-      {
-        type: "ENTER_REGION",
-        regionId:
-          tile.region_id !== null &&
-          tile.region_id !== undefined
-            ? Number(tile.region_id)
-            : undefined
-      }
-    );
+if (regionChanged) {
+  try {
+    huntProgress =
+      await advanceHuntObjective(
+        Number(pid),
+        {
+          type: "ENTER_REGION",
+          regionId:
+            tile.region_id !== null &&
+            tile.region_id !== undefined
+              ? Number(tile.region_id)
+              : undefined
+        }
+      );
 
-} catch (err) {
-  console.warn(
-    "Hunt ENTER_REGION progress failed",
-    err
-  );
+  } catch (err) {
+    console.warn(
+      "Hunt ENTER_REGION progress failed",
+      err
+    );
+  }
 }
 const playerLevel = Number(player.level ?? 1);
 const levelMin = Number(tile.level_min ?? 1);
@@ -2996,9 +3062,6 @@ const difficulty =
 const regionName = String(tile.region_name || "Unknown Region");
 const zoneLevel = levelMin;
 const controllingGuildId = tile.controlling_guild_id ?? null;
-
-let stepsSince = Number(player.steps_since_encounter ?? 999);
-stepsSince += 1;
 
 let enemy: any = null;
 
@@ -3036,9 +3099,6 @@ if (
       Number(eventSpawn.id)
     );
 
-  if (enemy) {
-    stepsSince = 0;
-  }
 }
 
 /*
@@ -3054,27 +3114,16 @@ if (
       eventSpawn.spawnType === "BOSS"
     )
   ) &&
-  stepsSince >= ENCOUNTER_GAP_STEPS
+  Math.random() < ENCOUNTER_CHANCE
 ) {
-  if (Math.random() < ENCOUNTER_CHANCE) {
-    enemy =
-      await trySpawnEnemy(
-        pid,
-        newX,
-        newY,
-        tile.terrain
-      );
-
-    if (enemy) {
-      stepsSince = 0;
-    }
-  }
+  enemy =
+    await trySpawnEnemy(
+      pid,
+      newX,
+      newY,
+      tile.terrain
+    );
 }
-
-await db.query(
-  `UPDATE players SET steps_since_encounter=? WHERE id=?`,
-  [stepsSince, pid]
-);
 
 // Only advance the combat tutorial when movement actually spawned an enemy.
 if (enemy) {
@@ -3093,43 +3142,68 @@ if (enemy) {
   const minY = newY - 5;
   const maxY = newY + 5;
 
-let [worldObjects]: any = await db.query(`
-SELECT
-  id,
-  name,
-  object_type,
-  region_name,
-  x,
-  y,
-  interaction_radius,
-  icon,
-  tile_sprite,
-  tile_visual_type,
-  z_index
-FROM world_objects
-WHERE is_active = 1
-  AND x BETWEEN ? AND ?
-  AND y BETWEEN ? AND ?
-ORDER BY z_index ASC, id ASC
-`, [minX, maxX, minY, maxY]);
+// World objects use the same sliding-window strategy as terrain. Only the
+// newly exposed row/column can contain objects the browser has not seen yet.
+let objectStripSql = "";
+let objectStripParams: any[] = [];
+
+if (dir === "north") {
+  objectStripSql = `SELECT id,name,object_type,region_name,x,y,interaction_radius,icon,tile_sprite,tile_visual_type,z_index FROM world_objects WHERE is_active=1 AND y=? AND x BETWEEN ? AND ? ORDER BY z_index ASC,id ASC`;
+  objectStripParams = [minY, minX, maxX];
+} else if (dir === "south") {
+  objectStripSql = `SELECT id,name,object_type,region_name,x,y,interaction_radius,icon,tile_sprite,tile_visual_type,z_index FROM world_objects WHERE is_active=1 AND y=? AND x BETWEEN ? AND ? ORDER BY z_index ASC,id ASC`;
+  objectStripParams = [maxY, minX, maxX];
+} else if (dir === "west") {
+  objectStripSql = `SELECT id,name,object_type,region_name,x,y,interaction_radius,icon,tile_sprite,tile_visual_type,z_index FROM world_objects WHERE is_active=1 AND x=? AND y BETWEEN ? AND ? ORDER BY z_index ASC,id ASC`;
+  objectStripParams = [minX, minY, maxY];
+} else {
+  objectStripSql = `SELECT id,name,object_type,region_name,x,y,interaction_radius,icon,tile_sprite,tile_visual_type,z_index FROM world_objects WHERE is_active=1 AND x=? AND y BETWEEN ? AND ? ORDER BY z_index ASC,id ASC`;
+  objectStripParams = [maxX, minY, maxY];
+}
+
+let worldObjects: any[] = [];
+
+// If this move advanced a quest, existing objects already inside the buffer may
+// have gained/lost quest-target markers. Refresh objects once on that state
+// change; ordinary movement still uses only the entering strip.
+if (questProgressChanged) {
+  const [rows]: any = await db.query(`
+    SELECT id,name,object_type,region_name,x,y,interaction_radius,icon,tile_sprite,tile_visual_type,z_index
+    FROM world_objects
+    WHERE is_active=1 AND x BETWEEN ? AND ? AND y BETWEEN ? AND ?
+    ORDER BY z_index ASC,id ASC
+  `, [minX, maxX, minY, maxY]);
+  worldObjects = rows;
+} else {
+  const [rows]: any = await db.query(objectStripSql, objectStripParams);
+  worldObjects = rows;
+}
 
 worldObjects = await filterHallowedPumpkinsForPlayer(Number(pid), worldObjects);
-  worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
+worldObjects = await markActiveQuestWorldObjects(Number(pid), worldObjects);
 
-  const [tiles]: any = await db.query(`
-    SELECT *
-    FROM world_map
-    WHERE x BETWEEN ? AND ?
-      AND y BETWEEN ? AND ?
-  `, [minX, maxX, minY, maxY]);
+  // The browser already owns the previous 11x11 tile buffer. After a
+  // one-tile move only one entering row/column is new, so send that strip
+  // instead of re-reading and returning all 121 tiles.
+  let tileStripSql = "";
+  let tileStripParams: any[] = [];
 
-  const nearbyPlayers =
-    await getNearbyWorldPlayers(
-      Number(pid),
-      newX,
-      newY,
-      5
-    );
+  if (dir === "north") {
+    tileStripSql = `SELECT * FROM world_map WHERE y = ? AND x BETWEEN ? AND ?`;
+    tileStripParams = [minY, minX, maxX];
+  } else if (dir === "south") {
+    tileStripSql = `SELECT * FROM world_map WHERE y = ? AND x BETWEEN ? AND ?`;
+    tileStripParams = [maxY, minX, maxX];
+  } else if (dir === "west") {
+    tileStripSql = `SELECT * FROM world_map WHERE x = ? AND y BETWEEN ? AND ?`;
+    tileStripParams = [minX, minY, maxY];
+  } else {
+    tileStripSql = `SELECT * FROM world_map WHERE x = ? AND y BETWEEN ? AND ?`;
+    tileStripParams = [maxX, minY, maxY];
+  }
+
+  const [tiles]: any =
+    await db.query(tileStripSql, tileStripParams);
 
   // =======================
   // BUNDLE: nearby-objects data
@@ -3222,6 +3296,7 @@ const nearbyHuntClues =
     pos: { x: newX, y: newY },
     terrain: tile.terrain,
     region: regionName,
+    regionChanged,
     zoneLevel,
     spawnedResourceNode,
     flavor: terrainFlavor(tile.terrain),
@@ -3244,9 +3319,10 @@ world: {
   },
 
   tiles,
+  partialTiles: true,
+  partialWorldObjects: !questProgressChanged,
   worldObjects,
   resourceNodes,
-  nearbyPlayers,
 
   huntClues: nearbyHuntClues,
   huntTargets,
@@ -3619,6 +3695,34 @@ router.get("/api/world/nearby-objects", async (req, res) => {
 // =======================
 // WORLD PARTIAL
 // =======================
+
+router.get("/world/nearby-players", async (req, res) => {
+  const pid = Number((req.session as any)?.playerId);
+
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return res.status(401).json({ error: "Not logged in" });
+  }
+
+  const [[player]]: any = await db.query(
+    `SELECT map_x, map_y FROM players WHERE id = ? LIMIT 1`,
+    [pid]
+  );
+
+  if (!player) {
+    return res.status(404).json({ error: "Player not found" });
+  }
+
+  const players =
+    await getNearbyWorldPlayers(
+      pid,
+      Number(player.map_x),
+      Number(player.map_y),
+      5
+    );
+
+  return res.json({ players });
+});
+
 
 router.get("/world/partial", async (req, res) => {
   const pid =
@@ -4483,6 +4587,7 @@ router.post("/api/seasonal-vendor/:objectId/quest/accept", async (req, res) => {
     if (!quest) return res.status(404).json({ error: "seasonal_quest_not_found" });
 
     const out = await acceptQuest(pid, Number(quest.id), "tavern");
+    invalidateActiveQuestWorldTargetCache(Number(pid));
     return res.json({ success: true, ...out, quest: await getHallowedSmashQuestState(pid) });
   } catch (err: any) {
     const msg = String(err?.message || "");
@@ -4531,6 +4636,7 @@ router.post("/api/seasonal-vendor/:objectId/quest/turn-in", async (req, res) => 
     }
 
     const reward = await claimQuestRewards(pid, Number(pq.id));
+    invalidateActiveQuestWorldTargetCache(Number(pid));
 
     // It no longer needs to occupy a tracked-quest slot after being handed in.
     await db.query(
@@ -4601,6 +4707,7 @@ router.post("/api/world/destroy/:objectId", async (req, res) => {
     if (alreadySmashed) return res.status(409).json({ error: "pumpkin_already_smashed" });
 
     const out = await applyDestroyObjectProgress(pid, objectId);
+    invalidateActiveQuestWorldTargetCache(Number(pid));
     if (!out.updatedObjectives.length) return res.status(400).json({ error: "no_active_destroy_objective" });
 
     await db.query(
@@ -4627,6 +4734,7 @@ router.post("/api/world/interact/:objectId", async (req, res) => {
     }
 
     const out = await applyInteractProgress(pid, objectId);
+    invalidateActiveQuestWorldTargetCache(Number(pid));
     return res.json(out);
   } catch (err: any) {
     const msg = String(err?.message || "");

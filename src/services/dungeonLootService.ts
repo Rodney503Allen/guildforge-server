@@ -605,14 +605,60 @@ async function resolveDungeonLootRollWithConn(
       [rollId],
     );
 
+    const [resultRows]: any =
+      await conn.query(
+        `
+          SELECT
+            dlc.player_id,
+            p.name AS player_name,
+            dlc.choice,
+            dlc.roll_value
+          FROM dungeon_loot_choices dlc
+          JOIN players p ON p.id = dlc.player_id
+          WHERE dlc.roll_id = ?
+          ORDER BY dlc.submitted_at ASC, dlc.player_id ASC
+        `,
+        [rollId],
+      );
+
+    const [[displayRow]]: any =
+      await conn.query(
+        `
+          SELECT
+            COALESCE(dlr.generated_name, i.name, ib.name, 'Unknown Reward') AS item_name,
+            COALESCE(i.icon, ib.icon) AS item_icon,
+            COALESCE(dlr.generated_rarity, i.rarity) AS item_rarity,
+            dlr.quantity
+          FROM dungeon_loot_rolls dlr
+          LEFT JOIN items i ON dlr.reward_type = 'item' AND i.id = dlr.reward_id
+          LEFT JOIN item_bases ib ON dlr.reward_type = 'item_base' AND ib.id = dlr.reward_id
+          WHERE dlr.id = ?
+          LIMIT 1
+        `,
+        [rollId],
+      );
+
     return {
       resolved: true,
-      winnerPlayerId:
-        null,
-      winningChoice:
-        null,
-      winningRoll:
-        null,
+      winnerPlayerId: null,
+      winningChoice: null,
+      winningRoll: null,
+      lootResult: {
+        rollId,
+        name: String(displayRow?.item_name ?? 'Unknown Reward'),
+        icon: displayRow?.item_icon ?? null,
+        rarity: displayRow?.item_rarity ?? null,
+        quantity: Number(displayRow?.quantity ?? 1),
+        winnerPlayerId: null,
+        winningChoice: null,
+        winningRoll: null,
+        results: (resultRows ?? []).map((row: any) => ({
+          playerId: Number(row.player_id),
+          playerName: String(row.player_name ?? 'Unknown Player'),
+          choice: String(row.choice),
+          roll: row.roll_value == null ? null : Number(row.roll_value),
+        })),
+      },
     };
   }
 
@@ -710,11 +756,73 @@ async function resolveDungeonLootRollWithConn(
     ],
   );
 
+  const [resultRows]: any =
+    await conn.query(
+      `
+        SELECT
+          dlc.player_id,
+          p.name AS player_name,
+          dlc.choice,
+          dlc.roll_value
+        FROM dungeon_loot_choices dlc
+        JOIN players p
+          ON p.id = dlc.player_id
+        WHERE dlc.roll_id = ?
+        ORDER BY
+          CASE dlc.choice
+            WHEN 'need' THEN 1
+            WHEN 'greed' THEN 2
+            ELSE 3
+          END ASC,
+          dlc.roll_value DESC,
+          dlc.submitted_at ASC,
+          dlc.player_id ASC
+      `,
+      [rollId],
+    );
+
+  const [[displayRow]]: any =
+    await conn.query(
+      `
+        SELECT
+          COALESCE(dlr.generated_name, i.name, ib.name, 'Unknown Reward') AS item_name,
+          COALESCE(i.icon, ib.icon) AS item_icon,
+          COALESCE(dlr.generated_rarity, i.rarity) AS item_rarity,
+          dlr.quantity
+        FROM dungeon_loot_rolls dlr
+        LEFT JOIN items i
+          ON dlr.reward_type = 'item'
+         AND i.id = dlr.reward_id
+        LEFT JOIN item_bases ib
+          ON dlr.reward_type = 'item_base'
+         AND ib.id = dlr.reward_id
+        WHERE dlr.id = ?
+        LIMIT 1
+      `,
+      [rollId],
+    );
+
   return {
     resolved: true,
     winnerPlayerId,
     winningChoice,
     winningRoll,
+    lootResult: {
+      rollId,
+      name: String(displayRow?.item_name ?? 'Unknown Reward'),
+      icon: displayRow?.item_icon ?? null,
+      rarity: displayRow?.item_rarity ?? null,
+      quantity: Number(displayRow?.quantity ?? 1),
+      winnerPlayerId,
+      winningChoice,
+      winningRoll,
+      results: (resultRows ?? []).map((row: any) => ({
+        playerId: Number(row.player_id),
+        playerName: String(row.player_name ?? 'Unknown Player'),
+        choice: String(row.choice),
+        roll: row.roll_value == null ? null : Number(row.roll_value),
+      })),
+    },
   };
 }
 

@@ -53,14 +53,6 @@ let dungeonPollingTimer =
 let dungeonBusy =
   false;
 
-/*
- * Loot choices need their own lock. Do not reuse dungeonBusy here:
- * refreshDungeonPage() intentionally returns while dungeonBusy is true,
- * and the final loot choice may need to refresh immediately into Rest.
- */
-let dungeonLootChoiceBusy =
-  false;
-
 let dungeonRestState =
   null;
 
@@ -81,6 +73,13 @@ let dungeonSocketInstanceId =
   null;
 let dungeonLifecycleRefreshTimer =
   null;
+
+/* Terminal completion owns navigation once the final room is finished. */
+let dungeonTerminalCompletion =
+  false;
+
+const dungeonShownLootResults =
+  new Set();
 
 
 let dungeonInitialized =
@@ -1743,6 +1742,14 @@ async function refreshDungeonPage() {
 
       stopDungeonPolling();
       stopSmoothDungeonTimers();
+
+      /*
+       * Completion has its own one-way exit handler. Do not let a late
+       * poll/socket resync start a second navigation back to /world.
+       */
+      if (dungeonTerminalCompletion) {
+        return;
+      }
 
       if (
         document.getElementById(
@@ -4432,35 +4439,6 @@ async function renderDungeonLootPanel(
   const data =
     await response.json();
 
-  if (
-    !response.ok ||
-    data?.ok === false
-  ) {
-    throw new Error(
-      data?.error ||
-      "Unable to load dungeon loot."
-    );
-  }
-
-  /*
-   * A lifecycle socket event and an in-flight loot fetch can cross.
-   * If the authoritative server state has already left Loot, do not
-   * repaint a stale loot panel over the new Rest/Complete state.
-   */
-  const lootPhase =
-    String(
-      data?.loot?.phase ??
-      ""
-    ).toLowerCase();
-
-  if (
-    data?.loot &&
-    lootPhase !== "loot"
-  ) {
-    await refreshDungeonPage();
-    return;
-  }
-
   const rolls =
     data?.loot?.rolls ??
     [];
@@ -4684,115 +4662,202 @@ function renderDungeonLootRoll(
   `;
 }
 
+function ensureDungeonToastStyles() {
+  if (document.getElementById("dungeonLootToastStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "dungeonLootToastStyles";
+  style.textContent = `
+    .dungeon-loot-toast-stack{position:fixed;right:22px;top:22px;z-index:100000;display:flex;flex-direction:column;gap:12px;width:min(390px,calc(100vw - 32px));pointer-events:none}
+    .dungeon-loot-toast{pointer-events:auto;background:rgba(13,17,22,.97);border:8px solid transparent;border-image:url('/images/ui/panel_border.png') 16 / 8px stretch;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,.55);color:#e8edf2}
+    .dungeon-loot-toast__title{font-weight:800;font-size:15px;margin-bottom:8px}
+    .dungeon-loot-toast__row{display:grid;grid-template-columns:1fr auto auto;gap:10px;padding:4px 0;font-size:13px;border-top:1px solid rgba(255,255,255,.07)}
+    .dungeon-loot-toast__choice{text-transform:capitalize;opacity:.8}.dungeon-loot-toast__roll{font-weight:800;min-width:30px;text-align:right}
+    .dungeon-loot-toast__winner{margin-top:9px;font-weight:800;color:#f2d58a}
+    .dungeon-completion-overlay{position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:20px}
+    .dungeon-completion-modal{width:min(560px,100%);max-height:85vh;overflow:auto;background:#11171d;color:#e8edf2;border:10px solid transparent;border-image:url('/images/ui/main_border.png') 16 / 12px stretch;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.75)}
+    .dungeon-completion-rewards{display:grid;gap:10px;margin:16px 0}.dungeon-completion-reward{display:flex;align-items:center;gap:12px;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1)}
+    .dungeon-completion-reward img{width:46px;height:46px;object-fit:contain}.dungeon-completion-reward__name{font-weight:800}.dungeon-completion-reward__meta{font-size:12px;opacity:.72;margin-top:2px}
+    .dungeon-completion-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+  `;
+  document.head.appendChild(style);
+}
+
+function showDungeonLootResultToast(result) {
+  if (!result || !result.rollId) return;
+  if (dungeonShownLootResults.has(Number(result.rollId))) return;
+  dungeonShownLootResults.add(Number(result.rollId));
+  ensureDungeonToastStyles();
+
+  let stack = document.getElementById("dungeonLootToastStack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "dungeonLootToastStack";
+    stack.className = "dungeon-loot-toast-stack";
+    document.body.appendChild(stack);
+  }
+
+  const results = Array.isArray(result.results) ? result.results : [];
+  const winner = results.find(row => Number(row.playerId) === Number(result.winnerPlayerId));
+  const toast = document.createElement("div");
+  toast.className = "dungeon-loot-toast";
+  toast.innerHTML = `
+    <div class="dungeon-loot-toast__title">${escapeDungeonHtml(result.name || "Boss Loot")}</div>
+    ${results.map(row => `
+      <div class="dungeon-loot-toast__row">
+        <span>${escapeDungeonHtml(row.playerName || "Player")}</span>
+        <span class="dungeon-loot-toast__choice">${escapeDungeonHtml(row.choice || "pass")}</span>
+        <span class="dungeon-loot-toast__roll">${row.roll == null ? "—" : escapeDungeonHtml(String(row.roll))}</span>
+      </div>
+    `).join("")}
+    <div class="dungeon-loot-toast__winner">
+      ${winner
+        ? `${escapeDungeonHtml(winner.playerName)} won with ${escapeDungeonHtml(result.winningChoice || "roll")} ${escapeDungeonHtml(String(result.winningRoll ?? ""))}.`
+        : "Everyone passed."}
+    </div>
+  `;
+  stack.appendChild(toast);
+  window.setTimeout(() => toast.remove(), 9000);
+}
+
+function renderDungeonChestReward(reward) {
+  const icon = reward?.icon
+    ? `<img src="${escapeDungeonHtml(reward.icon)}" alt="">`
+    : `<div class="dungeon-chest-icon">🎁</div>`;
+  const meta = [
+    Number(reward?.quantity ?? 1) > 1 ? `x${Number(reward.quantity)}` : null,
+    reward?.itemLevel != null ? `Item Level ${Number(reward.itemLevel)}` : null
+  ].filter(Boolean).join(" • ");
+
+  return `
+    <div class="dungeon-completion-reward">
+      ${icon}
+      <div>
+        <div class="dungeon-completion-reward__name">${escapeDungeonHtml(reward?.name || "Unknown Reward")}</div>
+        ${meta ? `<div class="dungeon-completion-reward__meta">${escapeDungeonHtml(meta)}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+async function showDungeonCompletionChestModal() {
+  ensureDungeonToastStyles();
+  const response = await fetch("/api/dungeons/completion-chest", {
+    credentials: "include",
+    cache: "no-store"
+  });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || "Unable to load dungeon completion chest.");
+  }
+
+  const chest = data?.chest ?? null;
+  document.getElementById("dungeonCompletionOverlay")?.remove();
+  if (!chest) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "dungeonCompletionOverlay";
+  overlay.className = "dungeon-completion-overlay";
+  overlay.innerHTML = `
+    <div class="dungeon-completion-modal">
+      <div class="dungeon-section-label">Dungeon Complete</div>
+      <h2>Personal Dungeon Chest</h2>
+      <p>${chest.status === "claimed" ? "These rewards have been claimed." : "Your personal completion rewards:"}</p>
+      <div class="dungeon-completion-rewards">
+        ${(chest.rewards ?? []).length
+          ? chest.rewards.map(renderDungeonChestReward).join("")
+          : `<div class="dungeon-empty-state">No rewards were stored for this chest.</div>`}
+      </div>
+      <div class="dungeon-completion-actions">
+        ${chest.status === "claimed" ? "" : `<button id="dungeonCompletionClaimBtn" class="dungeon-btn dungeon-btn--primary" type="button">Claim Rewards</button>`}
+        <button id="dungeonCompletionCloseBtn" class="dungeon-btn dungeon-btn--ghost" type="button">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById("dungeonCompletionCloseBtn")?.addEventListener("click", () => overlay.remove());
+  document.getElementById("dungeonCompletionClaimBtn")?.addEventListener("click", async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await claimDungeonChest(chest.id, false);
+      await showDungeonCompletionChestModal();
+    } catch (error) {
+      button.disabled = false;
+      window.alert(error?.message || "Unable to claim dungeon chest.");
+    }
+  });
+}
+
+async function handleDungeonTerminalCompletion() {
+  if (dungeonTerminalCompletion) return;
+  dungeonTerminalCompletion = true;
+
+  stopDungeonPolling();
+  stopSmoothDungeonTimers();
+  if (dungeonLifecycleRefreshTimer) {
+    window.clearTimeout(dungeonLifecycleRefreshTimer);
+    dungeonLifecycleRefreshTimer = null;
+  }
+  await leaveDungeonInstanceSocketRoom();
+  releaseDungeonAudio();
+  dungeonActive = null;
+  dungeonEncounter = null;
+  dungeonCombat = null;
+
+  if (document.getElementById("dungeonModal")) {
+    closeDungeonModalView();
+    if (typeof refreshWorld === "function") await refreshWorld();
+  } else if (window.location.pathname === "/dungeon") {
+    window.history.replaceState({}, "", "/world");
+  }
+
+  await showDungeonCompletionChestModal();
+}
+
 async function submitDungeonLootChoice(
   rollId,
   choice
 ) {
-  if (
-    dungeonLootChoiceBusy
-  ) {
-    return;
-  }
+  const response =
+    await fetch(
+      `/api/dungeons/active/loot/${
+        rollId
+      }/choice`,
+      {
+        method:
+          "POST",
 
-  dungeonLootChoiceBusy =
-    true;
+        credentials:
+          "include",
 
-  const lootButtons =
-    document.querySelectorAll(
-      "[data-loot-choice]"
-    );
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
 
-  lootButtons.forEach(
-    button => {
-      button.disabled =
-        true;
-    }
-  );
-
-  try {
-    const response =
-      await fetch(
-        `/api/dungeons/active/loot/${
-          rollId
-        }/choice`,
-        {
-          method:
-            "POST",
-
-          credentials:
-            "include",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify({
-              choice
-            })
-        }
-      );
-
-    const data =
-      await response.json();
-
-    if (
-      !response.ok ||
-      data.ok === false
-    ) {
-      throw new Error(
-        data.error ||
-        "Unable to submit loot choice."
-      );
-    }
-
-    /*
-     * The server resolves Need/Greed/Pass and, when this was the last
-     * outstanding choice on the last open roll, atomically advances
-     * the instance from Loot -> Rest. Refresh immediately so the
-     * resolving player does not wait for the socket or recovery poll.
-     */
-    if (
-      data.movedToRest
-    ) {
-      dungeonCombat =
-        null;
-
-      stopSmoothDungeonTimers();
-    }
-
-    await refreshDungeonPage();
-  } catch (error) {
-    console.error(
-      "Dungeon loot choice failed:",
-      error
-    );
-
-    setDungeonText(
-      "dungeonActionStatus",
-      error?.message ||
-      "Unable to submit loot choice."
-    );
-
-    lootButtons.forEach(
-      button => {
-        if (
-          document.body.contains(
-            button
-          )
-        ) {
-          button.disabled =
-            false;
-        }
+        body:
+          JSON.stringify({
+            choice
+          })
       }
     );
 
-    throw error;
-  } finally {
-    dungeonLootChoiceBusy =
-      false;
+  const data =
+    await response.json();
+
+  if (
+    !response.ok ||
+    data.ok === false
+  ) {
+    throw new Error(
+      data.error ||
+      "Unable to submit loot choice."
+    );
   }
+
+  await refreshDungeonPage();
 }
 
 async function renderDungeonRestPanel(
@@ -5243,14 +5308,7 @@ async function advanceDungeonRoom() {
     data.transition ===
     "complete"
   ) {
-    stopDungeonPolling();
-
-    await renderDungeonCompletePanel(
-      document.getElementById(
-        "dungeonPhasePanel"
-      )
-    );
-
+    await handleDungeonTerminalCompletion();
     return;
   }
 
@@ -5315,18 +5373,12 @@ async function renderDungeonCompletePanel(
                   </strong>
 
                   <span>
-                    ${
-                      chest.rewards?.length ??
-                      0
-                    } reward${
-                      (
-                        chest.rewards?.length ??
-                        0
-                      ) === 1
-                        ? ""
-                        : "s"
-                    }
+                    ${chest.rewards?.length ?? 0} reward${(chest.rewards?.length ?? 0) === 1 ? "" : "s"}
                   </span>
+                </div>
+
+                <div class="dungeon-completion-rewards">
+                  ${(chest.rewards ?? []).map(renderDungeonChestReward).join("")}
                 </div>
 
                 ${
@@ -5382,87 +5434,14 @@ async function renderDungeonCompletePanel(
     ?.addEventListener(
       "click",
       async () => {
-        const button =
-          document.getElementById(
-            "dungeonReturnWorldBtn"
-          );
-
-        if (button) {
-          button.disabled =
-            true;
-
-          button.textContent =
-            "Returning...";
-        }
-
-        try {
-          const response =
-            await fetch(
-              "/api/dungeons/completion/leave",
-              {
-                method:
-                  "POST",
-                credentials:
-                  "include"
-              }
-            );
-
-          const data =
-            await response.json();
-
-          if (
-            !response.ok ||
-            data.ok === false
-          ) {
-            throw new Error(
-              data.error ||
-              "Unable to leave the completed dungeon."
-            );
-          }
-
-          if (
-            document.getElementById(
-              "dungeonModal"
-            )
-          ) {
-            closeDungeonModalView();
-
-            if (
-              typeof refreshWorld ===
-              "function"
-            ) {
-              await refreshWorld();
-            }
-          } else {
-            window.location.href =
-              "/world";
-          }
-        } catch (error) {
-          console.error(
-            "Dungeon completion leave failed:",
-            error
-          );
-
-          if (button) {
-            button.disabled =
-              false;
-
-            button.textContent =
-              "Return to World";
-          }
-
-          setDungeonText(
-            "dungeonActionStatus",
-            error?.message ||
-            "Unable to return to the world."
-          );
-        }
+        await handleDungeonTerminalCompletion();
       }
     );
 }
 
 async function claimDungeonChest(
-  chestId
+  chestId,
+  rerenderLegacyPanel = true
 ) {
   const response =
     await fetch(
@@ -5490,11 +5469,13 @@ async function claimDungeonChest(
     );
   }
 
-  await renderDungeonCompletePanel(
-    document.getElementById(
-      "dungeonPhasePanel"
-    )
-  );
+  if (rerenderLegacyPanel) {
+    await renderDungeonCompletePanel(
+      document.getElementById(
+        "dungeonPhasePanel"
+      )
+    );
+  }
 }
 
 
@@ -5711,6 +5692,15 @@ async function connectDungeonRealtimeSocket() {
             incomingInstanceId !==
               activeInstanceId
           ) {
+            return;
+          }
+
+          if (payload?.lootResult) {
+            showDungeonLootResultToast(payload.lootResult);
+          }
+
+          if (payload?.dungeonCompleted || payload?.reason === "completed") {
+            void handleDungeonTerminalCompletion();
             return;
           }
 
