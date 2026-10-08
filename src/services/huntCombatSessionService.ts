@@ -216,6 +216,18 @@ const huntCombatSessions = new Map<number, HuntCombatSession>();
 const huntCombatLocks = new KeyedCombatLock<number>();
 
 const PLAYER_AUTO_ATTACK_MS = COMBAT_TIMING.playerAutoAttackMs;
+
+// Use each player's equipped weapon swing speed, matching world combat.
+function getHuntPlayerAutoAttackMs(player: HuntCombatPlayer): number {
+  const stats = player.stats as typeof player.stats & {
+    weaponAttackSpeedMs?: number;
+  };
+  const speed = Number(stats.weaponAttackSpeedMs);
+  return Number.isFinite(speed) && speed >= 1000 && speed <= 12000
+    ? Math.round(speed)
+    : PLAYER_AUTO_ATTACK_MS;
+}
+
 const HUNT_SPELL_RECOVERY_MS = 350;
 const HUNT_ENEMY_RECOVERY_MS = 350;
 const HUNT_FINAL_SESSION_LIFETIME_MS = 2 * 60 * 1000;
@@ -361,6 +373,12 @@ export async function createHuntCombatSession(
 
   if (players.size === 0) {
     return null;
+  }
+
+  // Party runtime starts with a shared default; adjust every participant
+  // to their own equipped weapon speed before the encounter begins.
+  for (const player of players.values()) {
+    player.nextAutoAttackAt = now + getHuntPlayerAutoAttackMs(player);
   }
 
   const mechanicDefinitions = await loadEnemyMechanicDefinitions([
@@ -871,7 +889,7 @@ async function processPlayerAutoAttacks(session: HuntCombatSession) {
 
     player.nextAutoAttackAt =
       now +
-      PLAYER_AUTO_ATTACK_MS;
+      getHuntPlayerAutoAttackMs(player);
 
     await persistHuntEnemyHp(
       session
@@ -1531,7 +1549,7 @@ export function buildHuntCombatSnapshot(
             ),
 
           autoAttackTotalMs:
-            PLAYER_AUTO_ATTACK_MS,
+            getHuntPlayerAutoAttackMs(player),
 
           cooldowns:
             player.cooldowns,

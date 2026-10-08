@@ -145,6 +145,7 @@ export type DungeonCombatSession = {
       DungeonCombatEnemyState
     >;
 
+
   selectedEnemyByPlayer:
     Map<
       number,
@@ -174,6 +175,17 @@ export type DungeonCombatSession = {
 
 const PLAYER_AUTO_ATTACK_MS =
   COMBAT_TIMING.playerAutoAttackMs;
+
+// Match the weapon-speed rules used by normal world combat.
+function getDungeonPlayerAutoAttackMs(player: PartyCombatPlayer): number {
+  const speed = Number(
+    (player.stats as typeof player.stats & { weaponAttackSpeedMs?: number })
+      .weaponAttackSpeedMs
+  );
+  return Number.isFinite(speed) && speed >= 1000 && speed <= 12000
+    ? Math.round(speed)
+    : PLAYER_AUTO_ATTACK_MS;
+}
 
 const DUNGEON_ENEMY_RECOVERY_MS =
   350;
@@ -809,6 +821,12 @@ const participantIds =
     return null;
   }
 
+  // Shared party runtime initializes a default timer; replace it with
+  // each dungeon participant's actual equipped-weapon swing interval.
+  for (const player of players.values()) {
+    player.nextAutoAttackAt = now + getDungeonPlayerAutoAttackMs(player);
+  }
+
   /*
    * Restore spell cooldown timestamps from the dungeon member row.
    * Expired timestamps are harmless and naturally read as ready.
@@ -1228,8 +1246,12 @@ function createStableDungeonSpellEnemy(
           value:
             PartyCombatDotEffect[]
         ) => {
-          state.dots =
-            value;
+          // Keep the original array reference shared with session.dots.
+          // Replacing it allows bindDungeonEnemyState() to restore a stale
+          // array and silently discard newly applied spell DOTs.
+          if (state.dots !== value) {
+            state.dots.splice(0, state.dots.length, ...value);
+          }
         },
       },
 
@@ -1244,8 +1266,11 @@ function createStableDungeonSpellEnemy(
           value:
             PartyCombatDebuffEffect[]
         ) => {
-          state.debuffs =
-            value;
+          // Preserve the bound session.debuffs reference for the
+          // same reason; spell handlers often filter into a new array.
+          if (state.debuffs !== value) {
+            state.debuffs.splice(0, state.debuffs.length, ...value);
+          }
         },
       },
 
@@ -2248,7 +2273,7 @@ async function processDungeonPlayerAutoAttacks(
 
     player.nextAutoAttackAt =
       now +
-      PLAYER_AUTO_ATTACK_MS;
+      getDungeonPlayerAutoAttackMs(player);
 
     await updateDungeonEnemyHp(
       session.runtimeEnemyId,
@@ -2492,6 +2517,7 @@ async function advanceDungeonCombatSessionUnlocked(
     );
   }
 
+  // No buffered spell execution: every spell requires a fresh, ready-time input.
   session.updatedAt =
     now;
 
@@ -2709,6 +2735,17 @@ async function castDungeonSpellUnlocked(
   }
 
   return result;
+}
+
+// Legacy endpoint adapter: execute immediately or reject. Never queue a cast.
+export async function queueDungeonSpell(
+  session: DungeonCombatSession,
+  playerId: number,
+  spellId: number,
+  targetPlayerId: number | null = null,
+  targetEnemyId: number | null = null,
+): Promise<DungeonSpellCastResult> {
+  return castDungeonSpell(session, playerId, spellId, targetPlayerId, targetEnemyId);
 }
 
 export async function castDungeonSpell(
@@ -3294,7 +3331,7 @@ export function buildDungeonCombatSnapshot(
             ),
 
           autoAttackTotalMs:
-            PLAYER_AUTO_ATTACK_MS,
+            getDungeonPlayerAutoAttackMs(player),
 
           cooldowns:
             player.cooldowns,
@@ -3323,6 +3360,7 @@ export function buildDungeonCombatSnapshot(
     instanceId:
       session.instanceId,
 
+    serverTime: now,
     state:
       session.state,
 

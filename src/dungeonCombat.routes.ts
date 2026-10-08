@@ -15,6 +15,7 @@ import {
   advanceDungeonCombatSession,
   buildDungeonCombatSnapshot,
   castDungeonSpell,
+  queueDungeonSpell,
   createDungeonCombatSession,
   getDungeonCombatSession,
   selectDungeonEnemyTarget,
@@ -263,6 +264,45 @@ async function enrichDungeonSnapshotWithBuffs(
       });
   }
 
+  // Shields are absorption pools, not rows in player_buffs.
+  // Fetch them once per snapshot for the entire dungeon party.
+  const [shieldRows]: any = await db.query(
+    `
+      SELECT
+        player_id,
+        source,
+        max_absorb,
+        remaining_absorb,
+        expires_at,
+        GREATEST(
+          0,
+          TIMESTAMPDIFF(MICROSECOND, NOW(3), expires_at) DIV 1000
+        ) AS remaining_ms
+      FROM player_shields
+      WHERE player_id IN (${placeholders})
+        AND expires_at > NOW(3)
+        AND remaining_absorb > 0
+      ORDER BY player_id ASC, expires_at ASC
+    `,
+    playerIds,
+  );
+
+  const shieldsByPlayer = new Map<number, any[]>();
+
+  for (const row of shieldRows ?? []) {
+    const playerId = Number(row.player_id);
+    if (!shieldsByPlayer.has(playerId)) {
+      shieldsByPlayer.set(playerId, []);
+    }
+    shieldsByPlayer.get(playerId)!.push({
+      source: String(row.source ?? "Shield"),
+      maxAbsorb: Math.max(0, Number(row.max_absorb) || 0),
+      remainingAbsorb: Math.max(0, Number(row.remaining_absorb) || 0),
+      expiresAt: row.expires_at,
+      remainingMs: Math.max(0, Number(row.remaining_ms) || 0),
+    });
+  }
+
   snapshot.players =
     snapshot.players.map(
       (player: any) => ({
@@ -275,6 +315,8 @@ async function enrichDungeonSnapshotWithBuffs(
             )
           ) ??
           [],
+        shields:
+          shieldsByPlayer.get(Number(player.playerId)) ?? [],
       })
     );
 
@@ -700,7 +742,7 @@ router.post(
       }
 
       const result =
-        await castDungeonSpell(
+        await queueDungeonSpell(
           session,
           playerId,
           spellId,
@@ -712,16 +754,6 @@ router.post(
         return res.status(400).json(
           result
         );
-      }
-
-      if (result.snapshot) {
-        result.snapshot =
-          await enrichDungeonSnapshotWithBuffs(result.snapshot);
-
-        publishDungeonInstanceState(instanceId, {
-          combat: result.snapshot,
-          serverTime: Date.now(),
-        });
       }
 
       if (session.state === "active") {
@@ -890,7 +922,10 @@ if (
 
   publishDungeonInstanceState(
     instanceId,
-    result.snapshot
+    {
+      combat: result.snapshot,
+      serverTime: Date.now(),
+    }
   );
 }
 

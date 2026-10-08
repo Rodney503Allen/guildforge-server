@@ -98,8 +98,16 @@ router.get("/town/current", async (req, res) => {
     [pid]
   );
 
+  if (!player) return res.status(404).json({ error: "player_not_found" });
+
   const [[town]]: any = await db.query(
-    `SELECT id, name FROM locations WHERE map_x=? AND map_y=? LIMIT 1`,
+    `SELECT l.id, l.name
+     FROM locations l
+     INNER JOIN world_map wm
+       ON wm.x = l.map_x AND wm.y = l.map_y
+     WHERE l.map_x = ? AND l.map_y = ?
+       AND wm.terrain = 'town'
+     LIMIT 1`,
     [player.map_x, player.map_y]
   );
 
@@ -212,9 +220,12 @@ const tutorialRoute =
   null;
 
   const [[town]]: any = await db.query(`
-    SELECT *
-    FROM locations
-    WHERE map_x = ? AND map_y = ?
+    SELECT l.*
+    FROM locations l
+    INNER JOIN world_map wm
+      ON wm.x = l.map_x AND wm.y = l.map_y
+    WHERE l.map_x = ? AND l.map_y = ?
+      AND wm.terrain = 'town'
     LIMIT 1
   `, [player.map_x, player.map_y]);
 

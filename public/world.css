@@ -10046,3 +10046,98 @@ body.world-map-open { overflow: hidden; }
   }
 }
 
+
+
+/* ALPHA 1.0: single authoritative world camera sizing / header polish.
+   11 loaded cells, nine visible cells, no minimum tile size that overflows
+   the actual center column on smaller screens. */
+.world-map-panel { container-type:size; min-width:0; min-height:0; }
+.world-map-panel .map-stage { box-sizing:border-box; width:100%; height:100%; min-width:0; min-height:0; padding:8px; display:grid; place-items:center; overflow:hidden; }
+.world-map-panel .map-wrapper { width:max-content; height:max-content; min-width:0; min-height:0; max-width:100%; max-height:100%; padding:0; margin:0; display:block; overflow:visible; }
+.world-map-panel .grid-viewport {
+  --tile: min(96px, max(1px, calc((100cqw - 22px) / 9)), max(1px, calc((100cqh - 22px) / 9)));
+  box-sizing:content-box; width:calc(var(--tile) * 9); height:calc(var(--tile) * 9);
+  min-width:0; min-height:0; max-width:none; max-height:none; aspect-ratio:1;
+  position:relative; flex:none; overflow:hidden;
+}
+.world-map-panel .grid-viewport > #Grid {
+  display:grid; grid-template-columns:repeat(11, var(--tile)); grid-template-rows:repeat(11, var(--tile));
+  gap:0; width:calc(var(--tile) * 11); height:calc(var(--tile) * 11);
+  min-width:0; min-height:0; padding:0; margin:0;
+  transform:translate3d(calc(-1 * var(--tile)),calc(-1 * var(--tile)),0);
+}
+.world-map-panel #Grid > .tile { box-sizing:border-box; width:var(--tile); height:var(--tile); min-width:0; min-height:0; margin:0; }
+.world-head--center {
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+  gap:10px 16px; min-height:76px; padding:12px 16px !important;
+  border:1px solid rgba(200,163,75,.28) !important; border-radius:7px !important;
+}
+.world-head--center .world-head-copy { flex:1 1 180px; min-width:0; }
+.world-head--center .world-center-kicker { font-size:10px; letter-spacing:1.8px; text-transform:uppercase; }
+.world-head--center #world-title { margin:4px 0 0; font-size:clamp(17px,1.55vw,23px); line-height:1.25; text-align:left; overflow-wrap:anywhere; }
+.world-head--center .world-center-meta { margin-top:6px; }
+.world-head--center .world-center-meta .coords { font-size:11px; letter-spacing:.45px; }
+.world-head--center .world-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex:0 1 auto; flex-wrap:wrap; }
+.world-head--center .world-action-btn { min-width:0; min-height:36px; padding:8px 13px; white-space:nowrap; border-radius:5px; }
+.world-head--center .world-action-btn[hidden] { display:none !important; }
+@media(max-width:700px) {
+  .world-head--center { align-items:flex-start; padding:10px 12px !important; }
+  .world-head--center .world-actions { width:100%; justify-content:flex-start; }
+  .world-head--center .world-action-btn { flex:1 1 auto; }
+}
+
+/* Alpha 1.0: 7x7 visible camera; 11x11 loaded buffer retained. */
+.world-map-panel .grid-viewport {
+  --tile: min(120px, max(1px, calc((100cqw - 22px) / 7)), max(1px, calc((100cqh - 22px) / 7)));
+  width: calc(var(--tile) * 7);
+  height: calc(var(--tile) * 7);
+}
+.world-map-panel .grid-viewport > #Grid {
+  transform: translate3d(calc(-2 * var(--tile)), calc(-2 * var(--tile)), 0);
+}
+.world-nearby-player.is-moving .world-nearby-player__body {
+  animation: gf-remote-walk-bob 210ms ease-in-out infinite alternate;
+}
+@keyframes gf-remote-walk-bob {
+  from { translate: 0 0; }
+  to { translate: 0 -3px; }
+}
+
+/* Fluid travel: animate gait on the body, not the camera-following marker.
+   Marker transform is reserved for directional movement (Web Animations). */
+.world-map-panel .world-player-sprite.is-moving { animation: none !important; }
+.world-map-panel .world-player-sprite.is-moving .world-player-sprite__body {
+  animation: gfFluidWalkGait 210ms ease-in-out infinite alternate;
+}
+@keyframes gfFluidWalkGait {
+  from { translate: 0 1px; }
+  to { translate: 0 -4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .world-map-panel .world-player-sprite.is-moving .world-player-sprite__body { animation: none; }
+}
+
+/* Centered walk: player marker stays fixed; only the body shakes in place. */
+.world-map-panel .world-player-sprite.is-moving {
+  animation: none !important;
+  transform: translate(-50%, -50%) !important;
+}
+.world-map-panel .world-player-sprite.is-moving .world-player-sprite__body {
+  animation: gfCenteredWalkShake 180ms ease-in-out infinite alternate !important;
+}
+@keyframes gfCenteredWalkShake {
+  from { translate: -1px 1px; rotate: -2deg; }
+  to { translate: 1px -2px; rotate: 2deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .world-map-panel .world-player-sprite.is-moving .world-player-sprite__body { animation: none !important; }
+}
+
+/* Persistent nearby-player layer, independent of the tile buffer redraw. */
+.world-map-panel .grid-viewport { position: relative; }
+.world-map-panel .world-remote-player-layer {
+  position: absolute; inset: 0; z-index: 75; pointer-events: none; overflow: visible;
+}
+.world-map-panel .world-remote-player-layer .world-nearby-player {
+  position: absolute; left: 0; top: 0; pointer-events: auto;
+}

@@ -4,15 +4,15 @@ let pendingCombatEnemy = null;
 let lastMoveDir = null;
 
 // ✅ Movement cooldown
-const MOVE_COOLDOWN_MS = 0;
+const MOVE_COOLDOWN_MS = 500;
 
-// Visible world is 9x9. We render an extra hidden one-tile buffer on every
-// side (11x11 total) so full-cell scrolling never reveals an empty edge.
-const WORLD_VIEW_RADIUS = 4;
-const WORLD_VIEW_SIZE = 9;
+// Visible world is 7x7, with two hidden buffer tiles on each side
+// (11x11 loaded total) for seamless scrolling.
+const WORLD_VIEW_RADIUS = 3;
+const WORLD_VIEW_SIZE = 7;
 const WORLD_BUFFER_RADIUS = 5;
 const WORLD_BUFFER_SIZE = 11;
-const WORLD_SCROLL_MS = 420;
+const WORLD_SCROLL_MS = 480; // Nearly matches the 500ms step cadence, reducing the idle gap.
 let lastMoveAt = 0;
 let moveLock = false;
 
@@ -1742,9 +1742,8 @@ function getWorldTileSize() {
     );
 
   if (tile) {
-    const width =
-      tile.getBoundingClientRect()
-        .width;
+    // Use the layout width, unaffected by an in-flight grid animation.
+    const width = tile.offsetWidth || tile.getBoundingClientRect().width;
 
     if (
       Number.isFinite(width) &&
@@ -1787,8 +1786,8 @@ function getWorldGridBaseTransform() {
   const tileSize = getWorldTileSize();
   return {
     tileSize,
-    x: -tileSize,
-    y: -tileSize
+    x: -tileSize * (WORLD_BUFFER_RADIUS - WORLD_VIEW_RADIUS),
+    y: -tileSize * (WORLD_BUFFER_RADIUS - WORLD_VIEW_RADIUS)
   };
 }
 
@@ -1822,64 +1821,17 @@ function setWorldPlayerMotion(dir, moving) {
 }
 
 function positionWorldPlayerSprite() {
-  const viewport =
-    document.querySelector(
-      ".grid-viewport"
-    );
+  const viewport = document.querySelector(".grid-viewport");
+  const sprite = document.getElementById("worldPlayerSprite");
+  if (!viewport || !sprite) return;
 
-  const sprite =
-    document.getElementById(
-      "worldPlayerSprite"
-    );
-
-  const playerTile =
-    document.querySelector(
-      "#Grid .tile.player"
-    );
-
-  if (
-    !viewport ||
-    !sprite ||
-    !playerTile
-  ) {
-    return;
-  }
-
-  /*
-   * Anchor the visible player marker to the ACTUAL logical player tile,
-   * not to an assumed percentage of the viewport.
-   *
-   * This remains correct even when responsive/container-query sizing,
-   * browser zoom, borders, or fractional tile widths change the exact
-   * geometry of the 9x9 camera.
-   */
-  const viewportRect =
-    viewport.getBoundingClientRect();
-
-  const tileRect =
-    playerTile.getBoundingClientRect();
-
-  const centerX =
-    tileRect.left -
-    viewportRect.left +
-    tileRect.width / 2;
-
-  const centerY =
-    tileRect.top -
-    viewportRect.top +
-    tileRect.height / 2;
-
-  sprite.style.position =
-    "absolute";
-
-  sprite.style.left =
-    `${centerX}px`;
-
-  sprite.style.top =
-    `${centerY}px`;
-
-  sprite.style.margin =
-    "0";
+  // The camera always follows the logical center tile. Never anchor this
+  // overlay using the animated tile's bounding box: that box moves during
+  // scrolling, and re-anchoring it produces a visible snap at tile boundaries.
+  sprite.style.position = "absolute";
+  sprite.style.left = `${viewport.clientWidth / 2}px`;
+  sprite.style.top = `${viewport.clientHeight / 2}px`;
+  sprite.style.margin = "0";
 }
 
 function ensureWorldPlayerSprite() {
@@ -1926,9 +1878,7 @@ function ensureWorldPlayerResizeObserver() {
     return;
   }
 
-  if (worldPlayerResizeObserver) {
-    worldPlayerResizeObserver.disconnect();
-  }
+  if (worldPlayerResizeObserver) return;
 
   worldPlayerResizeObserver =
     new ResizeObserver(() => {
@@ -1937,6 +1887,7 @@ function ensureWorldPlayerResizeObserver() {
        * window changes. Re-center after layout has actually updated.
        */
       requestAnimationFrame(() => {
+        resetWorldGridToBase();
         positionWorldPlayerSprite();
       });
     });
@@ -1967,12 +1918,19 @@ function resetWorldGridToBase() {
   grid.style.transform = `translate3d(${base.x}px, ${base.y}px, 0)`;
 }
 
+// Keep the marker fixed at the viewport center. The CSS animates only its
+// inner body with a subtle walking shake while the map scrolls beneath it.
+function animateWorldPlayerStride(_dir) {
+  // Intentionally no positional movement of the player marker.
+}
+
 function animateWorldTravelStep(dir) {
   const grid = document.getElementById("Grid");
   if (!grid || !dir) return Promise.resolve();
 
   ensureWorldPlayerSprite();
   setWorldPlayerMotion(dir, true);
+  animateWorldPlayerStride(dir);
 
   const step = getWorldStepTarget(dir);
 
@@ -3083,17 +3041,13 @@ function renderWorldFromData({
     ).toLowerCase();
 
   if (enterTownBtn) {
-    enterTownBtn.style.display =
-      currentTerrain === "town"
-        ? "inline-block"
-        : "none";
+    enterTownBtn.hidden = currentTerrain !== "town";
+    enterTownBtn.style.display = currentTerrain === "town" ? "inline-flex" : "none";
   }
 
   if (enterDungeonBtn) {
-    enterDungeonBtn.style.display =
-      currentTerrain === "dungeon"
-        ? "inline-block"
-        : "none";
+    enterDungeonBtn.hidden = currentTerrain !== "dungeon";
+    enterDungeonBtn.style.display = currentTerrain === "dungeon" ? "inline-flex" : "none";
   }
 
   if (
@@ -3107,7 +3061,7 @@ function renderWorldFromData({
 
   const coords = document.querySelector(".coords");
   if (coords) {
-    coords.textContent = `Position: (${player.map_x}, ${player.map_y})`;
+    coords.textContent = `X: ${player.map_x}  ·  Y: ${player.map_y}`;
   }
 
   renderCurrentResourcePanel(player, resourceNodes || []);
@@ -3278,115 +3232,124 @@ function createNearbyWorldPlayerMarker(otherPlayer) {
   return marker;
 }
 
+// Remote markers live above the tile grid. A terrain redraw must never destroy
+// them, and a socket update must never teleport them to the destination first.
+const remoteWorldVisuals = new Map();
+let remoteWorldLayer = null;
+let remoteWorldAnimationRunning = false;
+
+function getRemoteWorldLayer() {
+  const grid = document.getElementById('Grid');
+  const viewport = grid?.closest('.grid-viewport');
+  if (!viewport) return null;
+  if (remoteWorldLayer?.parentElement !== viewport) {
+    remoteWorldLayer = document.createElement('div');
+    remoteWorldLayer.className = 'world-remote-player-layer';
+    viewport.appendChild(remoteWorldLayer);
+  }
+  return remoteWorldLayer;
+}
+
+function positionRemoteWorldPlayers(now) {
+  const layer = getRemoteWorldLayer();
+  const grid = document.getElementById('Grid');
+  if (!layer || !grid) {
+    remoteWorldAnimationRunning = false;
+    return;
+  }
+  const viewportRect = layer.getBoundingClientRect();
+  const firstTile = grid.querySelector('.tile[data-x][data-y]');
+  if (firstTile) {
+    const firstRect = firstTile.getBoundingClientRect();
+    const originX = Number(firstTile.dataset.x);
+    const originY = Number(firstTile.dataset.y);
+    const tileWidth = firstRect.width;
+    const tileHeight = firstRect.height;
+    for (const [id, state] of remoteWorldVisuals) {
+      if (!nearbyWorldPlayers.has(id)) {
+        state.marker.remove();
+        remoteWorldVisuals.delete(id);
+        continue;
+      }
+      const progress = state.startedAt == null
+        ? 1
+        : Math.min(1, Math.max(0, (now - state.startedAt) / WORLD_SCROLL_MS));
+      const x = state.fromX + (state.toX - state.fromX) * progress;
+      const y = state.fromY + (state.toY - state.fromY) * progress;
+      state.visualX = x;
+      state.visualY = y;
+      state.marker.style.left = `${firstRect.left - viewportRect.left + (x - originX + .5) * tileWidth}px`;
+      state.marker.style.top = `${firstRect.top - viewportRect.top + (y - originY + .5) * tileHeight}px`;
+      state.marker.classList.toggle('is-moving', progress < 1);
+      if (progress >= 1) state.startedAt = null;
+    }
+  }
+  requestAnimationFrame(positionRemoteWorldPlayers);
+}
+
 function renderNearbyWorldPlayer(otherPlayer) {
-  const playerId =
-    Number(
-      otherPlayer?.id
-    );
+  const playerId = Number(otherPlayer?.id);
+  if (!Number.isInteger(playerId) || playerId <= 0 ||
+      playerId === Number(window.__PLAYER_ID__)) return;
 
-  if (
-    !Number.isInteger(playerId) ||
-    playerId <= 0 ||
-    playerId ===
-      Number(
-        window.__PLAYER_ID__
-      )
-  ) {
+  const x = Number(otherPlayer.map_x ?? otherPlayer.x);
+  const y = Number(otherPlayer.map_y ?? otherPlayer.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  if (!isWorldCoordinateInLoadedBuffer(x, y)) {
+    nearbyWorldPlayers.delete(playerId);
+    remoteWorldVisuals.get(playerId)?.marker.remove();
+    remoteWorldVisuals.delete(playerId);
     return;
   }
 
-  const existing =
-    document.querySelector(
-      `.world-nearby-player[data-player-id="${playerId}"]`
-    );
-
-  existing?.remove();
-
-  const x =
-    Number(
-      otherPlayer.map_x ??
-      otherPlayer.x
-    );
-
-  const y =
-    Number(
-      otherPlayer.map_y ??
-      otherPlayer.y
-    );
-
-  if (
-    !isWorldCoordinateInLoadedBuffer(
-      x,
-      y
-    )
-  ) {
-    nearbyWorldPlayers.delete(
-      playerId
-    );
-    return;
-  }
-
-  const tile =
-    document.querySelector(
-      `#Grid .tile[data-x="${x}"][data-y="${y}"]`
-    );
-
-  if (!tile) {
-    return;
-  }
-
+  const layer = getRemoteWorldLayer();
+  if (!layer) return;
   const normalized = {
-    ...otherPlayer,
-    id: playerId,
-    map_x: x,
-    map_y: y,
-    name:
-      String(
-        otherPlayer.name ||
-        "Adventurer"
-      ),
-    level:
-      Math.max(
-        1,
-        Number(
-          otherPlayer.level
-        ) || 1
-      ),
-    isPartyMember:
-      Boolean(
-        otherPlayer.isPartyMember
-      )
+    ...otherPlayer, id: playerId, map_x: x, map_y: y,
+    name: String(otherPlayer.name || 'Adventurer'),
+    level: Math.max(1, Number(otherPlayer.level) || 1),
+    isPartyMember: Boolean(otherPlayer.isPartyMember)
   };
+  nearbyWorldPlayers.set(playerId, normalized);
 
-  nearbyWorldPlayers.set(
-    playerId,
-    normalized
-  );
+  let state = remoteWorldVisuals.get(playerId);
+  if (!state) {
+    const marker = createNearbyWorldPlayerMarker(normalized);
+    layer.appendChild(marker);
+    state = { marker, fromX: x, fromY: y, toX: x, toY: y,
+      visualX: x, visualY: y, startedAt: null };
+    remoteWorldVisuals.set(playerId, state);
+  } else if (state.toX !== x || state.toY !== y) {
+    // Begin from the actual currently displayed location, even when another
+    // socket update arrives before the preceding step has finished.
+    state.fromX = state.visualX;
+    state.fromY = state.visualY;
+    state.toX = x;
+    state.toY = y;
+    state.startedAt = performance.now();
+  }
 
-  tile.appendChild(
-    createNearbyWorldPlayerMarker(
-      normalized
-    )
-  );
+  const marker = state.marker;
+  marker.querySelector('.world-nearby-player__name').textContent = normalized.name;
+  marker.classList.toggle('is-party-member', normalized.isPartyMember);
+  marker.setAttribute('aria-label', `View ${normalized.name}'s player card, level ${normalized.level}`);
+  marker.title = `View ${normalized.name}'s player card`;
+  if (marker.parentElement !== layer) layer.appendChild(marker);
+  if (!remoteWorldAnimationRunning) {
+    remoteWorldAnimationRunning = true;
+    requestAnimationFrame(positionRemoteWorldPlayers);
+  }
 }
 
 function renderNearbyWorldPlayers() {
-  document
-    .querySelectorAll(
-      ".world-nearby-player"
-    )
-    .forEach(marker =>
-      marker.remove()
-    );
-
-  for (
-    const otherPlayer of
-    nearbyWorldPlayers.values()
-  ) {
-    renderNearbyWorldPlayer(
-      otherPlayer
-    );
+  // Preserve existing marker nodes and in-flight animations on every redraw.
+  for (const [id, state] of remoteWorldVisuals) {
+    if (!nearbyWorldPlayers.has(id)) {
+      state.marker.remove();
+      remoteWorldVisuals.delete(id);
+    }
   }
+  for (const player of nearbyWorldPlayers.values()) renderNearbyWorldPlayer(player);
 }
 
 async function resyncNearbyWorldPlayers() {
@@ -3416,7 +3379,14 @@ async function resyncNearbyWorldPlayers() {
           )
       );
 
-    renderNearbyWorldPlayers();
+    // Update markers in place during resync; only remove players no longer nearby.
+    const liveIds = new Set(nearbyWorldPlayers.keys());
+    for (const [id, state] of remoteWorldVisuals) {
+      if (!liveIds.has(id)) { state.marker.remove(); remoteWorldVisuals.delete(id); }
+    }
+    for (const otherPlayer of nearbyWorldPlayers.values()) {
+      renderNearbyWorldPlayer(otherPlayer);
+    }
   } catch (err) {
     console.warn(
       "Unable to resync nearby world players:",
@@ -3500,6 +3470,7 @@ async function connectWorldPresenceSocket() {
                 `.world-nearby-player[data-player-id="${playerId}"]`
               )
               ?.remove();
+            remoteWorldVisuals.delete(playerId);
 
             return;
           }
@@ -4885,7 +4856,22 @@ async function moveWorld(dir) {
     if (movementReleased) return;
 
     movementReleased = true;
-    moveLock = false;
+
+    // Preserve the original 500 ms per-tile pace even when the server
+    // responds faster than the visual animation. Keep the lock until then.
+    const remainingCooldownMs = Math.max(
+      0,
+      MOVE_COOLDOWN_MS - (Date.now() - lastMoveAt)
+    );
+    window.setTimeout(() => {
+      moveLock = false;
+
+      if (!isInCombat() && heldWorldDirections.size) {
+        continueHeldWorldMovement();
+      } else {
+        setWorldPlayerMotion(lastMoveDir || dir, false);
+      }
+    }, remainingCooldownMs);
 
     console.log(
       `[MOVE ${dir}] movement unlocked: ${Math.round(
@@ -4893,23 +4879,6 @@ async function moveWorld(dir) {
       )}ms`
     );
 
-    if (!isInCombat() && heldWorldDirections.size) {
-      /*
-       * Do NOT wait for another requestAnimationFrame here.
-       * The previous animation has already completed at a tile boundary, so
-       * starting the next step immediately removes the extra frame-sized gap.
-       */
-      console.log(
-        `[MOVE ${dir}] next held step requested immediately`
-      );
-
-      continueHeldWorldMovement();
-    } else {
-      setWorldPlayerMotion(
-        lastMoveDir || dir,
-        false
-      );
-    }
   }
 
   try {

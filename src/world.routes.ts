@@ -1332,7 +1332,7 @@ res.send(`
 
           <div class="world-center-meta">
             <span class="coords">
-              Position: (${player.map_x}, ${player.map_y})
+              X: ${player.map_x} · Y: ${player.map_y}
             </span>
           </div>
         </div>

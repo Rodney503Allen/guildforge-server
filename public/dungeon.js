@@ -47,6 +47,16 @@ let dungeonPotionLoadedRoomKey =
 let dungeonPendingSpell =
   null;
 
+// Clock offset is refreshed from authoritative socket broadcasts.
+let dungeonServerClockOffsetMs = 0;
+function dungeonServerNow() { return Date.now() + dungeonServerClockOffsetMs; }
+function updateDungeonServerClock(serverTime) {
+  if (Number.isFinite(Number(serverTime)) && Number(serverTime) > 0) {
+    dungeonServerClockOffsetMs = Number(serverTime) - Date.now();
+  }
+}
+
+
 let dungeonPollingTimer =
   null;
 
@@ -1862,6 +1872,7 @@ async function refreshDungeonCombat() {
     );
   }
 
+  updateDungeonServerClock(data.serverTime);
   dungeonCombat =
     data.combat ??
     null;
@@ -2537,10 +2548,9 @@ function renderDungeonPlayerBuffs(
       ? player.buffs
       : [];
 
-  if (
-    buffs.length ===
-    0
-  ) {
+  const shields = Array.isArray(player?.shields) ? player.shields : [];
+
+  if (buffs.length === 0 && shields.length === 0) {
     return "";
   }
 
@@ -2610,6 +2620,27 @@ function renderDungeonPlayerBuffs(
             }
           ).join("")
         }
+        ${shields.map(shield => {
+          const amount = Math.max(0, Number(shield.remainingAbsorb) || 0);
+          const maximum = Math.max(0, Number(shield.maxAbsorb) || 0);
+          const source = String(shield.source || "Absorption Shield");
+          const emoji = "🛡️";
+          return `
+            <div class="dungeon-status-icon dungeon-status-icon--buff dungeon-status-icon--shield" tabindex="0">
+              <span class="dungeon-status-icon__emoji">${emoji}</span>
+              <span class="dungeon-status-icon__badge">${formatDungeonEffectSeconds(shield.remainingMs)}s</span>
+              ${renderDungeonHoverTooltip(
+                source.replaceAll("_", " "),
+                emoji,
+                "Absorbs incoming damage until depleted or expired.",
+                [
+                  { label: "Absorb left", value: String(amount) },
+                  { label: "Original shield", value: String(maximum) }
+                ]
+              )}
+            </div>
+          `;
+        }).join("")}
       </div>
     </div>
   `;
@@ -2929,23 +2960,6 @@ function renderDungeonEnemyCard(
           </div>
         </div>
 
-        ${
-          enemy.mechanic
-            ?.activeCast
-            ? `
-              <div class="dungeon-enemy-card__casting">
-                ⚠ Casting ${
-                  escapeDungeonHtml(
-                    enemy.mechanic
-                      .activeCast
-                      .name ||
-                    "Ability"
-                  )
-                }
-              </div>
-            `
-            : ""
-        }
       </div>
     </button>
   `;
@@ -3975,6 +3989,8 @@ function renderDungeonHotbar() {
         )
     );
 
+  updateDungeonServerClock(dungeonCombat?.serverTime);
+
   const spellHtml =
     dungeonSpells.map(
       entry => {
@@ -4014,7 +4030,7 @@ function renderDungeonHotbar() {
           Math.max(
             0,
             cooldownUntil -
-            Date.now()
+            dungeonServerNow()
           );
 
         const manaCost =
@@ -4031,12 +4047,9 @@ function renderDungeonHotbar() {
           phase !== "trash" &&
           phase !== "boss" ||
           !me ||
-          !me.ready ||
           me.hp <= 0 ||
           me.sp <
-            manaCost ||
-          remainingMs >
-            0;
+            manaCost;
 
         return `
           <button
@@ -4232,12 +4245,18 @@ async function castDungeonSpell(
 ) {
   const targetEnemyId =
     getSelectedDungeonEnemyId();
-  if (dungeonBusy) {
+  if (dungeonBusy) return;
+
+  const me = (dungeonCombat?.players ?? []).find(
+    player => Number(player.playerId) === Number(dungeonPlayerId)
+  );
+  const cooldownUntil = Number(me?.cooldowns?.[`spell:${spellId}`] ?? 0);
+  if (!me?.ready || cooldownUntil > dungeonServerNow()) {
+    setDungeonText("dungeonActionStatus", "Not ready — wait for ATB and cooldown.");
     return;
   }
 
-  dungeonBusy =
-    true;
+  dungeonBusy = true;
 
   try {
     const response =
@@ -4288,35 +4307,10 @@ async function castDungeonSpell(
         "hidden"
       );
 
-    /*
-     * Match normal combat / Hunt spell audio.
-     *
-     * Audio is emitted only after the Dungeon server accepts the cast,
-     * so rejected casts never play their spell sound.
-     */
-    const castSpellEntry =
-      dungeonSpells.find(
-        entry =>
-          Number(
-            entry.spell?.id
-          ) ===
-          Number(
-            spellId
-          )
-      );
-
-    const castSpellData =
-      castSpellEntry?.spell ??
-      null;
-
-    if (
-      castSpellData?.audio &&
-      window.GFSpellEvents
-        ?.emitCast
-    ) {
-      window.GFSpellEvents.emitCast(
-        castSpellData
-      );
+    setDungeonText("dungeonActionStatus", "Ability cast.");
+    const spellData = dungeonSpells.find(entry => Number(entry.spell?.id) === Number(spellId))?.spell;
+    if (spellData?.audio && window.GFSpellEvents?.emitCast) {
+      window.GFSpellEvents.emitCast(spellData);
     }
 
     if (
@@ -5585,6 +5579,7 @@ async function connectDungeonRealtimeSocket() {
       socket.on(
         "dungeon:state",
         payload => {
+          updateDungeonServerClock(payload?.serverTime);
           const snapshot =
             payload?.combat ??
             payload ??
