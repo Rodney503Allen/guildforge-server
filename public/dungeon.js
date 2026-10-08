@@ -4677,7 +4677,7 @@ function ensureDungeonToastStyles() {
   const style = document.createElement("style");
   style.id = "dungeonLootToastStyles";
   style.textContent = `
-    .dungeon-loot-toast-stack{position:fixed;right:22px;top:22px;z-index:100000;display:flex;flex-direction:column;gap:12px;width:min(390px,calc(100vw - 32px));pointer-events:none}
+    .dungeon-loot-toast-stack{position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);z-index:100000;display:flex;flex-direction:column;align-items:stretch;gap:12px;width:min(460px,calc(100vw - 32px));max-height:75vh;overflow-y:auto;pointer-events:none}
     .dungeon-loot-toast{pointer-events:auto;background:rgba(13,17,22,.97);border:8px solid transparent;border-image:url('/images/ui/panel_border.png') 16 / 8px stretch;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,.55);color:#e8edf2}
     .dungeon-loot-toast__title{font-weight:800;font-size:15px;margin-bottom:8px}
     .dungeon-loot-toast__row{display:grid;grid-template-columns:1fr auto auto;gap:10px;padding:4px 0;font-size:13px;border-top:1px solid rgba(255,255,255,.07)}

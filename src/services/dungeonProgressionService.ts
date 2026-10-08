@@ -1115,54 +1115,21 @@ export async function advanceDungeonAfterRestForPlayer(
     }
 
     /*
-     * The personal completion chests above are intentionally NOT deleted.
-     * They no longer have an FK to dungeon_instances, so they survive the
-     * runtime cleanup and can be claimed from /world after the run is gone.
+     * Preserve the completed instance and its members while players
+     * inspect and claim their individual completion chests.
+     * Each member can leave independently via leaveCompletedDungeonForPlayer.
+     * The final departure archives the instance; personal chests remain
+     * claimable separately even after leaving.
      */
     await connection.query(
       `
-        DELETE dlc
-        FROM dungeon_loot_choices dlc
-        JOIN dungeon_loot_rolls dlr ON dlr.id = dlc.roll_id
-        WHERE dlr.instance_id = ?
+        UPDATE dungeon_instances
+        SET current_phase = 'complete',
+            completed_at = COALESCE(completed_at, NOW())
+        WHERE id = ? AND status = 'active' AND current_phase = 'rest'
       `,
       [active.instanceId],
     );
-
-    await connection.query(
-      `DELETE FROM dungeon_loot_rolls WHERE instance_id = ?`,
-      [active.instanceId],
-    );
-
-    await connection.query(
-      `DELETE FROM dungeon_instance_wipes WHERE instance_id = ?`,
-      [active.instanceId],
-    );
-
-    await connection.query(
-      `DELETE FROM dungeon_instance_enemies WHERE instance_id = ?`,
-      [active.instanceId],
-    );
-
-    await connection.query(
-      `DELETE FROM dungeon_instance_rooms WHERE instance_id = ?`,
-      [active.instanceId],
-    );
-
-    await connection.query(
-      `DELETE FROM dungeon_instance_members WHERE instance_id = ?`,
-      [active.instanceId],
-    );
-
-    const [instanceDelete]: any =
-      await connection.query(
-        `DELETE FROM dungeon_instances WHERE id = ? AND status = 'active'`,
-        [active.instanceId],
-      );
-
-    if (Number(instanceDelete?.affectedRows ?? 0) !== 1) {
-      throw new Error("Completed dungeon instance could not be removed.");
-    }
 
     await connection.commit();
 
@@ -1173,7 +1140,7 @@ export async function advanceDungeonAfterRestForPlayer(
       completedRoomOrder: currentRoomOrder,
       phase: "complete" as const,
       status: "completed" as const,
-      deleted: true,
+      deleted: false,
       rewards: {
         xp: completionXp,
         gold: completionGold,
