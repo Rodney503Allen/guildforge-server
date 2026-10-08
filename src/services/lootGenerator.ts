@@ -877,3 +877,32 @@ export async function generateLootFromBaseItem(args: {
 
   return saved;
 }
+
+
+/**
+ * Persist a previously rolled item without changing its rarity or affixes.
+ * Used by persistent dungeon completion chests.
+ */
+export async function savePreRolledLootFromBaseItem(args: {
+  playerId: number;
+  item: GeneratedItem;
+  sourceType?: string;
+  sourceId?: number | null;
+  isClaimed?: boolean;
+  conn: any;
+}): Promise<SavedItem> {
+  const saved = await saveItemInstance(
+    args.playerId,
+    args.item,
+    args.sourceType ?? "dungeon",
+    args.sourceId ?? null,
+    args.conn
+  );
+  if (args.isClaimed) {
+    await args.conn.query(
+      "UPDATE player_items SET is_claimed = 1 WHERE id = ?",
+      [saved.playerItemId]
+    );
+  }
+  return saved;
+}

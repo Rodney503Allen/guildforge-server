@@ -14,7 +14,9 @@ import {
 } from "./inventoryService";
 
 import {
-  generateLootFromBaseItem,
+  generateLootPreviewFromBaseItem,
+  savePreRolledLootFromBaseItem,
+  type GeneratedItem,
   type LootRarity,
 } from "./lootGenerator";
 
@@ -157,114 +159,67 @@ export async function createDungeonCompletionChestsWithConn(
       continue;
     }
 
-    /*
-     * Roll each configured personal reward independently.
-     * Because Stormvault's temporary seed is four 25% entries,
-     * it is possible to get 0+ rewards. If all entries miss,
-     * guarantee one random entry so the completion chest is never empty.
-     */
-    const successfulEntries: any[] =
-      [];
+    // Exactly one guaranteed completion reward per player.
+    // Existing drop_chance values act as relative selection weights,
+    // rather than independent rolls that can award multiple items.
+    const eligibleEntries = (lootEntries ?? []).filter(
+      (entry: any) => String(entry.reward_type) === "item_base"
+    );
+    if (!eligibleEntries.length) {
+      throw new Error("Dungeon has no configured equipment completion rewards.");
+    }
 
-    for (
-      const entry of
-      lootEntries ?? []
-    ) {
-      const chance =
-        Math.max(
-          0,
-          Math.min(
-            1,
-            Number(
-              entry.drop_chance ??
-              0
-            ),
-          ),
-        );
-
-      if (
-        Math.random() <=
-        chance
-      ) {
-        successfulEntries.push(
-          entry
-        );
+    const weights = eligibleEntries.map((entry: any) =>
+      Math.max(0, Number(entry.drop_chance) || 0)
+    );
+    const totalWeight = weights.reduce((sum: number, weight: number) => sum + weight, 0);
+    let chosenIndex = 0;
+    if (totalWeight > 0) {
+      let roll = Math.random() * totalWeight;
+      for (let i = 0; i < eligibleEntries.length; i++) {
+        roll -= weights[i];
+        if (roll < 0) { chosenIndex = i; break; }
       }
+    } else {
+      chosenIndex = randomIntInclusive(0, eligibleEntries.length - 1);
     }
 
-    if (
-      successfulEntries.length ===
-        0 &&
-      (lootEntries ?? []).length >
-        0
-    ) {
-      successfulEntries.push(
-        lootEntries[
-          randomIntInclusive(
-            0,
-            lootEntries.length - 1
-          )
-        ]
-      );
-    }
+    const entry = eligibleEntries[chosenIndex];
+    const quantity = 1;
+      const rewardType = String(entry.reward_type);
+      const rewardId = Number(entry.reward_id);
+      const itemLevel = entry.item_level_override == null
+        ? null
+        : Number(entry.item_level_override);
 
-    for (
-      const entry of
-      successfulEntries
-    ) {
-      const minQty =
-        Math.max(
-          1,
-          Number(
-            entry.min_quantity ??
-            1
-          ),
-        );
-
-      const maxQty =
-        Math.max(
-          minQty,
-          Number(
-            entry.max_quantity ??
-            minQty
-          ),
-        );
+      // Freeze the complete equipment rolls at chest creation, not at claim.
+      const rolledItems: GeneratedItem[] = [];
+      if (rewardType === "item_base") {
+        for (let i = 0; i < quantity; i++) {
+          const preview = await generateLootPreviewFromBaseItem({
+            baseItemId: rewardId,
+            itemLevel: Math.max(1, Number(itemLevel ?? 1)),
+            rarityOverride: rollDungeonCompletionRarity(),
+            conn,
+          });
+          if (!preview) {
+            throw new Error("Unable to pre-roll dungeon completion equipment.");
+          }
+          rolledItems.push(preview);
+        }
+      }
 
       await conn.query(
-        `
-          INSERT IGNORE INTO dungeon_completion_chest_rewards (
-            chest_id,
-            loot_entry_id,
-            reward_type,
-            reward_id,
-            quantity,
-            item_level,
-            claimed
-          )
-          VALUES (?, ?, ?, ?, ?, ?, 0)
-        `,
+        `INSERT IGNORE INTO dungeon_completion_chest_rewards
+         (chest_id, loot_entry_id, reward_type, reward_id,
+          quantity, item_level, rolled_items_json, claimed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
         [
-          chestId,
-          Number(entry.id),
-          String(
-            entry.reward_type
-          ),
-          Number(
-            entry.reward_id
-          ),
-          randomIntInclusive(
-            minQty,
-            maxQty,
-          ),
-          entry.item_level_override ==
-          null
-            ? null
-            : Number(
-                entry.item_level_override
-              ),
+          chestId, Number(entry.id), rewardType, rewardId,
+          quantity, itemLevel,
+          rewardType === "item_base" ? JSON.stringify(rolledItems) : null,
         ],
       );
-    }
   }
 
   return {
@@ -301,7 +256,21 @@ export async function getLatestDungeonCompletionChestForPlayer(
           ib.name AS base_name,
           ib.icon AS base_icon,
           ib.item_type AS base_item_type,
-          ib.slot AS base_slot
+          ib.slot AS base_slot,
+          ib.armor_weight AS base_armor_weight,
+          ib.weapon_class AS base_weapon_class,
+          ib.base_attack AS base_attack,
+          ib.attack_speed_ms AS base_attack_speed_ms,
+          ib.base_defense AS base_defense,
+          ib.sell_value AS base_sell_value,
+          dccr.rolled_items_json,
+          i.rarity AS item_rarity,
+          i.attack AS item_attack,
+          i.defense AS item_defense,
+          i.agility AS item_agility,
+          i.vitality AS item_vitality,
+          i.intellect AS item_intellect,
+          i.crit AS item_crit
 
         FROM dungeon_completion_chests dcc
 
@@ -420,6 +389,34 @@ export async function getLatestDungeonCompletionChestForPlayer(
                 : Number(
                     row.item_level
                   ),
+            rarity: (() => {
+              const raw = row.rolled_items_json;
+              const rolls = typeof raw === "string" ? JSON.parse(raw) : raw;
+              return rolls?.[0]?.rarity ?? row.item_rarity ?? "base";
+            })(),
+            roll_json: (() => {
+              const raw = row.rolled_items_json;
+              const rolls = typeof raw === "string" ? JSON.parse(raw) : raw;
+              return rolls?.[0]?.affixes ?? [];
+            })(),
+            rolledItems: (() => {
+              const raw = row.rolled_items_json;
+              return typeof raw === "string" ? JSON.parse(raw) : (raw ?? []);
+            })(),
+            armor_weight: row.base_armor_weight ?? null,
+            weapon_class: row.base_weapon_class ?? null,
+            base_attack: row.base_attack ?? 0,
+            attack_speed_ms: row.base_slot === "weapon"
+              ? (Number(row.base_attack_speed_ms) > 0 ? Number(row.base_attack_speed_ms) : 6000)
+              : null,
+            base_defense: row.base_defense ?? 0,
+            sell_value: row.base_sell_value ?? 0,
+            attack: row.item_attack ?? 0,
+            defense: row.item_defense ?? 0,
+            agility: row.item_agility ?? 0,
+            vitality: row.item_vitality ?? 0,
+            intellect: row.item_intellect ?? 0,
+            crit: row.item_crit ?? 0,
             claimed:
               Boolean(
                 row.reward_claimed
@@ -440,6 +437,7 @@ async function awardChestRewardWithConn(
     rewardId: number;
     quantity: number;
     itemLevel: number | null;
+    rolledItems: GeneratedItem[] | null;
   },
 ) {
   const {
@@ -449,6 +447,7 @@ async function awardChestRewardWithConn(
     rewardId,
     quantity,
     itemLevel,
+    rolledItems,
   } = args;
 
   if (
@@ -465,45 +464,26 @@ async function awardChestRewardWithConn(
     return;
   }
 
-  for (
-    let i = 0;
-    i < quantity;
-    i++
-  ) {
-    const generated =
-      await generateLootFromBaseItem({
-        playerId,
-        baseItemId:
-          rewardId,
-        itemLevel:
-          Math.max(
-            1,
-            Number(
-              itemLevel ??
-              1
-            ),
-          ),
-        sourceType:
-          "dungeon",
-        sourceId:
-          instanceId,
-        isClaimed:
-          true,
-        rarityOverride:
-          rollDungeonCompletionRarity(),
-        conn,
-      });
-
-    if (!generated) {
-      throw new Error(
-        "Could not generate dungeon chest equipment reward.",
-      );
+  if (!rolledItems || rolledItems.length !== quantity) {
+    // Fail safely for legacy, unrolled chests rather than silently rerolling.
+    throw new Error(
+      "Dungeon chest equipment was not pre-rolled. Migrate existing pending chests before claiming."
+    );
+  }
+  for (const item of rolledItems) {
+    if (item.itemBaseId !== rewardId) {
+      throw new Error("Dungeon chest equipment data is inconsistent.");
     }
-
-    await addPlayerItemToInventoryWithConn(
-      conn,
+    const generated = await savePreRolledLootFromBaseItem({
       playerId,
-      generated.playerItemId,
+      item,
+      sourceType: "dungeon",
+      sourceId: instanceId,
+      isClaimed: true,
+      conn,
+    });
+    await addPlayerItemToInventoryWithConn(
+      conn, playerId, generated.playerItemId
     );
   }
 }
@@ -571,7 +551,8 @@ export async function claimDungeonCompletionChest(
             reward_id,
             quantity,
             item_level,
-            claimed
+            claimed,
+            rolled_items_json
 
           FROM dungeon_completion_chest_rewards
 
@@ -620,6 +601,11 @@ export async function claimDungeonCompletionChest(
                 1
               ),
             ),
+          rolledItems: (() => {
+            const raw = reward.rolled_items_json;
+            return raw == null ? null :
+              (typeof raw === "string" ? JSON.parse(raw) : raw);
+          })(),
           itemLevel:
             reward.item_level ==
             null
