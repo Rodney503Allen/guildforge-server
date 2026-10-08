@@ -299,20 +299,26 @@ function close() {
   dungeonButton.type = 'button';
   dungeonButton.className = pendingBtn?.className || 'pending-chest pending-chest--rail world-rail-card frame-host';
   dungeonButton.classList.add('hidden', 'pending-dungeon-chest');
-  dungeonButton.innerHTML = '<span class="pending-dungeon-chest__icon" aria-hidden="true">🗝️</span><span class="pending-chest__copy"><strong>Dungeon Reward Chest</strong><small>Your expedition rewards are ready</small></span>';
+  dungeonButton.innerHTML = '<span class="pending-dungeon-chest__icon" aria-hidden="true"><img src="/images/dungeon_chest.png" alt=""></span><span class="pending-chest__copy"><strong>Dungeon Reward Chest</strong><small>Your expedition rewards are ready</small></span>';
   dungeonButton.setAttribute('aria-label', 'Open dungeon reward chest');
   if (pendingBtn?.parentElement) pendingBtn.insertAdjacentElement('afterend', dungeonButton);
   else document.body.appendChild(dungeonButton);
 
   const dungeonStyle = document.createElement('style');
   dungeonStyle.textContent = `
-    .pending-dungeon-chest__icon {font-size:30px;min-width:46px;text-align:center;filter:drop-shadow(0 0 8px #a87d37)}
+    .pending-dungeon-chest__icon {display:flex;align-items:center;justify-content:center;min-width:46px;filter:drop-shadow(0 0 8px #a87d37)}
+    .pending-dungeon-chest__icon img {width:44px;height:44px;object-fit:contain}
     .pending-dungeon-chest {border-color:#b28a46!important}
     .gf-dungeon-chest-backdrop {position:fixed;inset:0;z-index:11000;background:rgba(4,7,12,.84);display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
     .gf-dungeon-chest-panel {width:min(540px,100%);max-height:90vh;overflow:auto;background:linear-gradient(150deg,#20242a,#101317 70%);border:2px solid #b38a45;box-shadow:0 18px 70px #000,0 0 22px #98743c55;color:#e9d9b9;padding:24px;border-radius:9px;text-align:center;box-sizing:border-box}
     .gf-dungeon-chest-panel h2 {margin:5px 0 8px;color:#e9c57c;font-size:22px}
     .gf-dungeon-chest-panel p {color:#bfb9aa;margin:7px 0 17px}
-    .gf-dungeon-chest-emblem {font-size:72px;line-height:1.2;filter:drop-shadow(0 0 15px #bb8a3b)}
+    .gf-dungeon-chest-emblem {display:flex;justify-content:center;align-items:center;filter:drop-shadow(0 0 15px #bb8a3b)}
+    .gf-dungeon-chest-emblem img {width:160px;max-width:75%;height:140px;object-fit:contain}
+    .gf-dungeon-chest-panel [hidden] {display:none!important}
+    .gf-dungeon-chest-sealed {padding:22px 0 12px}
+    .gf-dungeon-chest-sealed button {font-size:16px;padding:12px 26px;background:#88662e;color:#fff2d4;border:1px solid #c69c57;border-radius:5px;cursor:pointer}
+    .gf-dungeon-chest-sealed button:hover {filter:brightness(1.15)}
     .gf-dungeon-chest-items {display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:18px 0;text-align:left}
     .gf-dungeon-chest-item {background:#10151d;border:1px solid #665334;border-radius:6px;padding:12px;display:flex;align-items:center;gap:10px;min-width:0}
     .gf-dungeon-chest-item img {width:48px;height:48px;object-fit:contain;flex:none}
@@ -365,18 +371,27 @@ function close() {
     overlay.setAttribute('aria-label', 'Dungeon reward chest');
     overlay.innerHTML = `
       <div class="gf-dungeon-chest-panel">
-        <div class="gf-dungeon-chest-emblem" aria-hidden="true">🗝️</div>
+        <div class="gf-dungeon-chest-emblem" aria-hidden="true"><img src="/images/dungeon_chest.png" alt=""></div>
         <h2>Dungeon Reward Chest</h2>
         <p>${dungeonEscape(chest.dungeonName || 'Dungeon Complete')}</p>
+        <div class="gf-dungeon-chest-sealed" id="gfDungeonChestSealed"><p>Open your chest to reveal the expedition rewards.</p><button id="gfDungeonChestOpen" type="button">Open Chest</button></div>
+        <div id="gfDungeonChestRevealed" hidden>
         <div class="gf-dungeon-chest-items">${(chest.rewards || []).map(reward => `
           <div class="gf-dungeon-chest-item">
             <img src="${dungeonEscape(dungeonIconPath(reward.icon))}" alt="" onerror="this.src='/icons/default.png'">
             <div><strong>${dungeonEscape(reward.name || 'Reward')}</strong><small>${reward.quantity > 1 ? '×' + Number(reward.quantity) + ' · ' : ''}${reward.itemLevel != null ? 'Level ' + Number(reward.itemLevel) : 'Dungeon reward'}</small></div>
           </div>`).join('') || '<p>No items in this chest.</p>'}</div>
-        <div class="gf-dungeon-chest-actions"><button class="primary" id="gfDungeonChestClaim">Claim Rewards</button><button id="gfDungeonChestClose">Close</button></div>
+        <div class="gf-dungeon-chest-actions"><button class="primary" id="gfDungeonChestClaim">Claim Rewards</button></div>
+        </div>
+        <div class="gf-dungeon-chest-actions"><button id="gfDungeonChestClose">Close</button></div>
       </div>`;
     document.body.appendChild(overlay);
     overlay.querySelector('#gfDungeonChestClose').addEventListener('click', closeDungeonChestModal);
+    overlay.querySelector('#gfDungeonChestOpen').addEventListener('click', async () => {
+      overlay.querySelector('#gfDungeonChestSealed').hidden = true;
+      overlay.querySelector('#gfDungeonChestRevealed').hidden = false;
+      try { chestOpenSound.currentTime = 0; await chestOpenSound.play(); } catch {}
+    });
     overlay.addEventListener('click', e => {if (e.target === overlay) closeDungeonChestModal();});
     overlay.querySelector('#gfDungeonChestClaim').addEventListener('click', async e => {
       if (dungeonBusy) return;
@@ -395,7 +410,6 @@ function close() {
         e.currentTarget.disabled = false;
       } finally { dungeonBusy = false; }
     });
-    try {chestOpenSound.currentTime=0; await chestOpenSound.play();} catch {}
   }
   dungeonButton.addEventListener('click', openDungeonChestModal);
   setTimeout(async () => {
