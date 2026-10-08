@@ -251,6 +251,8 @@ if (!chatLog || !chatInput) {
         item.itemType || "",
       slot:
         item.slot || "",
+      weaponClass:
+        item.weaponClass || item.weapon_class || "",
       armorWeight:
         item.armorWeight || "",
       value:
@@ -265,6 +267,9 @@ if (!chatLog || !chatInput) {
         item.baseAttack ?? "",
       baseDefense:
         item.baseDefense ?? "",
+      attackSpeedMs:
+        item.attackSpeedMs ??
+        item.attack_speed_ms ?? "",
       rollJson:
         JSON.stringify(
           item.rollJson || []

@@ -11,6 +11,7 @@ import {
 import {
   applyHealingReceivedMultiplier,
   calculateScaledHealingAmount,
+  rollCriticalHealing,
   applySpellDebuff,
   applySpellDot,
   calculateScaledSpellAmount,
@@ -340,11 +341,8 @@ SpellHandlerDefinition = {
      * Healing amount is always based on the
      * caster's scaling stats.
      */
-    const baseScaledHealing =
-      calculateScaledHealingAmount(
-        player,
-        baseHeal
-      );
+    const rolledHeal = rollCriticalHealing(player, calculateScaledHealingAmount(player, baseHeal));
+    const baseScaledHealing = rolledHeal.amount;
 
 
     // =================================================
@@ -383,6 +381,7 @@ SpellHandlerDefinition = {
 
       let healedPlayers =
         0;
+      const healingEvents: Array<{playerId:number;amount:number;crit:boolean}> = [];
 
 
       for (
@@ -467,6 +466,7 @@ SpellHandlerDefinition = {
         if (
           actualHealing > 0
         ) {
+          healingEvents.push({playerId: ally.playerId, amount: actualHealing, crit: rolledHeal.crit});
           totalHealing +=
             actualHealing;
 
@@ -496,7 +496,8 @@ SpellHandlerDefinition = {
         log,
 
         healing:
-          totalHealing
+          totalHealing,
+        healingEvents
       };
     }
 
@@ -629,6 +630,7 @@ SpellHandlerDefinition = {
        */
       healing:
         actualHealing,
+      healingEvents: [{ playerId: Number(healTargetId), amount: actualHealing, crit: rolledHeal.crit }],
       potentialHealing: scaledHealing,
       overhealing: Math.max(0, scaledHealing - actualHealing),
       healedTargetId: Number(healTargetId),

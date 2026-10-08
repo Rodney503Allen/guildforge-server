@@ -575,3 +575,21 @@
   white-space: normal;
 }
 
+
+/* Weapon swing interval displayed alongside base attack. */
+.gf-tooltip-item .t-equip-speed {
+  color: rgba(202, 194, 174, .95);
+  font-weight: 700;
+}
+
+/* Attack and weapon swing interval share a single line. */
+.gf-tooltip-item .t-equip-attack-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.gf-tooltip-item .t-equip-attack-row .t-equip-speed {
+  white-space: nowrap;
+  margin-left: auto;
+}

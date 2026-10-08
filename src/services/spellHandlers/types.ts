@@ -222,6 +222,7 @@ export type SpellHandlerResult = {
    */
   enemyResults?: SpellEnemyHitResult[];
   healing?: number;
+  healingEvents?: Array<{playerId:number;amount:number;crit:boolean}>;
 
   enemyHP?: number;
   playerHP?: number;

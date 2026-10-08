@@ -15,6 +15,8 @@ import {
   isCooldownReady,
   setCooldown,
   pushDamageEvent,
+  pushHealingEvent,
+  refreshSessionEffects,
   reduceOtherSpellCooldowns,
   refreshPlayerCreatureDot
 } from "./services/combatSessionService";
@@ -974,6 +976,14 @@ const previousEnemyHP =
       }
     }
 
+    // Generic direct heals provide actual per-target restoration, not potential healing.
+    // Only the current combatant has a world-combat floating-number panel.
+    if (Array.isArray(result.healingEvents)) {
+      for (const heal of result.healingEvents) {
+        if (Number(heal.playerId) === pid) pushHealingEvent(session, heal.amount, heal.crit);
+      }
+    }
+
     if (spellEnemy && actualDamage > 0) {
       const markedHit = await processWarlordMarkedHit(spellEnemy as any, pid, actualDamage);
       result.casterGaugeGain =
@@ -1179,6 +1189,9 @@ const previousEnemyHP =
         );
       }
     }
+
+    // Refresh HoTs/buffs created by this cast before publishing the snapshot.
+    await refreshSessionEffects(session);
 
     const snapshot =
       buildCombatSnapshot(

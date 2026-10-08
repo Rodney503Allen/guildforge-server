@@ -139,7 +139,8 @@ function getInterpolatedATB(anchor, now) {
   if (!anchor) {
     return {
       pct: 0,
-      ready: false
+      ready: false,
+      remainingMs: 0
     };
   }
 
@@ -153,7 +154,8 @@ function getInterpolatedATB(anchor, now) {
        * 100% -> 0% flash when the turn is consumed.
        */
       pct: 99,
-      ready: true
+      ready: true,
+      remainingMs: 0
     };
   }
 
@@ -175,7 +177,8 @@ function getInterpolatedATB(anchor, now) {
   ) {
     return {
       pct: anchor.gauge,
-      ready: false
+      ready: false,
+      remainingMs: Math.max(0, anchor.readyInMs - elapsedMs)
     };
   }
 
@@ -224,7 +227,8 @@ function getInterpolatedATB(anchor, now) {
       ),
 
     ready:
-      false
+      false,
+    remainingMs: Math.max(0, anchor.readyInMs - elapsedMs)
   };
 }
 
@@ -256,9 +260,7 @@ function renderSmoothCombatTimers() {
       "playerATBText",
       visual.ready
         ? "READY"
-        : `${Math.round(
-            visual.pct
-          )}%`
+        : `${(visual.remainingMs / 1000).toFixed(1)}s`
     );
   }
 
@@ -281,9 +283,7 @@ function renderSmoothCombatTimers() {
       "enemyATBText",
       visual.ready
         ? "READY"
-        : `${Math.round(
-            visual.pct
-          )}%`
+        : `${(visual.remainingMs / 1000).toFixed(1)}s`
     );
   }
 
@@ -345,7 +345,7 @@ function renderSmoothCombatTimers() {
         : `${(
             remainingMs /
             1000
-          ).toFixed(1)}s`
+          ).toFixed(1)}s / ${(totalMs / 1000).toFixed(1)}s`
     );
   }
 
@@ -834,6 +834,35 @@ function showFloatingDamage(
   );
 }
 
+const displayedHealingEventIds = new Set();
+function syncHealingEvents(snapshot) {
+  const events = Array.isArray(snapshot?.healingEvents) ? snapshot.healingEvents : [];
+  for (const event of events) {
+    const id = String(event.id ?? "");
+    if (!id || displayedHealingEventIds.has(id)) continue;
+    displayedHealingEventIds.add(id);
+    const panel = document.querySelector("#combatModal .player-panel");
+    const amount = Math.max(0, Math.floor(Number(event.amount) || 0));
+    if (!panel || !amount) continue;
+    const el = document.createElement("div");
+    el.className = "floating-damage floating-heal" + (event.crit ? " is-heal-crit" : "");
+    el.textContent = `+${amount}${event.crit ? "!" : ""}`;
+    el.style.marginLeft = `${Math.floor(Math.random() * 41) - 20}px`;
+    el.style.color = event.crit ? "#16a34a" : "#4ade80";
+    el.style.fontWeight = event.crit ? "900" : "700";
+    el.style.fontSize = event.crit ? "2.15em" : "1.65em";
+    el.style.lineHeight = "1";
+    el.style.textShadow = "0 2px 5px rgba(0,0,0,.85)";
+    panel.appendChild(el);
+    el.addEventListener("animationend", () => el.remove(), {once:true});
+    window.setTimeout(() => el.remove(), 1500);
+  }
+  if (displayedHealingEventIds.size > 100) {
+    const recent = new Set(events.slice(-30).map(e => String(e.id)));
+    for (const id of displayedHealingEventIds) if (!recent.has(id)) displayedHealingEventIds.delete(id);
+  }
+}
+
 function syncDamageEvents(snapshot) {
   const events = Array.isArray(
     snapshot?.damageEvents
@@ -892,6 +921,7 @@ function normalizeCombatEffectIcon(icon) {
 function combatEffectEmoji(effect, isPlayerBuff = false) {
   const stat = String(effect?.stat || "").toLowerCase();
 
+  if (effect?.kind === "hot") return "💚";
   if (effect?.kind === "dot" || stat.includes("dot") || stat.includes("damage_over_time")) return "🔥";
   if (stat.includes("defense")) return isPlayerBuff ? "🛡️" : "💔";
   if (stat.includes("attack_speed") || stat.includes("agility")) return isPlayerBuff ? "💨" : "🕸️";
@@ -949,7 +979,9 @@ function renderCombatEffects(containerId, effects, options = {}) {
     const seconds = formatCombatEffectSeconds(effect);
     const icon = normalizeCombatEffectIcon(effect?.icon);
     const emoji = combatEffectEmoji(effect, isPlayerBuff);
-    const kind = isPlayerBuff
+    const kind = effect?.kind === "hot"
+      ? "hot"
+      : isPlayerBuff
       ? "buff"
       : (effect?.kind === "dot" ? "dot" : "debuff");
 
@@ -987,7 +1019,9 @@ function renderCombatEffects(containerId, effects, options = {}) {
         data-tooltip="info"
         data-name="${escapeHtml(name)}"
         data-sub="${escapeHtml(
-          isPlayerBuff
+          effect?.kind === "hot"
+            ? "Healing Over Time"
+            : isPlayerBuff
             ? "Active Buff"
             : (effect?.kind === "dot" ? "Damage Over Time" : "Enemy Debuff")
         )}"
@@ -1019,10 +1053,13 @@ function renderCombatEffects(containerId, effects, options = {}) {
   }).join("");
 }
 
+let latestCombatEffectSnapshot = null;
 function renderCombatPlayerBuffs(buffs = window.__GF_ACTIVE_BUFFS__) {
+  const activeBuffs = latestCombatEffectSnapshot?.playerBuffs ?? buffs;
+  const activeHots = latestCombatEffectSnapshot?.playerHots ?? [];
   renderCombatEffects(
     "playerCombatEffects",
-    buffs,
+    [...(Array.isArray(activeBuffs) ? activeBuffs : []), ...(Array.isArray(activeHots) ? activeHots : [])],
     { playerBuff: true }
   );
 }
@@ -1065,10 +1102,17 @@ function syncCombatSnapshot(snapshot) {
 
   if (enemy) {
     if (currentEnemy) {
+      currentEnemy.img = enemy.img ?? currentEnemy.img;
       currentEnemy.hp = Number(enemy.hp ?? currentEnemy.hp ?? 0);
       currentEnemy.maxHP = Number(enemy.maxHp ?? currentEnemy.maxHP ?? 1);
     }
 
+    const portrait = document.getElementById("enemyPortrait");
+    if (portrait) {
+      let imagePath = enemy.img || "/images/default_creature.png";
+      if (!/^https?:\/\//i.test(imagePath) && !imagePath.startsWith("/")) imagePath = "/" + imagePath;
+      if (portrait.getAttribute("src") !== imagePath) portrait.src = imagePath;
+    }
     setText("enemyName", enemy.name);
     setText("enemyLevel", enemy.level);
     setText("enemyDescription", enemy.description);
@@ -1086,6 +1130,7 @@ function syncCombatSnapshot(snapshot) {
     }
   }
 
+  latestCombatEffectSnapshot = snapshot?.effects ?? null;
   renderCombatPlayerBuffs();
 
   renderCombatEffects(
@@ -1098,6 +1143,7 @@ function syncCombatSnapshot(snapshot) {
   );
 
   syncDamageEvents(snapshot);
+  syncHealingEvents(snapshot);
   syncServerCombatLog(snapshot);
 }
 /* ===============================
@@ -1186,7 +1232,8 @@ if (enemyImg) {
     level: enemy?.level ?? "",
     description: enemy?.description ?? "",
     hp: Number.isFinite(hp) ? hp : 0,
-    maxHP: Number.isFinite(max) ? max : (Number.isFinite(hp) ? hp : 1)
+    maxHP: Number.isFinite(max) ? max : (Number.isFinite(hp) ? hp : 1),
+    img: enemy?.img ?? enemy?.creatureimage ?? null
   };
 
   // ✅ Update ENEMY UI immediately (DO NOT wait on /me)
@@ -1412,6 +1459,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       name: state.snapshot.enemy.name,
       level: state.snapshot.enemy.level,
       description: state.snapshot.enemy.description,
+      img: state.snapshot.enemy.img,
       hp: state.snapshot.enemy.hp,
       maxHP: state.snapshot.enemy.maxHp
     });

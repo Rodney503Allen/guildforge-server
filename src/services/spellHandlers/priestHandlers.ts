@@ -9,6 +9,7 @@ import {
 import {
   applyHealingReceivedMultiplier,
   calculateScaledHealingAmount,
+  rollCriticalHealing,
   getConfiguredBuff
 } from "./helpers";
 
@@ -310,14 +311,9 @@ SpellHandlerDefinition = {
         baseScaledHealing
       );
 
-    const healingPerTick =
-      Math.max(
-        1,
-        Math.floor(
-          totalHealing /
-          totalTicks
-        )
-      );
+    // Roll once at cast time; existing healing column stores empowered tick strength.
+    const rolledTotal = rollCriticalHealing(player, totalHealing);
+    const healingPerTick = Math.max(1, Math.floor(rolledTotal.amount / totalTicks));
 
     const expectedHealing =
       healingPerTick *

@@ -275,21 +275,11 @@ export function computePlayerStats(
     damageDealtBonusPct += b.damageDealtPct;
     spellDamageDealtBonusPct += b.spellDamageDealtPct;
 
-    final.healingReceivedMult = Math.max(
-      0,
-      1 + healingReceivedPct / 100
-    );
 
-    final.healingDealtMult = Math.max(
-      0,
-      1 + healingDealtPct / 100
-    );
-
-    final.atbRateMult = Math.max(
-      0.1,
-      1 + atbRateBonusPct / 100
-    );
   }
+
+  // ATB rate applies even when there are no active buffs.
+  final.atbRateMult = Math.max(0.1, 1 + atbRateBonusPct / 100);
 
   // derived scaling from core stats
   const vitBonusHP = final.vitality * 10;

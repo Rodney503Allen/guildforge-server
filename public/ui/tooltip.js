@@ -80,7 +80,8 @@
 
     if (armorWeight) return formatLabel(armorWeight);
     if (weaponClass) return formatLabel(weaponClass);
-    if (itemType) return formatLabel(itemType);
+    if (itemType && String(itemType).toLowerCase() !== slot) return formatLabel(itemType);
+    if (slot === "weapon") return "Weapon"; // Legacy chat snapshots lack weapon class.
     return "";
   }
 
@@ -101,8 +102,17 @@
     const shownAttack = baseAttack != null && baseAttack !== 0 ? baseAttack : attack;
     const shownDefense = baseDefense != null && baseDefense !== 0 ? baseDefense : defense;
 
+    // Place the swing interval on the same row as base attack.
+    const isWeapon = String(dataset.slot || "").toLowerCase() === "weapon";
+    const speedMs = isWeapon ? optionalNumber(dataset.attackSpeedMs) : null;
+    const speedHtml = speedMs != null && speedMs > 0
+      ? `<span class="t-equip-speed">${esc((speedMs / 1000).toFixed(1))}s</span>`
+      : "";
+
     if (shownAttack != null && shownAttack !== 0) {
-      lines.push(`<div class="t-equip-primary">${esc(shownAttack)} Attack</div>`);
+      lines.push(`<div class="t-equip-primary t-equip-attack-row"><span>${esc(shownAttack)} Attack</span>${speedHtml}</div>`);
+    } else if (speedHtml) {
+      lines.push(`<div class="t-equip-primary t-equip-attack-row"><span></span>${speedHtml}</div>`);
     }
 
     if (shownDefense != null && shownDefense !== 0) {
@@ -270,6 +280,15 @@
     `;
   }
 
+  function buildCombatEffect(element) {
+    const d = element.dataset;
+    tooltip.innerHTML = `
+      <div class="t-name gf-system">${esc(d.name || "Effect")}</div>
+      ${d.desc ? `<div class="t-description">${esc(d.desc)}</div>` : ""}
+      ${d.duration ? `<div style="text-align:right;margin-top:8px;opacity:.75;font-size:12px">${esc(d.duration)}</div>` : ""}
+    `;
+  }
+
   function build(element) {
     tooltip.className = `gf-tooltip gf-tooltip-${String(element.dataset.tooltip || "item").toLowerCase()}`;
 
@@ -285,6 +304,9 @@
         break;
       case "tool":
         buildSimple(element, "Tool");
+        break;
+      case "combat-effect":
+        buildCombatEffect(element);
         break;
       case "info":
         buildSimple(element, "Information");

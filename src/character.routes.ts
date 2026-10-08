@@ -75,6 +75,9 @@ function buildTooltipAttrs(item: any) {
     attrs.push(`data-item-type="${escapeHtml(item?.item_type || item?.type || "")}"`);
     attrs.push(`data-armor-weight="${escapeHtml(item?.armor_weight || "")}"`);
     attrs.push(`data-weapon-class="${escapeHtml(item?.weapon_class || "")}"`);
+    if (String(item?.slot || "") === "weapon" && item?.attack_speed_ms != null) {
+      attrs.push(`data-attack-speed-ms="${Number(item.attack_speed_ms)}"`);
+    }
     attrs.push(`data-base-attack="${Number(item?.base_attack || 0)}"`);
     attrs.push(`data-base-defense="${Number(item?.base_defense || 0)}"`);
     attrs.push(`data-attack="${Number(item?.attack || 0)}"`);
@@ -515,6 +518,7 @@ router.get("/character", requireLogin, async (req, res) => {
       ib.weapon_class AS base_weapon_class,
       ib.required_level AS base_required_level,
       ib.base_attack AS base_attack,
+      ib.attack_speed_ms AS base_attack_speed_ms,
       ib.base_defense AS base_defense
 
     FROM inventory inv
@@ -561,6 +565,7 @@ router.get("/character", requireLogin, async (req, res) => {
       item_type: isRolled ? g.base_item_type : null,
       armor_weight: isRolled ? g.base_armor_weight : null,
       weapon_class: isRolled ? g.base_weapon_class : null,
+       attack_speed_ms: isRolled && g.base_attack_speed_ms != null ? Number(g.base_attack_speed_ms) : null,
       base_attack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : (Number(g.static_attack) || 0),
       base_defense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : (Number(g.static_defense) || 0),
 
@@ -690,6 +695,7 @@ router.get("/character", requireLogin, async (req, res) => {
       ib.weapon_class AS base_weapon_class,
       ib.required_level AS base_required_level,
       ib.base_attack AS base_attack,
+      ib.attack_speed_ms AS base_attack_speed_ms,
       ib.base_defense AS base_defense,
       ib.sell_value AS base_sell_value
 
@@ -742,6 +748,7 @@ router.get("/character", requireLogin, async (req, res) => {
         : g.static_item_type,
       armor_weight: isRolled ? g.base_armor_weight : null,
       weapon_class: isRolled ? g.base_weapon_class : null,
+       attack_speed_ms: isRolled && g.base_attack_speed_ms != null ? Number(g.base_attack_speed_ms) : null,
       base_attack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : (Number(g.static_attack) || 0),
       base_defense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : (Number(g.static_defense) || 0),
 
@@ -824,7 +831,7 @@ router.get("/character", requireLogin, async (req, res) => {
   <script src="/ui/toast.js"></script>
   <script defer src="/ui/tooltip.js"></script>
   <script defer src="/statpanel.js"></script>
-  <script defer src="/character.js?v=8"></script>
+  <script defer src="/character.js?v=9"></script>
   <script defer src="/tutorial.js?v=1"></script>
 
 </head>

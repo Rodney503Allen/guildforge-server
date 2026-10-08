@@ -32,6 +32,7 @@ export type InventoryItemView = {
   item_level?: number | null;
   base_attack?: number | null;
   base_defense?: number | null;
+  attack_speed_ms?: number | null;
   roll_json?: any;
 };
 
@@ -81,7 +82,8 @@ export async function getInventory(pid: number): Promise<InventoryItemView[]> {
       ib.icon AS base_icon,
       ib.description AS base_description,
       ib.base_attack AS base_attack,
-      ib.base_defense AS base_defense
+      ib.base_defense AS base_defense,
+      ib.attack_speed_ms AS base_attack_speed_ms
 
     FROM inventory inv
     LEFT JOIN items i
@@ -121,6 +123,8 @@ export async function getInventory(pid: number): Promise<InventoryItemView[]> {
       item_level: isRolled && r.rolled_item_level != null ? Number(r.rolled_item_level) : null,
       base_attack: isRolled && r.base_attack != null ? Number(r.base_attack) : null,
       base_defense: isRolled && r.base_defense != null ? Number(r.base_defense) : null,
+      attack_speed_ms: isRolled && r.base_slot === "weapon" && r.base_attack_speed_ms != null
+        ? Number(r.base_attack_speed_ms) : null,
       roll_json: isRolled ? parseRollJson(r.rolled_roll_json) : null
     };
   });

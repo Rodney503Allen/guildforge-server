@@ -126,6 +126,15 @@ export function calculateScaledSpellAmount(
  * Applies the caster's outgoing-healing modifier after normal spell scaling.
  * Recipient-side healing modifiers are intentionally applied separately.
  */
+/** Roll healing crit once on cast; HoTs persist the resulting increased tick amount. */
+export function rollCriticalHealing(caster: any, amount: number): { amount: number; crit: boolean } {
+  const rawChance = Number(caster?.crit ?? caster?.stats?.crit ?? 0);
+  const chance = Math.max(0, Math.min(1, rawChance > 1 ? rawChance / 100 : rawChance));
+  const crit = Math.random() < chance;
+  const multiplier = Math.max(1, Number(caster?.critDamageMult ?? caster?.stats?.critDamageMult ?? 1.5));
+  return { amount: Math.max(0, Math.floor(amount * (crit ? multiplier : 1))), crit };
+}
+
 export function calculateScaledHealingAmount(
   player: any,
   baseAmount: number,

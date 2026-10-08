@@ -492,60 +492,74 @@ function group(rows) {
     }[char]));
 
 
-  function renderOnlinePlayers(snapshot) {
-    const players = Array.isArray(snapshot?.players)
-      ? snapshot.players
-      : [];
+  const ONLINE_PAGE_SIZE = 10;
+  let onlinePlayers = [];
+  let onlinePage = 0;
 
-    const count = Number(
-      snapshot?.count ?? players.length ?? 0,
-    );
-
-    if (el.onlineCount) {
-      el.onlineCount.textContent = String(count);
-    }
-
-    if (el.onlineBadge) {
-      el.onlineBadge.textContent = `${count} Online`;
-    }
-
-    if (!el.onlineList) return;
-
-    if (!players.length) {
-      el.onlineList.innerHTML = `
-        <div class="empty">
-          <i>No travelers are currently online.</i>
-        </div>
-      `;
-      return;
-    }
-
-    el.onlineList.innerHTML = players
-      .map(player => `
-        <div
-          class="onlinePlayerRow frame-host"
-          data-player-card-id="${Number(player.id)}"
-          role="button"
-          tabindex="0"
-          aria-label="View ${escapeHtml(player.name)}'s player card"
-          title="View ${escapeHtml(player.name)}'s player card"
-        >
-          <span class="frame-border sub" aria-hidden="true"></span>
-
-          <div class="onlinePlayerInfo">
-            <strong>${escapeHtml(player.name)}</strong>
-            <span>
-              Lv. ${Number(player.level || 1)}
-              ${escapeHtml(player.pclass || "")}
-              · ${escapeHtml(player.location || "Unknown location")}
-            </span>
-          </div>
-
-          <span class="badge good onlinePlayerStatus">Online</span>
-        </div>
-      `)
-      .join("");
+  function onlinePortrait(player) {
+    // Accept portrait fields if the presence payload provides them.
+    // Otherwise display an initial until the presence service includes a portrait URL.
+    const raw = String(player.portrait_url || player.portraitUrl || player.avatar_url || player.avatarUrl || player.portrait || player.avatar || "").trim();
+    if (!raw || /^(javascript|data):/i.test(raw)) return "";
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return `/${raw.replace(/^\/+/, "")}`;
   }
+
+  function renderOnlinePage() {
+    if (!el.onlineList) return;
+    const pages = Math.max(1, Math.ceil(onlinePlayers.length / ONLINE_PAGE_SIZE));
+    onlinePage = Math.min(Math.max(0, onlinePage), pages - 1);
+    const visible = onlinePlayers.slice(onlinePage * ONLINE_PAGE_SIZE, (onlinePage + 1) * ONLINE_PAGE_SIZE);
+
+    if (!onlinePlayers.length) {
+      el.onlineList.innerHTML = '<div class="empty"><i>No travelers are currently online.</i></div>';
+    } else {
+      el.onlineList.innerHTML = visible.map(player => {
+        const id = Number(player.id);
+        const name = escapeHtml(player.name || "Traveler");
+        const level = Math.max(1, Number(player.level) || 1);
+        const portrait = onlinePortrait(player);
+        const initial = escapeHtml(String(player.name || "?").slice(0, 1).toUpperCase());
+        return `
+          <button class="onlinePlayerTile frame-host" type="button"
+            data-player-card-id="${id}" aria-label="View ${name}'s player card"
+            title="${name} · Level ${level}">
+            <span class="frame-border sub" aria-hidden="true"></span>
+            <span class="onlinePlayerPortrait">
+              ${portrait ? `<img src="${escapeHtml(portrait)}" alt="" loading="lazy" onerror="this.remove()">` : ""}
+              <span class="onlinePlayerInitial" aria-hidden="true">${initial}</span>
+              <span class="onlinePlayerDot" aria-hidden="true"></span>
+            </span>
+            <strong class="onlinePlayerName">${name}</strong>
+            <span class="onlinePlayerLevel">Lv. ${level}</span>
+          </button>`;
+      }).join("");
+    }
+
+    const pager = document.getElementById("onlinePlayersPager");
+    if (pager) {
+      pager.hidden = pages <= 1;
+      pager.innerHTML = pages <= 1 ? "" : `
+        <button type="button" class="onlinePageBtn" data-online-page="prev" ${onlinePage === 0 ? "disabled" : ""}>‹ Prev</button>
+        <span class="onlinePageLabel">Page ${onlinePage + 1} of ${pages}</span>
+        <button type="button" class="onlinePageBtn" data-online-page="next" ${onlinePage === pages - 1 ? "disabled" : ""}>Next ›</button>`;
+    }
+  }
+
+  function renderOnlinePlayers(snapshot) {
+    onlinePlayers = Array.isArray(snapshot?.players) ? snapshot.players : [];
+    const count = Number(snapshot?.count ?? onlinePlayers.length);
+    if (el.onlineCount) el.onlineCount.textContent = String(count);
+    if (el.onlineBadge) el.onlineBadge.textContent = `${count} Online`;
+    renderOnlinePage();
+  }
+
+  document.getElementById("onlinePlayersPager")?.addEventListener("click", event => {
+    const button = event.target.closest("[data-online-page]");
+    if (!button || button.disabled) return;
+    onlinePage += button.dataset.onlinePage === "next" ? 1 : -1;
+    renderOnlinePage();
+  });
 
   function joinTavernPresence() {
     if (!state.socket?.connected) return;

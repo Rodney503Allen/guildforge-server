@@ -46,6 +46,8 @@ function buildItemSnapshot(item: any) {
       item.slot || null,
     armorWeight:
       item.armor_weight || null,
+    weaponClass:
+      item.weapon_class || null,
 
     value:
       item.value != null
@@ -75,6 +77,12 @@ function buildItemSnapshot(item: any) {
       item.base_defense != null
         ? Number(item.base_defense)
         : null,
+    attackSpeedMs:
+      item.attack_speed_ms != null && Number(item.attack_speed_ms) > 0
+        ? Number(item.attack_speed_ms)
+        : String(item.slot || "").toLowerCase() === "weapon"
+          ? 6000
+          : null,
 
     rollJson:
       Array.isArray(item.roll_json)
@@ -149,6 +157,32 @@ router.get(
           messageIds
         );
 
+      // Older chat snapshots were saved before weaponClass existed.
+      // Resolve their base weapon classes in one query so old links display correctly.
+      const legacyPlayerItemIds = [...new Set((linkRows || []).flatMap((link: any) => {
+        try {
+          const snapshot = typeof link.item_snapshot === "string"
+            ? JSON.parse(link.item_snapshot)
+            : link.item_snapshot;
+          const id = Number(snapshot?.playerItemId ?? snapshot?.player_item_id);
+          return snapshot?.slot === "weapon" && !snapshot?.weaponClass && Number.isInteger(id) && id > 0
+            ? [id] : [];
+        } catch { return []; }
+      }))];
+      const legacyWeaponClasses = new Map<number, string>();
+      if (legacyPlayerItemIds.length) {
+        const [weaponRows]: any = await db.query(
+          `SELECT pi.id AS player_item_id, ib.weapon_class
+           FROM player_items pi
+           JOIN item_bases ib ON ib.id = pi.item_base_id
+           WHERE pi.id IN (${legacyPlayerItemIds.map(() => "?").join(",")})`,
+          legacyPlayerItemIds
+        );
+        for (const row of weaponRows || []) {
+          if (row.weapon_class) legacyWeaponClasses.set(Number(row.player_item_id), String(row.weapon_class));
+        }
+      }
+
       const linksByMessage =
         new Map<number, any[]>();
 
@@ -176,6 +210,11 @@ router.get(
         }
 
         if (!snapshot) continue;
+        if (snapshot.slot === "weapon" && !snapshot.weaponClass) {
+          snapshot.weaponClass = legacyWeaponClasses.get(
+            Number(snapshot.playerItemId ?? snapshot.player_item_id)
+          ) || null;
+        }
 
         if (
           !linksByMessage.has(chatId)

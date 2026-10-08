@@ -103,6 +103,7 @@
         item?.item_type ||
         "",
       slot: item?.slot || "",
+      weaponClass: item?.weaponClass || item?.weapon_class || "",
       armorWeight:
         item?.armorWeight ||
         item?.armor_weight ||
@@ -127,6 +128,10 @@
       baseDefense:
         item?.baseDefense ??
         item?.base_defense ??
+        "",
+      attackSpeedMs:
+        item?.attackSpeedMs ??
+        item?.attack_speed_ms ??
         "",
       rollJson: JSON.stringify(
         item?.rollJson ||

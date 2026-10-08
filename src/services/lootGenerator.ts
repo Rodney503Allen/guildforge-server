@@ -164,7 +164,10 @@ function getArmorWeightRule(weight: string | null) {
 
 function getItemLevelMultiplier(itemLevel: number): number {
   const safeLevel = Math.max(1, Number(itemLevel) || 1);
-  return 1 + Math.floor(safeLevel / 5) * 0.5;
+
+  // Preserve the old +50% per 5-level affix curve, but distribute it
+  // smoothly across every level so each item level can matter.
+  return 1 + (safeLevel / 5) * 0.5;
 }
 
 export function getScaledBaseStats(args: {
@@ -179,16 +182,15 @@ export function getScaledBaseStats(args: {
   const requiredLevel = Math.max(1, Number(args.requiredLevel) || 1);
   const itemLevel = Math.max(requiredLevel, Number(args.itemLevel) || requiredLevel);
 
-  // Base items begin at their own required level. Every full 5 levels gained
-  // beyond that point adds 20% of the original base stat plus 2 flat points.
-  const scalingTiers = Math.max(
-    0,
-    Math.floor((itemLevel - requiredLevel) / 5)
-  );
+  // Base items begin at their own required level. The previous system added
+  // 20% of the original base stat + 2 flat points every 5 levels. Keep that
+  // same overall curve, but distribute it continuously across every level.
+  const levelsAboveBase = Math.max(0, itemLevel - requiredLevel);
+  const scalingTiers = levelsAboveBase / 5;
 
   const scaleStat = (baseValue: number): number => {
     if (baseValue <= 0) return 0;
-    if (scalingTiers <= 0) return Math.round(baseValue);
+    if (levelsAboveBase <= 0) return Math.round(baseValue);
 
     return Math.max(
       1,

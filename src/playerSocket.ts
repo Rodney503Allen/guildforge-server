@@ -18,6 +18,7 @@ type OnlinePlayer = {
   level: number;
   pclass: string;
   location: string;
+  portrait_url: string | null;
 };
 
 export function registerPlayerSocket(
@@ -178,13 +179,15 @@ async function getOnlinePlayers(): Promise<OnlinePlayer[]> {
   const [rows]: any = await db.query(
     `
       SELECT
-        id,
-        name,
-        level,
-        pclass,
-        location
-      FROM players
-      WHERE id IN (${placeholders})
+        p.id,
+        p.name,
+        p.level,
+        p.pclass,
+        p.location,
+        a.image_url AS portrait_url
+      FROM players AS p
+      LEFT JOIN avatars AS a ON a.id = p.equipped_avatar_id
+      WHERE p.id IN (${placeholders})
     `,
     playerIds,
   );
@@ -196,6 +199,7 @@ async function getOnlinePlayers(): Promise<OnlinePlayer[]> {
       level: Number(row.level || 1),
       pclass: String(row.pclass || ""),
       location: String(row.location || "Unknown"),
+      portrait_url: row.portrait_url ? String(row.portrait_url) : null,
     }),
   );
 

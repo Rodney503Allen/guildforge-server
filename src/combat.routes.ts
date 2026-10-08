@@ -260,6 +260,7 @@ const [[enemyRow]]: any = await db.query(
     c.name,
     c.level,
     c.description,
+    c.creatureimage,
     c.attack,
     c.defense,
     c.agility,

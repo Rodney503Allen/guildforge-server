@@ -13,6 +13,7 @@ import {
 import {
   applyHealingReceivedMultiplier,
   calculateScaledHealingAmount,
+  rollCriticalHealing,
   getConfiguredBuff
 } from "./helpers";
 
@@ -96,7 +97,8 @@ async function applyHot(
   const totalTicks = Math.max(1, Math.floor(duration / tickInterval));
   const scaledTotal = calculateScaledHealingAmount(caster, totalHealing);
   const recipientTotal = applyHealingReceivedMultiplier(target.stats, scaledTotal);
-  const healingPerTick = Math.max(1, Math.floor(recipientTotal / totalTicks));
+  const rolled = rollCriticalHealing(caster, recipientTotal);
+  const healingPerTick = Math.max(1, Math.floor(rolled.amount / totalTicks));
   const source = `spell:${spell.id}${sourceSuffix}`;
 
   await db.query(

@@ -400,6 +400,7 @@ router.get("/shop", async (req, res) => {
           ib.item_type,
           ib.armor_weight,
           ib.weapon_class,
+          ib.attack_speed_ms,
           ib.required_level,
           ib.max_level,
           ib.base_attack,
@@ -759,6 +760,7 @@ router.get("/shop", async (req, res) => {
           data-inventory-slots="${Number(i.inventory_slots || 0)}"
           data-armor-weight="${escapeHtml(i.armor_weight || "")}"
           data-weapon-class="${escapeHtml(i.weapon_class || "")}"
+          data-attack-speed-ms="${i.sourceType === "base" && i.item_type === "weapon" ? (Number(i.attack_speed_ms) > 0 ? Number(i.attack_speed_ms) : 6000) : ""}"
           data-item-level="${i.sourceType === "base" ? Number(i.display_item_level || i.required_level || 1) : ""}"
           data-base-attack="${i.sourceType === "base" ? Number(i.display_base_attack ?? i.base_attack ?? 0) : ""}"
           data-base-defense="${i.sourceType === "base" ? Number(i.display_base_defense ?? i.base_defense ?? 0) : ""}"

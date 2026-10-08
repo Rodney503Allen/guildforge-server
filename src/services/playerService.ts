@@ -29,6 +29,7 @@ export type PlayerComputed = DerivedStats & {
 
   portrait_url?: string | null;
   guild_banner?: string | null;
+  weaponAttackSpeedMs: number;
 };
 
 const ARCHETYPES = ["Arcanist", "Divine", "Brute", "Skirmisher"] as const;
@@ -242,11 +243,14 @@ export async function getFinalPlayerStats(
       i.vitality AS static_vitality,
       i.intellect AS static_intellect,
       i.crit AS static_crit,
+      i.slot AS static_slot,
 
       -- rolled item path
       pi.roll_json AS rolled_roll_json,
       pi.item_level AS rolled_item_level,
 
+      ib.slot AS rolled_slot,
+      ib.attack_speed_ms AS rolled_attack_speed_ms,
       ib.required_level AS base_required_level,
       ib.base_attack,
       ib.base_defense
@@ -294,6 +298,17 @@ export async function getFinalPlayerStats(
       ...rollMods
     };
   });
+
+  // Equipped weapon speed is independent of ATB and agility.
+  // Legacy/static weapons use the normal 6000ms interval until migrated.
+  const equippedWeapon = (gear || []).find((g: any) =>
+    String(g.player_item_id ? g.rolled_slot : g.static_slot) === "weapon"
+  );
+  const rawWeaponSpeed = Number(equippedWeapon?.rolled_attack_speed_ms);
+  const weaponAttackSpeedMs =
+    Number.isFinite(rawWeaponSpeed) && rawWeaponSpeed >= 1000 && rawWeaponSpeed <= 12000
+      ? Math.round(rawWeaponSpeed)
+      : 6000;
 
   // ======================
   // ACTIVE BUFFS
@@ -346,6 +361,7 @@ export async function getFinalPlayerStats(
     guild_rank: guildRow?.guild_rank ?? null,
 
     portrait_url: base.portrait_url ?? null,
-    guild_banner: base.guild_banner ?? null
+    guild_banner: base.guild_banner ?? null,
+    weaponAttackSpeedMs
   };
 }

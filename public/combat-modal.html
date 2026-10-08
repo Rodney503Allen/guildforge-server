@@ -224,6 +224,17 @@
     display:block;
   }
 
+  /* Show the entire creature without cropping wide tails or crests. */
+  .portrait-frame.enemy{
+    box-sizing: border-box;
+    padding: 7px;
+  }
+
+  .portrait-frame.enemy img{
+    object-fit: contain;
+    object-position: center;
+  }
+
   /* =======================
      TEXT
   ======================= */
@@ -1578,6 +1589,64 @@ html body #combatModal.combat-modal {
 #combatModal .combat-bottom-section {
   background-clip: border-box !important;
   background-origin: border-box !important;
+}
+
+
+/* ==========================================================
+   LARGER PLAYER / ENEMY PORTRAITS
+   Keep the original combat frame, bars, and controls intact.
+   ========================================================== */
+#combatModal .combat-panel {
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px;
+}
+
+#combatModal .combat-portrait-column {
+  width: 120px;
+  min-width: 0;
+  flex: 0 0 120px;
+}
+
+#combatModal .portrait-frame {
+  box-sizing: border-box;
+  width: 120px;
+  height: 120px;
+}
+
+#combatModal .combat-panel .panel-info {
+  min-width: 0;
+}
+
+/* Give creature art room inside its larger frame. */
+#combatModal .portrait-frame.enemy {
+  padding: 8px;
+}
+
+#combatModal .portrait-frame.enemy img {
+  object-fit: contain;
+  object-position: center;
+}
+
+/* The panels stack below 860px; portraits stay prominent. */
+@media (max-width: 520px) {
+  #combatModal .combat-panel {
+    grid-template-columns: 100px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+  #combatModal .combat-portrait-column {
+    width: 100px;
+    flex-basis: 100px;
+  }
+  #combatModal .portrait-frame {
+    width: 100px;
+    height: 100px;
+  }
+  #combatModal .portrait-frame.enemy {
+    padding: 6px;
+  }
 }
 
 </style>

@@ -2023,6 +2023,7 @@ function renderDungeonRoomSteps(
 
 let dungeonLastMechanicSequences =
   new Map();
+let dungeonLastAlertCastKeys = new Map();
 
 function playDungeonEnemyAlertSound() {
   const audio =
@@ -3293,7 +3294,9 @@ function renderDungeonMechanic(
     warning?.classList.add(
       "hidden"
     );
-
+    if (runtimeEnemyId != null) {
+      dungeonLastAlertCastKeys.delete(String(runtimeEnemyId));
+    }
     return;
   }
 
@@ -3321,10 +3324,15 @@ function renderDungeonMechanic(
       0
     );
 
-  if (
-    mechanicSequence >
-    previousSequence
-  ) {
+  // A cast can start with an unchanged mechanic sequence. Track the
+  // visible cast transition as well so its warning sound isn't skipped.
+  const castKey = String(
+    cast.id ?? cast.castId ?? cast.mechanicId ?? cast.name ?? "cast"
+  );
+  const lastCastKey = dungeonLastAlertCastKeys.get(sequenceKey);
+  const shouldAlert = mechanicSequence > previousSequence || lastCastKey !== castKey;
+
+  if (shouldAlert) {
     warning.classList.remove(
       "is-alerting"
     );
@@ -3341,6 +3349,7 @@ function renderDungeonMechanic(
       sequenceKey,
       mechanicSequence
     );
+    dungeonLastAlertCastKeys.set(sequenceKey, castKey);
   }
 
   setDungeonText(

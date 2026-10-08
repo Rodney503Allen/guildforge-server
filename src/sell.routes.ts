@@ -99,6 +99,7 @@ router.get("/sell", async (req, res) => {
       ib.slot AS base_slot,
       ib.armor_weight AS base_armor_weight,
       ib.weapon_class AS base_weapon_class,
+      ib.attack_speed_ms AS base_attack_speed_ms,
       ib.required_level AS base_required_level,
       ib.base_attack AS base_attack,
       ib.base_defense AS base_defense,
@@ -167,6 +168,7 @@ router.get("/sell", async (req, res) => {
           slot: isRolled ? (it.base_slot || "") : (it.static_slot || ""),
           armorWeight: isRolled ? (it.base_armor_weight || "") : "",
           weaponClass: isRolled ? (it.base_weapon_class || "") : "",
+          attackSpeedMs: isRolled && it.base_slot === "weapon" ? (Number(it.base_attack_speed_ms) > 0 ? Number(it.base_attack_speed_ms) : 6000) : (!isRolled && it.static_slot === "weapon" ? 6000 : ""),
           itemLevel: isRolled ? Number(it.rolled_item_level || 0) : "",
           baseAttack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : Number(it.static_attack || 0),
           baseDefense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : Number(it.static_defense || 0),
@@ -208,6 +210,7 @@ router.get("/sell", async (req, res) => {
            data-slot="${escapeHtml(it.slot || "")}"
            data-armor-weight="${escapeHtml(it.armorWeight || "")}"
            data-weapon-class="${escapeHtml(it.weaponClass || "")}"
+           data-attack-speed-ms="${it.attackSpeedMs}"
            data-item-level="${it.itemLevel !== "" ? escapeHtml(String(it.itemLevel)) : ""}"
            data-base-attack="${escapeHtml(String(it.baseAttack ?? ""))}"
            data-base-defense="${escapeHtml(String(it.baseDefense ?? ""))}"

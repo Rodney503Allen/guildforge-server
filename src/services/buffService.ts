@@ -7,6 +7,7 @@ export type Buff = {
   value: number;
   expires_at: Date;
   source?: string;
+  spellName?: string | null;
 };
 
 const buffExpiryTimers =
@@ -134,10 +135,15 @@ function scheduleBuffExpiry(
  */
 export async function getActiveBuffs(playerId: number): Promise<Buff[]> {
   const [rows]: any = await db.query(`
-    SELECT stat, value, expires_at, source
-    FROM player_buffs
-    WHERE player_id = ?
-      AND expires_at > NOW()
+    SELECT pb.stat, pb.value, pb.expires_at, pb.source,
+      s.name AS spellName
+    FROM player_buffs pb
+    LEFT JOIN spells s ON s.id = CASE
+      WHEN pb.source LIKE 'spell:%'
+      THEN CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(pb.source, '|', 1), ':', -1) AS UNSIGNED)
+      ELSE NULL END
+    WHERE pb.player_id = ?
+      AND pb.expires_at > NOW()
   `, [playerId]);
 
   return rows;

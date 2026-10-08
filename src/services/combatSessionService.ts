@@ -65,6 +65,7 @@ export type CombatActor = {
 
   level?: number;
   description?: string;
+  img?: string | null;
 
   hp: number;
   maxHp: number;
@@ -105,6 +106,16 @@ export type CombatEnemyEffect = {
   remainingMs: number;
 };
 
+export type CombatPlayerHotEffect = {
+  id: number;
+  kind: "hot";
+  displayName: string;
+  healingPerTick: number;
+  tickIntervalSeconds: number;
+  remainingMs: number;
+  icon: string | null;
+};
+
 export type CombatSession = {
   playerId: number;
   enemyInstanceId: number;
@@ -113,6 +124,7 @@ export type CombatSession = {
   updatedAt: number;
 
   nextPlayerAutoAttackAt: number;
+  playerAutoAttackMs: number;
 
   state: "active" | "victory" | "defeat" | "fled";
 
@@ -123,9 +135,13 @@ export type CombatSession = {
 
   nextDamageEventId: number;
   damageEvents: CombatDamageEvent[];
+  healingEvents: Array<{ id: number; target: "player"; amount: number; crit: boolean; createdAt: number }>;
+  nextHealingEventId: number;
 
   effects: {
     enemy: CombatEnemyEffect[];
+    playerHots: CombatPlayerHotEffect[];
+    playerBuffs: Array<{ stat: string; value: number; source: string | null; spellName: string | null; remainingMs: number; icon: string | null }>;
   };
 
   rewards?: {
@@ -150,6 +166,13 @@ const combatSessions = new Map<number, CombatSession>();
 
 const PLAYER_AUTO_ATTACK_MS = COMBAT_TIMING.playerAutoAttackMs;
 
+function getPlayerAutoAttackMs(player: { weaponAttackSpeedMs?: number }): number {
+  const speed = Number(player.weaponAttackSpeedMs);
+  return Number.isFinite(speed) && speed >= 1000 && speed <= 12000
+    ? Math.round(speed)
+    : PLAYER_AUTO_ATTACK_MS;
+}
+
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
@@ -169,10 +192,29 @@ export function pushDamageEvent(
   );
 }
 
+export function pushHealingEvent(session: CombatSession, amount: number, crit = false) {
+  const healed = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!healed) return;
+  session.healingEvents.push({
+    id: session.nextHealingEventId++,
+    target: "player",
+    amount: healed,
+    crit,
+    createdAt: Date.now()
+  });
+  if (session.healingEvents.length > 30) session.healingEvents.splice(0, session.healingEvents.length - 30);
+}
+
 async function refreshSessionPlayer(session: CombatSession) {
   const player = await getFinalPlayerStats(session.playerId);
   if (!player) return null;
 
+  const nextSpeed = getPlayerAutoAttackMs(player);
+  if (nextSpeed !== session.playerAutoAttackMs) {
+    // Equipping a different weapon restarts the independent swing timer.
+    session.playerAutoAttackMs = nextSpeed;
+    session.nextPlayerAutoAttackAt = Date.now() + nextSpeed;
+  }
   session.player.stats = player;
   session.player.name = player.name ?? "Player";
   session.player.hp = Number(player.hpoints ?? 0);
@@ -201,6 +243,7 @@ async function refreshSessionEnemy(session: CombatSession) {
       c.maxhp,
       c.level,
       c.description,
+      c.creatureimage,
 
       ca.name AS affix_name,
       ca.description AS affix_description,
@@ -314,6 +357,8 @@ async function refreshSessionEnemy(session: CombatSession) {
     ),
   };
 
+  session.enemy.img = enemyRow.creatureimage ? String(enemyRow.creatureimage) : null;
+
   session.enemy.name = enemyDisplayName;
   session.enemy.hp = Number(enemyRow.hp ?? 0);
   session.enemy.maxHp = modifiedMaxHp;
@@ -329,7 +374,44 @@ async function refreshSessionEnemy(session: CombatSession) {
   return enemyStats;
 }
 
-async function refreshSessionEffects(session: CombatSession) {
+export async function refreshSessionEffects(session: CombatSession) {
+  // Resolve buff spell names at the source, independently of /me and hotbar state.
+  const [buffRows]: any = await db.query(`
+    SELECT pb.stat, pb.value, pb.source,
+      GREATEST(0, TIMESTAMPDIFF(MICROSECOND, NOW(3), pb.expires_at) / 1000) AS remaining_ms,
+      s.name AS spell_name, s.icon AS spell_icon
+    FROM player_buffs pb
+    LEFT JOIN spells s ON s.id = CASE
+      WHEN pb.source REGEXP '^spell:[0-9]+'
+      THEN CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(pb.source, '|', 1), ':', -1) AS UNSIGNED)
+      ELSE NULL END
+    WHERE pb.player_id = ? AND pb.expires_at > NOW(3)
+    ORDER BY pb.expires_at ASC
+  `, [session.playerId]);
+  session.effects.playerBuffs = (buffRows || []).map((row: any) => ({
+    stat: String(row.stat || ''),
+    value: Number(row.value || 0),
+    source: row.source == null ? null : String(row.source),
+    spellName: row.spell_name == null ? null : String(row.spell_name),
+    remainingMs: Math.max(0, Number(row.remaining_ms || 0)),
+    icon: row.spell_icon == null ? null : String(row.spell_icon),
+  }));
+  const [hotRows]: any = await db.query(`
+    SELECT ph.id, ph.display_name, ph.healing, ph.tick_interval,
+      GREATEST(0, TIMESTAMPDIFF(MICROSECOND, NOW(3), ph.expires_at) / 1000) AS remaining_ms
+    FROM player_hots ph
+    WHERE ph.player_id = ? AND ph.expires_at > NOW(3)
+    ORDER BY ph.expires_at ASC
+  `, [session.playerId]);
+  session.effects.playerHots = (hotRows || []).map((row: any) => ({
+    id: Number(row.id),
+    kind: "hot" as const,
+    displayName: String(row.display_name || "Healing over Time"),
+    healingPerTick: Number(row.healing || 0),
+    tickIntervalSeconds: Number(row.tick_interval || 0),
+    remainingMs: Math.max(0, Number(row.remaining_ms || 0)),
+    icon: null,
+  }));
   const [debuffRows]: any = await db.query(
     `
     SELECT
@@ -675,6 +757,7 @@ async function processPlayerHots(session: CombatSession) {
       );
       session.player.ready = session.player.gauge >= 100;
     }
+    if (tick.healing > 0) pushHealingEvent(session, tick.healing);
     if (tick.healing > 0)
       pushLog(session, `✨ ${tick.displayName} restores ${tick.healing} HP.`);
     if (tick.refreshed)
@@ -781,7 +864,7 @@ async function processPlayerAutoAttack(session: CombatSession) {
     }
   }
 
-  session.nextPlayerAutoAttackAt = now + PLAYER_AUTO_ATTACK_MS;
+  session.nextPlayerAutoAttackAt = Date.now() + session.playerAutoAttackMs;
 
   if (newEnemyHP <= 0) {
     const claim = await processWarlordClaimThePrize(
@@ -1173,6 +1256,7 @@ export async function createCombatSession(
     c.crit,
     c.level,
     c.description,
+    c.creatureimage,
     c.attack_speed,
     ca.name AS affix_name,
     ca.description AS affix_description,
@@ -1250,10 +1334,15 @@ export async function createCombatSession(
     updatedAt: now,
     nextDamageEventId: 1,
     damageEvents: [],
+    healingEvents: [],
+    nextHealingEventId: 1,
     effects: {
       enemy: [],
+      playerHots: [],
+      playerBuffs: [],
     },
-    nextPlayerAutoAttackAt: now + PLAYER_AUTO_ATTACK_MS,
+    playerAutoAttackMs: getPlayerAutoAttackMs(player),
+    nextPlayerAutoAttackAt: now + getPlayerAutoAttackMs(player),
     state: "active",
 
     player: {
@@ -1274,6 +1363,7 @@ export async function createCombatSession(
     enemy: {
       side: "enemy",
       name: enemyDisplayName,
+      img: enemyRow.creatureimage ? String(enemyRow.creatureimage) : null,
       level: Number(enemyRow.level ?? 1),
       description: enemyDescription,
       hp: Number(enemyRow.hp ?? 0),
@@ -1424,11 +1514,12 @@ export function buildCombatSnapshot(session: CombatSession) {
       recoveryMs: Math.max(0, session.player.recoveryUntil - now),
       readyInMs: getActorReadyInMs(session.player),
       autoAttackMs: Math.max(0, session.nextPlayerAutoAttackAt - now),
-      autoAttackTotalMs: PLAYER_AUTO_ATTACK_MS,
+      autoAttackTotalMs: session.playerAutoAttackMs,
       cooldowns: session.player.cooldowns,
     },
     enemy: {
       name: session.enemy.name,
+      img: session.enemy.img,
       level: session.enemy.level,
       description: session.enemy.description,
       hp: session.enemy.hp,
@@ -1439,12 +1530,15 @@ export function buildCombatSnapshot(session: CombatSession) {
       readyInMs: getActorReadyInMs(session.enemy),
     },
     effects: {
+      playerHots: session.effects.playerHots.map((effect) => ({ ...effect })),
+      playerBuffs: session.effects.playerBuffs.map((effect) => ({ ...effect })),
       enemy: session.effects.enemy.map((effect) => ({
         ...effect,
         remainingMs: Math.max(0, Number(effect.remainingMs || 0)),
       })),
     },
     damageEvents: session.damageEvents,
+    healingEvents: session.healingEvents,
     log: session.log,
     rewards: session.rewards ?? null,
   };
