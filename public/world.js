@@ -2383,19 +2383,20 @@ async function renderDungeonWorldHeaderIfNeeded(
       Math.max(
         1,
         Number(
+          dungeon.minLevel ??
           dungeon.min_level ??
           1
         ) || 1
       );
 
     const maxLevel =
-      dungeon.max_level ==
+      (dungeon.maxLevel ?? dungeon.max_level) ==
         null
         ? null
         : Math.max(
             minLevel,
             Number(
-              dungeon.max_level
+              dungeon.maxLevel ?? dungeon.max_level
             ) ||
             minLevel
           );
