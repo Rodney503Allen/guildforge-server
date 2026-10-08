@@ -4685,7 +4685,7 @@ function ensureDungeonToastStyles() {
     .dungeon-loot-toast__winner{margin-top:9px;font-weight:800;color:#f2d58a}
     .dungeon-completion-overlay{position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:20px}
     .dungeon-completion-modal{width:min(560px,100%);max-height:85vh;overflow:auto;background:#11171d;color:#e8edf2;border:10px solid transparent;border-image:url('/images/ui/main_border.png') 16 / 12px stretch;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.75)}
-    .dungeon-completion-rewards{display:grid;gap:10px;margin:16px 0}.dungeon-completion-reward{display:flex;align-items:center;gap:12px;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1)}
+    .dungeon-completion-rewards{display:grid;grid-template-columns:1fr;gap:10px;margin:16px 0;min-width:0}.dungeon-completion-reward{display:flex;align-items:center;gap:12px;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1)}
     .dungeon-completion-reward img{width:46px;height:46px;object-fit:contain}.dungeon-completion-reward__name{font-weight:800}.dungeon-completion-reward__meta{font-size:12px;opacity:.72;margin-top:2px}
     .dungeon-completion-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
   `;
@@ -4809,7 +4809,15 @@ async function handleDungeonTerminalCompletion() {
     window.clearTimeout(dungeonLifecycleRefreshTimer);
     dungeonLifecycleRefreshTimer = null;
   }
-  await leaveDungeonInstanceSocketRoom();
+  try {
+    const exitResponse = await fetch("/api/dungeons/completed/leave", { method: "POST", credentials: "include" });
+    const exitData = await exitResponse.json();
+    if (!exitResponse.ok || exitData.ok === false) throw new Error(exitData.error || "Unable to leave completed dungeon.");
+  } catch (error) {
+    dungeonTerminalCompletion = false;
+    throw error;
+  }
+  leaveDungeonInstanceSocket();
   releaseDungeonAudio();
   dungeonActive = null;
   dungeonEncounter = null;
@@ -5371,43 +5379,13 @@ async function renderDungeonCompletePanel(
         ${
           chest
             ? `
-              <div class="dungeon-chest">
-                <div class="dungeon-chest-icon">
-                  🎁
+              <div class="dungeon-chest dungeon-chest--summary">
+                <div class="dungeon-chest-icon">🎁</div>
+                <div class="dungeon-chest-summary-copy">
+                  <strong>Personal Dungeon Chest</strong>
+                  <span>${chest.rewards?.length ?? 0} rewards · ${chest.status === "claimed" ? "Claimed" : "Ready to claim"}</span>
                 </div>
-
-                <div>
-                  <strong>
-                    Personal Dungeon Chest
-                  </strong>
-
-                  <span>
-                    ${chest.rewards?.length ?? 0} reward${(chest.rewards?.length ?? 0) === 1 ? "" : "s"}
-                  </span>
-                </div>
-
-                <div class="dungeon-completion-rewards">
-                  ${(chest.rewards ?? []).map(renderDungeonChestReward).join("")}
-                </div>
-
-                ${
-                  chest.status ===
-                  "claimed"
-                    ? `
-                      <span class="dungeon-choice-made">
-                        Claimed
-                      </span>
-                    `
-                    : `
-                      <button
-                        id="dungeonClaimChestBtn"
-                        class="dungeon-btn dungeon-btn--primary"
-                        type="button"
-                      >
-                        Claim Chest
-                      </button>
-                    `
-                }
+                <button id="dungeonOpenChestBtn" class="dungeon-btn dungeon-btn--primary" type="button">${chest.status === "claimed" ? "View Rewards" : "Open Chest"}</button>
               </div>
             `
             : ""
@@ -5423,18 +5401,10 @@ async function renderDungeonCompletePanel(
       </div>
     `;
 
-  document
-    .getElementById(
-      "dungeonClaimChestBtn"
-    )
-    ?.addEventListener(
-      "click",
-      async () => {
-        await claimDungeonChest(
-          chest.id
-        );
-      }
-    );
+  document.getElementById("dungeonOpenChestBtn")?.addEventListener("click", async () => {
+    try { await showDungeonCompletionChestModal(); }
+    catch (error) { window.alert(error?.message || "Unable to open chest."); }
+  });
 
   document
     .getElementById(
@@ -5443,7 +5413,8 @@ async function renderDungeonCompletePanel(
     ?.addEventListener(
       "click",
       async () => {
-        await handleDungeonTerminalCompletion();
+        try { await handleDungeonTerminalCompletion(); }
+        catch (error) { window.alert(error?.message || "Unable to leave dungeon."); }
       }
     );
 }

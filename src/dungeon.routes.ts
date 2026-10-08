@@ -2,6 +2,7 @@
 import express from "express";
 import {
   abandonDungeon,
+  leaveCompletedDungeonForPlayer,
   createDungeonInstance,
   getActiveDungeonForPlayer,
   listAvailableDungeons,
@@ -498,6 +499,20 @@ router.post("/:dungeonId/enter", async (req: any, res) => {
   } catch (err: any) {
     console.error("POST /api/dungeons/:dungeonId/enter failed:", err);
     res.status(400).json({ ok: false, error: err?.message || "Unable to enter dungeon." });
+  }
+});
+
+router.post("/completed/leave", async (req: any, res) => {
+  try {
+    const playerId = Number(req.session?.playerId);
+    if (!Number.isInteger(playerId) || playerId <= 0) {
+      return res.status(401).json({ ok: false, error: "Login required." });
+    }
+    const result = await leaveCompletedDungeonForPlayer(playerId);
+    return res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error("POST /api/dungeons/completed/leave failed:", err);
+    return res.status(400).json({ ok: false, error: err?.message || "Unable to leave completed dungeon." });
   }
 });
 
