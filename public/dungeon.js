@@ -4823,14 +4823,20 @@ async function handleDungeonTerminalCompletion() {
   dungeonEncounter = null;
   dungeonCombat = null;
 
-  if (document.getElementById("dungeonModal")) {
-    closeDungeonModalView();
+  // The server has released this player from the completed instance.
+  // Show their persistent personal reward chest on the actual World page.
+  sessionStorage.setItem("gfDungeonChestAutoOpen", "1");
+  if (window.location.pathname === "/world") {
+    if (document.getElementById("dungeonModal")) closeDungeonModalView();
     if (typeof refreshWorld === "function") await refreshWorld();
-  } else if (window.location.pathname === "/dungeon") {
-    window.history.replaceState({}, "", "/world");
+    if (window.LootChestModal?.refreshDungeonChest) {
+      await window.LootChestModal.refreshDungeonChest();
+      await window.LootChestModal.openDungeonChest();
+      sessionStorage.removeItem("gfDungeonChestAutoOpen");
+    }
+  } else {
+    window.location.assign("/world");
   }
-
-  await showDungeonCompletionChestModal();
 }
 
 async function submitDungeonLootChoice(
