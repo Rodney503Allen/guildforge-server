@@ -17,13 +17,14 @@ const LootChestModal = (() => {
   const pendingBtn = document.getElementById("pendingChestBtn");
   
 
-  const chestOpenSound = new Audio("/sounds/chestOpening.mp3");
-  chestOpenSound.preload = "auto";
-  chestOpenSound.volume = 0.5;
-
-  const lootClaimSound = new Audio("/sounds/itemCollect.ogg");
-  lootClaimSound.preload = "auto";
-  lootClaimSound.volume = 0.5;
+  // Register loot chest sounds with the shared audio manager.
+  async function playChestSfx(key) {
+    const audio = window.GFAudio || await window.GFAudioReady;
+    if (!audio?.playSfx || !audio?.registerTrack) return;
+    audio.registerTrack("sfx", "loot_chest_open", "/sounds/chestOpening.mp3");
+    audio.registerTrack("sfx", "loot_chest_claim", "/sounds/itemCollect.ogg");
+    await audio.playSfx(key, { volume: 0.5 });
+  }
 
   const TOAST_VISIBLE_MS = 2200;
 
@@ -94,7 +95,7 @@ function showLootToast(title, message, type = "error") {
   async function open() {
     if (chestMode === "dungeon") {
       if (dungeonBusy || !dungeonChest) return;
-      try { chestOpenSound.currentTime = 0; await chestOpenSound.play(); } catch {}
+      void playChestSfx("loot_chest_open");
       renderItems((dungeonChest.rewards || []).map(reward => ({
         ...reward,
         qty: reward.quantity,
@@ -121,10 +122,7 @@ function showLootToast(title, message, type = "error") {
       applyChestRarityClass(pendingChestRarity);
     }
 
-    try {
-      chestOpenSound.currentTime = 0;
-      chestOpenSound.play();
-    } catch {}
+    void playChestSfx("loot_chest_open");
 
     renderItems(data.items);
 
@@ -144,7 +142,7 @@ function showLootToast(title, message, type = "error") {
         });
         const data = await res.json();
         if (!res.ok || data.ok === false) throw new Error(data.error || "Unable to claim dungeon rewards");
-        try { lootClaimSound.currentTime = 0; await lootClaimSound.play(); } catch {}
+        void playChestSfx("loot_chest_claim");
         close();
         await refreshDungeonChest();
         showLootToast("Dungeon Rewards", "Your rewards have been collected.", "success");
@@ -165,10 +163,7 @@ function showLootToast(title, message, type = "error") {
       return showLootToast("Inventory Full", data.error || "Failed to claim");
     }
 
-    try {
-      lootClaimSound.currentTime = 0;
-      lootClaimSound.play();
-    } catch {}
+    void playChestSfx("loot_chest_claim");
 
     await refreshPendingChest();
     close();
@@ -214,7 +209,6 @@ function showLootToast(title, message, type = "error") {
       const itemLevel = item.item_level ?? "";
       const baseAttack = item.base_attack ?? "";
       const baseDefense = item.base_defense ?? "";
-       const attackSpeedMs = item.attack_speed_ms ?? item.attackSpeedMs ?? "";
 
       const staticStats = [
         item.attack ? `Attack +${item.attack}` : null,
@@ -244,7 +238,6 @@ function showLootToast(title, message, type = "error") {
       if (itemLevel !== "" && itemLevel != null) tile.setAttribute("data-item-level", String(itemLevel));
       if (baseAttack !== "" && baseAttack != null) tile.setAttribute("data-base-attack", String(baseAttack));
       if (baseDefense !== "" && baseDefense != null) tile.setAttribute("data-base-defense", String(baseDefense));
-       if (slot === "weapon" && Number(attackSpeedMs) > 0) tile.setAttribute("data-attack-speed-ms", String(attackSpeedMs));
       if (staticStats) tile.setAttribute("data-stats", staticStats);
       if (rollJson) tile.setAttribute("data-roll-json", rollJson);
 

@@ -2145,46 +2145,26 @@ function professionActionLabel(professionName) {
 }
 
 function playGatheringSound(professionName) {
-  let file;
+  const soundKeys = {
+    mining: "gathering_mining",
+    herbalism: "gathering_herbalism",
+    woodcutting: "gathering_woodcutting"
+  };
 
-  switch (String(professionName || "").toLowerCase()) {
-    case "mining":
-      file = "/sounds/gathering/mining2.ogg";
-      break;
+  const key = soundKeys[String(professionName || "").toLowerCase()];
+  if (!key) return null;
 
-    case "herbalism":
-      file = "/sounds/gathering/herbalism2.ogg";
-      break;
-
-    case "woodcutting":
-      file = "/sounds/gathering/woodcutting2.ogg";
-      break;
-
-    default:
-      return null;
-  }
-
-
-
-  const audio = new Audio(file);
-  audio.volume = 0.5;
-  audio.loop = true;
-
-  audio.play().catch(() => {});
-
-  return audio;
+  // GFAudio applies master, mute, and SFX slider settings, including
+  // changes made while this gathering loop is already playing.
+  return window.GFAudio?.playLoopingSfx?.(key, { volume: 0.5 }) ?? null;
 }
 
 function playGatherCompleteSound() {
-  const audio = new Audio("/sounds/gathering/collected.ogg");
-  audio.volume = 0.6;
-  audio.play().catch(() => {});
+  void window.GFAudio?.playSfx?.("gathering_collected", { volume: 0.6 });
 }
 
 function playProfessionLevelSound() {
-  const audio = new Audio("/sounds/profession-level.ogg");
-  audio.volume = 0.65;
-  audio.play().catch(() => {});
+  void window.GFAudio?.playSfx?.("profession_level", { volume: 0.65 });
 }
 function showGatheringModal({ professionName, nodeName, durationMs }) {
   const modal = document.getElementById("gatheringModal");
@@ -6410,11 +6390,8 @@ async function gatherResourceNode(spawnedNodeId) {
     console.error("Gathering failed", err);
     showErrorToast("Gathering failed.");
   } finally {
-    if (sound) {
-      sound.pause();
-      sound.currentTime = 0;
-      sound.loop = false;
-    }
+    // Stop the manager-owned loop even if gathering exits with an error.
+    sound?.stop();
 
     hideGatheringModal();
 
