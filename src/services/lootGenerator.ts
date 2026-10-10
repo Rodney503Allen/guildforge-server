@@ -69,13 +69,15 @@ export type GeneratedItem = {
   affixes: RolledAffix[];
   icon: string | null;
   sellValue: number;
+  relicId?: number | null;
+  uniqueAffix?: { key: string; name: string; description: string; params: Record<string, unknown> } | null;
 };
 
 type SavedItem = GeneratedItem & {
   playerItemId: number;
 };
 
-export type LootRarity = "base" | "dormant" | "awakened" | "empowered" | "transcendent";
+export type LootRarity = "base" | "dormant" | "awakened" | "empowered" | "transcendent" | "relic";
 
 const RARITY_ORDER: Record<LootRarity, number> = {
   base: 0,
@@ -83,6 +85,7 @@ const RARITY_ORDER: Record<LootRarity, number> = {
   awakened: 2,
   empowered: 3,
   transcendent: 4,
+  relic: 4,
 };
 
 const RARITY_LABELS: Record<LootRarity, string> = {
@@ -91,6 +94,7 @@ const RARITY_LABELS: Record<LootRarity, string> = {
   awakened: "Awakened",
   empowered: "Empowered",
   transcendent: "Transcendent",
+  relic: "Relic",
 };
 
 const RARITY_CONFIG: Record<LootRarity, { affixCount: number }> = {
@@ -99,6 +103,7 @@ const RARITY_CONFIG: Record<LootRarity, { affixCount: number }> = {
   awakened: { affixCount: 2 },
   empowered: { affixCount: 3 },
   transcendent: { affixCount: 3 },
+  relic: { affixCount: 3 },
 };
 
 const TRANSCENDENT_RESONANCE_MULTIPLIER = 1.2;
@@ -230,6 +235,74 @@ function getAdjustedAffixRange(
   return { min, max };
 }
 
+type RelicDefinition = {
+  id: number;
+  item_base_id: number;
+  name: string;
+  icon: string | null;
+  sell_value: number | null;
+  stats_json: string | Array<{stat:string;label:string;min:number;max:number;isPercent?:boolean}>;
+  affix_key: string;
+  affix_name: string;
+  affix_description: string;
+  affix_params_json: string | Record<string, unknown> | null;
+};
+
+function parseRelicJson<T>(value: string | T | null): T | null {
+  if (value == null) return null;
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value) as T; } catch { return null; }
+}
+
+async function buildRelicItem(
+  base: ItemBaseRow,
+  itemLevel: number,
+  conn: any = db
+): Promise<GeneratedItem | null> {
+  const [rows]: any = await conn.query(`
+    SELECT id, item_base_id, name, icon, sell_value, stats_json,
+           affix_key, affix_name, affix_description, affix_params_json
+    FROM item_relics WHERE item_base_id = ? AND is_active = 1 LIMIT 1
+  `, [base.id]);
+  const relic = rows?.[0] as RelicDefinition | undefined;
+  if (!relic) return null;
+  const stats = parseRelicJson<Array<{stat:string;label:string;min:number;max:number;isPercent?:boolean}>>(relic.stats_json);
+  if (!Array.isArray(stats) || stats.length !== 3 || new Set(stats.map(x => x.stat)).size !== 3 ||
+      stats.some(x => !x.stat || !x.label || !Number.isFinite(Number(x.min)) || !Number.isFinite(Number(x.max)) || Number(x.max) < Number(x.min))) {
+    throw new Error(`Invalid three-stat configuration for relic ${relic.id}`);
+  }
+  // Relics retain their fixed stat types, but use the same item-level
+  // multiplier and armor-weight bonuses as ordinary equipment affixes.
+  const affixes: RolledAffix[] = stats.map(stat => {
+    const adjustedRange = getAdjustedAffixRange({
+      stat_key: stat.stat,
+      value_min: Number(stat.min),
+      value_max: Number(stat.max),
+    } as AffixRow, base.armor_weight, itemLevel);
+
+    return {
+      stat: stat.stat,
+      label: stat.label,
+      value: randomInt(adjustedRange.min, adjustedRange.max),
+      isPercent: Boolean(stat.isPercent),
+    };
+  });
+  const baseItem = buildFinalItem({base, itemLevel, rarity:"relic", affixes});
+  return {
+    ...baseItem, name: relic.name, icon: relic.icon || base.icon,
+    sellValue: relic.sell_value == null ? baseItem.sellValue : Number(relic.sell_value),
+    relicId: Number(relic.id),
+    uniqueAffix: {
+      key: relic.affix_key, name: relic.affix_name,
+      description: relic.affix_description,
+      params: parseRelicJson<Record<string, unknown>>(relic.affix_params_json) || {},
+    },
+  };
+}
+
+// Conditional probability AFTER a normal gear drop and item base have been selected.
+const RELIC_CHANCE_PER_GEAR_DROP = 0.005;
+
 export async function generateLootForCreature(
   creature: Creature,
   player: Player,
@@ -276,6 +349,17 @@ export async function generateLootForCreature(
 
   if (!base) {
     return results;
+  }
+
+  // Relics are a separate roll and never dilute the normal rarity weights.
+  // No relic definition on this base means ordinary loot proceeds unchanged.
+  const relicItem = rollChance(RELIC_CHANCE_PER_GEAR_DROP)
+    ? await buildRelicItem(base, itemLevel, options?.conn ?? db)
+    : null;
+  if (relicItem) {
+    const savedRelic = await saveItemInstance(player.id, relicItem,
+      options?.sourceType ?? "combat", options?.sourceId ?? creature.id, options?.conn);
+    return [savedRelic];
   }
 
   const affixPool = await getEligibleAffixes({
@@ -640,10 +724,11 @@ async function saveItemInstance(
         is_equipped,
         is_claimed,
         roll_json,
+        relic_id,
         source_type,
         source_id
       )
-      VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
       `,
       [
         playerId,
@@ -656,6 +741,7 @@ async function saveItemInstance(
         JSON.stringify(
           item.affixes
         ),
+        item.relicId ?? null,
         sourceType,
         sourceId ?? null
       ]
@@ -696,7 +782,8 @@ function normalizeRarity(value: string): LootRarity {
     v === "dormant" ||
     v === "awakened" ||
     v === "empowered" ||
-    v === "transcendent"
+    v === "transcendent" ||
+    v === "relic"
   ) {
     return v;
   }
@@ -799,6 +886,11 @@ export async function generateLootPreviewFromBaseItem(args: {
     args.rarityOverride ??
     rollShopRarity();
 
+  if (rarity === "relic") {
+    // Explicit relic preview; undefined if this base has no relic definition.
+    return buildRelicItem(base, itemLevel, runner);
+  }
+
   const affixPool =
     await getEligibleAffixes({
       base,
@@ -880,8 +972,9 @@ export async function generateLootFromBaseItem(args: {
 
 
 /**
- * Persist a previously rolled item without changing its rarity or affixes.
- * Used by persistent dungeon completion chests.
+ * Persist an already-rolled equipment reward without rerolling its affixes.
+ * Dungeon completion chests store GeneratedItem snapshots at completion time
+ * and claim those exact snapshots later, within the claim transaction.
  */
 export async function savePreRolledLootFromBaseItem(args: {
   playerId: number;
@@ -889,20 +982,29 @@ export async function savePreRolledLootFromBaseItem(args: {
   sourceType?: string;
   sourceId?: number | null;
   isClaimed?: boolean;
-  conn: any;
+  conn?: any;
 }): Promise<SavedItem> {
+  const runner = args.conn ?? db;
+  const item = args.item;
+
+  if (!item || !Number.isInteger(Number(item.itemBaseId)) || Number(item.itemBaseId) <= 0) {
+    throw new Error("Invalid pre-rolled equipment reward.");
+  }
+
   const saved = await saveItemInstance(
     args.playerId,
-    args.item,
+    item,
     args.sourceType ?? "dungeon",
     args.sourceId ?? null,
     args.conn
   );
+
   if (args.isClaimed) {
-    await args.conn.query(
-      "UPDATE player_items SET is_claimed = 1 WHERE id = ?",
+    await runner.query(
+      `UPDATE player_items SET is_claimed = 1 WHERE id = ?`,
       [saved.playerItemId]
     );
   }
+
   return saved;
 }

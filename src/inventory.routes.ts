@@ -1,6 +1,7 @@
 //src/inventory.routes.ts
 import express from "express";
 import { db } from "./db";
+import { mergeInventoryStacksAtomic } from "./services/inventoryService";
 
 const router = express.Router();
 
@@ -64,6 +65,36 @@ router.get("/api/inventory/slot-check/:id", async (req, res) => {
     slot: String(row.slot || "")
   });
 });
+// Drag a source stack onto a matching target stack.
+router.post("/api/inventory/merge", async (req, res) => {
+  const pid = Number((req.session as any).playerId);
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return res.status(401).json({ error: "Not logged in" });
+  }
+
+  const sourceId = Number(req.body?.sourceId);
+  const targetId = Number(req.body?.targetId);
+  if (!Number.isSafeInteger(sourceId) || sourceId <= 0 ||
+      !Number.isSafeInteger(targetId) || targetId <= 0 || sourceId === targetId) {
+    return res.status(400).json({ error: "Invalid source or target stack" });
+  }
+
+  try {
+    const result = await mergeInventoryStacksAtomic(pid, sourceId, targetId);
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    const known = new Set([
+      "INVALID_STACK_IDS", "STACK_NOT_FOUND", "STACKS_INCOMPATIBLE",
+      "ITEM_NOT_FOUND", "ITEM_NOT_STACKABLE", "INVALID_STACK_QUANTITY"
+    ]);
+    if (known.has(error?.message)) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error("Inventory merge failed:", error);
+    return res.status(500).json({ error: "Unable to merge stacks" });
+  }
+});
+
 // ===========================
 // USE ITEM (STACK SAFE)
 // ===========================

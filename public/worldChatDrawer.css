@@ -688,3 +688,7 @@ button.gfWorldChatName:hover {
     0 2px 5px rgba(0, 0, 0, .72),
     0 0 7px rgba(230, 197, 122, .2);
 }
+
+/* RELIC RARITY — Bloody Red */
+.gfWorldChatLinkedItem.gf-relic { color: #B51F32; }
+.gfWorldChatPickerItem.gf-relic { border-color: rgba(181,31,50,.86); }

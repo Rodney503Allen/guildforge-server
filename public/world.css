@@ -10141,3 +10141,114 @@ body.world-map-open { overflow: hidden; }
 .world-map-panel .world-remote-player-layer .world-nearby-player {
   position: absolute; left: 0; top: 0; pointer-events: auto;
 }
+
+
+/* ============================================================
+   GUILDFORGE WORLD — FLUID DESKTOP COLUMNS ONLY
+   Retains original art, frames, typography, cards and spacing.
+   Append after existing world.css rules.
+   ============================================================ */
+@media (min-width: 981px) {
+  .world-screen {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    /* Existing 122px global navigation offset is preserved. */
+    height: calc(100dvh - 122px);
+    margin: 122px 0 0;
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(0, 2.5fr)
+      minmax(0, 1fr);
+    justify-content: stretch;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  /* Undo legacy fixed-width rail and map-frame declarations. */
+  .world-screen > .world-rail {
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    min-height: 0;
+  }
+
+  .world-screen > .world-center {
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .world-center > .world-map-panel {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* Keep the existing seven-square camera sized by available space. */
+  .world-map-panel .map-stage {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* Rails can scroll their own contents without forcing page scrolling. */
+  .world-screen > .world-rail--left {
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
+/* Guildforge World: remove unused space above the three-column layout.
+   Add at the VERY END of world.css, after the fluid desktop columns patch. */
+@media (min-width: 981px) {
+  .world-screen {
+    margin-top: 0;
+    height: 100dvh;
+    padding-top: 12px;
+  }
+}
+
+/* Desktop: three centered columns with sufficient width for both rails. */
+@media (min-width: 981px) {
+  .world-screen {
+    --gf-rail-width: clamp(225px, 16vw, 280px);
+    --gf-map-width: min(780px, calc(100dvh - 100px), calc(100vw - 2 * var(--gf-rail-width) - 32px));
+    display: grid;
+    grid-template-columns: var(--gf-rail-width) minmax(0, var(--gf-map-width)) var(--gf-rail-width);
+    column-gap: 8px;
+    gap: 8px;
+    width: fit-content;
+    max-width: calc(100vw - 16px);
+    margin-left: auto;
+    margin-right: auto;
+    justify-content: center;
+    align-items: stretch;
+  }
+
+  .world-screen > .world-rail--right,
+  .world-screen > .world-rail--left,
+  .world-screen > .world-center {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+  }
+
+  .world-rail--right .world-nearby-panel,
+  .world-rail--right .world-rail-card,
+  .world-rail--right .world-interactables-card,
+  .world-rail--right .nearby-interactions,
+  .world-rail--right .world-interact__list,
+  .world-rail--right .world-nearby-trackers,
+  .world-rail--right .world-tracker-card {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}

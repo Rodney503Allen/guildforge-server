@@ -790,3 +790,6 @@ body::after{
     grid-template-columns:1fr;
   }
 }
+
+/* RELIC RARITY — Bloody Red */
+.relic, .gf-relic { color: #B51F32; }

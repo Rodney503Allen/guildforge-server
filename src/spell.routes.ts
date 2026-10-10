@@ -18,7 +18,8 @@ import {
   pushHealingEvent,
   refreshSessionEffects,
   reduceOtherSpellCooldowns,
-  refreshPlayerCreatureDot
+  refreshPlayerCreatureDot,
+  isPlayerCombatStunned
 } from "./services/combatSessionService";
 import { getEquippedSpells } from "./services/spellLoadoutService";
 import { publishWorldCombatSnapshot } from "./combatSocket";
@@ -497,6 +498,14 @@ router.post("/spells/cast", async (req, res) => {
     if (session.state !== "active") {
       return res.json({
         error: "combat_over",
+        snapshot: buildCombatSnapshot(session)
+      });
+    }
+
+    if (isPlayerCombatStunned(pid)) {
+      return res.status(409).json({
+        error: "stunned",
+        message: "You cannot cast spells while stunned.",
         snapshot: buildCombatSnapshot(session)
       });
     }

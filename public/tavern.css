@@ -2336,3 +2336,14 @@ body::after{
 .onlinePageLabel { color:var(--muted); font:11px system-ui,sans-serif; }
 @media(max-width:620px) { .onlinePlayersList { grid-template-columns:repeat(4,minmax(0,1fr)); } }
 @media(max-width:390px) { .onlinePlayersList { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+
+/* Relic rarity: trade inventory, both offers, and Tavern item picker. */
+:root { --gf-rarity-relic: #B51F32; }
+.tradeInventoryItem.is-relic .tradeInventoryItemText > strong,
+.tradeItemSlot.is-relic > strong { color: var(--gf-rarity-relic) !important; }
+.tradeInventoryItem.is-relic,
+.tradeItemSlot.is-relic { border-color: rgba(181,31,50,.58); }
+.tradeInventoryItem.is-relic:hover,
+.tradeItemSlot.is-relic:hover { box-shadow: 0 0 12px rgba(181,31,50,.22); }
+.chatItemPicker__item.gf-relic,
+.chatItemPicker__item[data-rarity="relic"] { color: var(--gf-rarity-relic); }

@@ -1171,6 +1171,18 @@ body::before{
    SKILL LOADOUT
 ========================================= */
 
+/* Relic equipment — Guildforge bloody-red rarity. */
+.inv-item[data-rarity="relic"],
+.pd-slot:has([data-rarity="relic"]){
+  border-color:rgba(181,31,50,.88);
+  box-shadow:0 0 18px rgba(181,31,50,.30), inset 0 0 14px #000;
+}
+.inv-item[data-rarity="relic"]:hover,
+.pd-slot:has([data-rarity="relic"]):hover{
+  border-color:#df4056;
+  box-shadow:0 0 23px rgba(181,31,50,.40), inset 0 0 14px #000;
+}
+
 .skill-loadout-panel{
   grid-column:1 / -1;
   margin:0;

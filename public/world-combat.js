@@ -46,7 +46,9 @@ let combatTimingRunning = false;
 const combatTiming = {
   playerATB: null,
   enemyATB: null,
-  autoAttack: null
+  autoAttack: null,
+  frostState: 'none',
+  lightningStunned: false
 };
 
 function clampCombatPct(value) {
@@ -106,7 +108,8 @@ function makeATBTimingAnchor(actor) {
 
     recoveryMs,
 
-    readyInMs
+    readyInMs,
+    frozen: Boolean(actor.frostState === 'frozen' || actor.lightningStunned)
   };
 }
 
@@ -131,7 +134,9 @@ function makeAutoAttackTimingAnchor(player) {
         Number(
           player.autoAttackTotalMs ?? 6000
         ) || 6000
-      )
+      ),
+    frostState: player.frostState || 'none',
+    lightningStunned: Boolean(player.lightningStunned)
   };
 }
 
@@ -144,7 +149,7 @@ function getInterpolatedATB(anchor, now) {
     };
   }
 
-  if (anchor.ready) {
+  if (anchor.ready && !anchor.frozen) {
     return {
       /*
        * READY is communicated by the READY label/panel
@@ -159,12 +164,7 @@ function getInterpolatedATB(anchor, now) {
     };
   }
 
-  const elapsedMs =
-    Math.max(
-      0,
-      now -
-      anchor.receivedAt
-    );
+  const elapsedMs = anchor.frozen ? 0 : Math.max(0, now - anchor.receivedAt);
 
   /*
    * Recovery is intentionally held at the server's
@@ -245,6 +245,7 @@ function renderSmoothCombatTimers() {
   // Player ATB
   // -----------------------
   if (combatTiming.playerATB) {
+    // Frozen holds both the fill and the numeric seconds at the snapshot value.
     const visual =
       getInterpolatedATB(
         combatTiming.playerATB,
@@ -291,13 +292,7 @@ function renderSmoothCombatTimers() {
   // Auto Attack
   // -----------------------
   if (combatTiming.autoAttack) {
-    const elapsedMs =
-      Math.max(
-        0,
-        now -
-        combatTiming.autoAttack
-          .receivedAt
-      );
+    const elapsedMs = Math.max(0, now - combatTiming.autoAttack.receivedAt) * ((combatTiming.frostState === 'frozen' || combatTiming.lightningStunned) ? 0 : combatTiming.frostState === 'chilled' ? 0.5 : 1);
 
     const remainingMs =
       Math.max(
@@ -388,14 +383,100 @@ function stopSmoothCombatTimers() {
   combatTiming.enemyATB =
     null;
 
-  combatTiming.autoAttack =
-    null;
+  combatTiming.autoAttack = null;
+  combatTiming.frostState = 'none';
+  combatTiming.lightningStunned = false;
+  applyCombatFrostVisuals('none');
+  applyCombatLightningVisuals(false);
+}
+
+// Frost visuals are presentation-only; timing comes from server snapshots.
+function applyCombatFrostVisuals(state) {
+  if (!document.getElementById('gf-frost-combat-styles')) {
+    const style = document.createElement('style');
+    style.id = 'gf-frost-combat-styles';
+    style.textContent = `
+      /* Keep the countdown labels above the frost fills, including at 0% or frozen. */
+      .bar:has(> #playerATBBar), .bar:has(> #playerAutoAttackBar) { position: relative !important; }
+      #playerATBBar, #playerAutoAttackBar { z-index: 1; }
+      #playerATBBar + .bar-text, #playerAutoAttackBar + .bar-text {
+        position: absolute !important;
+        inset: 0 !important;
+        z-index: 20 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: none;
+        color: #fff !important;
+        font-weight: 700;
+        text-shadow: 0 1px 3px #001222, 0 0 4px #001222;
+      }
+      #playerATBText, #playerAutoAttackText {
+        display: inline !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        color: #fff !important;
+      }
+      #playerATBBar, #playerAutoAttackBar { position: relative; }
+      #playerATBBar.gf-chilled, #playerAutoAttackBar.gf-chilled {
+        background-image: linear-gradient(90deg, rgba(153,228,255,.48), rgba(60,173,231,.52)) !important;
+        box-shadow: inset 0 0 8px rgba(167,233,255,.85), 0 0 5px rgba(109,201,250,.5);
+      }
+      #playerATBBar.gf-frozen, #playerAutoAttackBar.gf-frozen {
+        background-image: linear-gradient(90deg, rgba(23,86,176,.85), rgba(7,40,120,.9)) !important;
+        box-shadow: inset 0 0 9px rgba(93,170,255,.9), 0 0 7px rgba(42,104,224,.75);
+      }
+      .player-panel.gf-chilled { box-shadow: inset 0 0 20px rgba(111,211,252,.15); }
+      .player-panel.gf-frozen { box-shadow: inset 0 0 25px rgba(38,95,218,.34); }
+    `;
+    document.head.appendChild(style);
+  }
+  const chilled = state === 'chilled';
+  const frozen = state === 'frozen';
+  for (const id of ['playerATBBar', 'playerAutoAttackBar']) {
+    const bar = document.getElementById(id);
+    if (bar) {
+      bar.classList.toggle('gf-chilled', chilled);
+      bar.classList.toggle('gf-frozen', frozen);
+    }
+  }
+  const panel = document.querySelector('.player-panel');
+  if (panel) {
+    panel.classList.toggle('gf-chilled', chilled);
+    panel.classList.toggle('gf-frozen', frozen);
+  }
+}
+
+// Lightning uses an amber electric outline without replacing the Frost overlays.
+function applyCombatLightningVisuals(stunned) {
+  if (!document.getElementById('gf-lightning-combat-styles')) {
+    const style = document.createElement('style');
+    style.id = 'gf-lightning-combat-styles';
+    style.textContent = `
+      #playerATBBar.gf-lightning-stunned, #playerAutoAttackBar.gf-lightning-stunned {
+        outline: 2px solid rgba(255,209,74,.85);
+        box-shadow: inset 0 0 9px rgba(255,225,100,.65), 0 0 8px rgba(255,189,32,.7);
+      }
+      .player-panel.gf-lightning-stunned { outline: 1px solid rgba(255,210,80,.55); }
+    `;
+    document.head.appendChild(style);
+  }
+  for (const id of ['playerATBBar', 'playerAutoAttackBar']) {
+    document.getElementById(id)?.classList.toggle('gf-lightning-stunned', stunned);
+  }
+  document.querySelector('.player-panel')?.classList.toggle('gf-lightning-stunned', stunned);
 }
 
 function syncCombatTimingAnchors(snapshot) {
   if (!snapshot) return;
 
   if (snapshot.player) {
+    combatTiming.frostState = snapshot.player.frostState || 'none';
+    combatTiming.lightningStunned = Boolean(snapshot.player.lightningStunned);
+    applyCombatFrostVisuals(combatTiming.frostState);
+    applyCombatLightningVisuals(combatTiming.lightningStunned);
     combatTiming.playerATB =
       makeATBTimingAnchor(
         snapshot.player
@@ -920,6 +1001,12 @@ function normalizeCombatEffectIcon(icon) {
 
 function combatEffectEmoji(effect, isPlayerBuff = false) {
   const stat = String(effect?.stat || "").toLowerCase();
+  const type = String(effect?.type || "").toLowerCase();
+  if (type === "frost") return "❄️";
+  if (type === "fire") return "🔥";
+  if (type === "lightning") return "⚡";
+  if (type === "blight") return "☠️";
+  if (type === "bleed") return "🩸";
 
   if (effect?.kind === "hot") return "💚";
   if (effect?.kind === "dot" || stat.includes("dot") || stat.includes("damage_over_time")) return "🔥";
@@ -972,14 +1059,15 @@ function renderCombatEffects(containerId, effects, options = {}) {
     });
 
   container.innerHTML = active.map(effect => {
+    const playerDebuff = effect?.kind === "debuff" && Boolean(effect?.type);
     const name = formatCombatEffectName(
       effect,
-      isPlayerBuff ? "Buff" : "Enemy Effect"
+      playerDebuff ? "Debuff" : isPlayerBuff ? "Buff" : "Enemy Effect"
     );
     const seconds = formatCombatEffectSeconds(effect);
-    const icon = normalizeCombatEffectIcon(effect?.icon);
-    const emoji = combatEffectEmoji(effect, isPlayerBuff);
-    const kind = effect?.kind === "hot"
+    const icon = playerDebuff ? '' : normalizeCombatEffectIcon(effect?.icon);
+    const emoji = playerDebuff && effect.type === 'frost' && effect.stacks >= 2 ? '🧊' : combatEffectEmoji(effect, isPlayerBuff && !playerDebuff);
+    const kind = playerDebuff ? "debuff" : effect?.kind === "hot"
       ? "hot"
       : isPlayerBuff
       ? "buff"
@@ -988,6 +1076,7 @@ function renderCombatEffects(containerId, effects, options = {}) {
     const value = Number(effect?.value || 0);
     const detailParts = [];
 
+    if (effect?.stacks > 1) detailParts.push(`${effect.stacks} stacks`);
     if (effect?.stat) {
       detailParts.push(
         String(effect.stat).replace(/_/g, " ")
@@ -1021,12 +1110,15 @@ function renderCombatEffects(containerId, effects, options = {}) {
         data-sub="${escapeHtml(
           effect?.kind === "hot"
             ? "Healing Over Time"
+            : playerDebuff
+            ? "Active Debuff"
             : isPlayerBuff
             ? "Active Buff"
             : (effect?.kind === "dot" ? "Damage Over Time" : "Enemy Debuff")
         )}"
         data-desc="${escapeHtml(
           [
+            effect?.description || "",
             detailParts.length ? detailParts.join(" · ") : "",
             seconds !== null ? `${seconds}s remaining` : ""
           ].filter(Boolean).join(" — ")
@@ -1057,9 +1149,10 @@ let latestCombatEffectSnapshot = null;
 function renderCombatPlayerBuffs(buffs = window.__GF_ACTIVE_BUFFS__) {
   const activeBuffs = latestCombatEffectSnapshot?.playerBuffs ?? buffs;
   const activeHots = latestCombatEffectSnapshot?.playerHots ?? [];
+  const activeDebuffs = latestCombatEffectSnapshot?.playerDebuffs ?? [];
   renderCombatEffects(
     "playerCombatEffects",
-    [...(Array.isArray(activeBuffs) ? activeBuffs : []), ...(Array.isArray(activeHots) ? activeHots : [])],
+    [...(Array.isArray(activeBuffs) ? activeBuffs : []), ...(Array.isArray(activeHots) ? activeHots : []), ...(Array.isArray(activeDebuffs) ? activeDebuffs : [])],
     { playerBuff: true }
   );
 }

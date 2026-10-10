@@ -65,6 +65,15 @@ function buildTooltipAttrs(item: any) {
     `data-type="${escapeHtml(item?.type || item?.category || "")}"`,
   ];
 
+  if (String(item?.rarity || "").toLowerCase() === "relic") {
+    if (item?.relic_affix_name) {
+      attrs.push(`data-relic-affix-name="${escapeHtml(item.relic_affix_name)}"`);
+    }
+    if (item?.relic_affix_description) {
+      attrs.push(`data-relic-affix-description="${escapeHtml(item.relic_affix_description)}"`);
+    }
+  }
+
   const hasGearSlot = ["weapon", "offhand", "head", "chest", "legs", "feet", "hands", "backpack"].includes(
     String(item?.slot || "")
   );
@@ -507,6 +516,11 @@ router.get("/character", requireLogin, async (req, res) => {
       pi.item_level AS rolled_item_level,
       pi.rarity AS rolled_rarity,
       pi.roll_json AS rolled_roll_json,
+      pi.relic_id AS rolled_relic_id,
+      ir.name AS relic_name,
+      ir.icon AS relic_icon,
+      ir.affix_name AS relic_affix_name,
+      ir.affix_description AS relic_affix_description,
 
       ib.id AS base_id,
       ib.name AS base_name,
@@ -528,6 +542,8 @@ router.get("/character", requireLogin, async (req, res) => {
       ON pi.id = inv.player_item_id
     LEFT JOIN item_bases ib
       ON ib.id = pi.item_base_id
+    LEFT JOIN item_relics ir
+      ON ir.id = pi.relic_id
     WHERE inv.player_id = ?
       AND inv.equipped = 1
       AND (
@@ -555,9 +571,11 @@ router.get("/character", requireLogin, async (req, res) => {
       item_id: g.item_id != null ? Number(g.item_id) : null,
       player_item_id: g.player_item_id != null ? Number(g.player_item_id) : null,
 
-      name: isRolled ? g.rolled_name : g.static_name,
+      name: isRolled ? (g.relic_name || g.rolled_name) : g.static_name,
+      relic_affix_name: isRolled ? (g.relic_affix_name || null) : null,
+      relic_affix_description: isRolled ? (g.relic_affix_description || null) : null,
       slot: isRolled ? g.base_slot : g.static_slot,
-      icon: isRolled ? g.base_icon : g.static_icon,
+      icon: isRolled ? (g.relic_icon || g.base_icon) : g.static_icon,
       rarity: isRolled ? g.rolled_rarity : g.static_rarity,
       description: isRolled ? g.base_description : g.static_description,
 
@@ -684,6 +702,11 @@ router.get("/character", requireLogin, async (req, res) => {
       pi.item_level AS rolled_item_level,
       pi.rarity AS rolled_rarity,
       pi.roll_json AS rolled_roll_json,
+      pi.relic_id AS rolled_relic_id,
+      ir.name AS relic_name,
+      ir.icon AS relic_icon,
+      ir.affix_name AS relic_affix_name,
+      ir.affix_description AS relic_affix_description,
 
       ib.id AS base_id,
       ib.name AS base_name,
@@ -706,6 +729,8 @@ router.get("/character", requireLogin, async (req, res) => {
       ON pi.id = inv.player_item_id
     LEFT JOIN item_bases ib
       ON ib.id = pi.item_base_id
+    LEFT JOIN item_relics ir
+      ON ir.id = pi.relic_id
     WHERE inv.player_id = ?
       AND inv.equipped = 0
     ORDER BY COALESCE(pi.name, i.name, ib.name) ASC
@@ -731,9 +756,11 @@ router.get("/character", requireLogin, async (req, res) => {
       quantity: Number(g.quantity || 1),
       equipped: Number(g.equipped || 0),
 
-      name: isRolled ? g.rolled_name : g.static_name,
+      name: isRolled ? (g.relic_name || g.rolled_name) : g.static_name,
+      relic_affix_name: isRolled ? (g.relic_affix_name || null) : null,
+      relic_affix_description: isRolled ? (g.relic_affix_description || null) : null,
       slot: isRolled ? g.base_slot : g.static_slot,
-      icon: isRolled ? g.base_icon : g.static_icon,
+      icon: isRolled ? (g.relic_icon || g.base_icon) : g.static_icon,
       rarity: isRolled ? g.rolled_rarity : g.static_rarity,
       description: isRolled ? g.base_description : g.static_description,
 
@@ -1375,6 +1402,8 @@ router.post("/character/equip", requireLogin, async (req, res) => {
       ON pi.id = inv.player_item_id
     LEFT JOIN item_bases ib
       ON ib.id = pi.item_base_id
+    LEFT JOIN item_relics ir
+      ON ir.id = pi.relic_id
     WHERE inv.inventory_id = ?
       AND inv.player_id = ?
     LIMIT 1
@@ -1423,6 +1452,8 @@ router.post("/character/equip", requireLogin, async (req, res) => {
       ON pi.id = inv.player_item_id
     LEFT JOIN item_bases ib
       ON ib.id = pi.item_base_id
+    LEFT JOIN item_relics ir
+      ON ir.id = pi.relic_id
     WHERE inv.player_id = ?
       AND inv.equipped = 1
       AND (

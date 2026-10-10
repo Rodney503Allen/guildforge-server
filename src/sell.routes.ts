@@ -91,6 +91,12 @@ router.get("/sell", async (req, res) => {
       pi.rarity AS rolled_rarity,
       pi.item_level AS rolled_item_level,
       pi.roll_json AS rolled_roll_json,
+      pi.relic_id AS rolled_relic_id,
+      ir.name AS relic_name,
+      ir.icon AS relic_icon,
+      ir.sell_value AS relic_sell_value,
+      ir.affix_name AS relic_affix_name,
+      ir.affix_description AS relic_affix_description,
 
       ib.name AS base_name,
       ib.icon AS base_icon,
@@ -99,7 +105,6 @@ router.get("/sell", async (req, res) => {
       ib.slot AS base_slot,
       ib.armor_weight AS base_armor_weight,
       ib.weapon_class AS base_weapon_class,
-      ib.attack_speed_ms AS base_attack_speed_ms,
       ib.required_level AS base_required_level,
       ib.base_attack AS base_attack,
       ib.base_defense AS base_defense,
@@ -112,6 +117,8 @@ router.get("/sell", async (req, res) => {
       ON pi.id = inv.player_item_id
     LEFT JOIN item_bases ib
       ON ib.id = pi.item_base_id
+    LEFT JOIN item_relics ir
+      ON ir.id = pi.relic_id
     WHERE inv.player_id = ?
       AND inv.equipped = 0
     ORDER BY COALESCE(i.name, ib.name) ASC
@@ -133,16 +140,19 @@ router.get("/sell", async (req, res) => {
       : null;
 
     const rarity = isRolled ? it.rolled_rarity : it.static_rarity;
+    const isRelic = isRolled && String(rarity || "").toLowerCase() === "relic";
     const baseValue = isRolled
-      ? Number(it.base_sell_value || 0) * getRarityMultiplier(it.rolled_rarity)
+      ? (isRelic && it.relic_sell_value != null
+          ? Number(it.relic_sell_value)
+          : Number(it.base_sell_value || 0) * getRarityMultiplier(it.rolled_rarity))
       : Number(it.static_value || 0);
 
     const unit = Math.max(0, Math.floor(baseValue * SELL_RATE));
 
     const qty = isRolled ? 1 : Number(it.quantity || 1);
 
-    const name = isRolled ? it.base_name : it.static_name;
-    const icon = isRolled ? it.base_icon : it.static_icon;
+    const name = isRelic ? (it.relic_name || it.base_name) : (isRolled ? it.base_name : it.static_name);
+    const icon = isRelic ? (it.relic_icon || it.base_icon) : (isRolled ? it.base_icon : it.static_icon);
     const slotOrType = isRolled
       ? (it.base_slot || it.base_item_type || "equipment")
       : (it.static_slot || it.static_category || "item");
@@ -161,6 +171,8 @@ router.get("/sell", async (req, res) => {
 
           desc: desc || "",
           isRolled,
+          relicAffixName: isRelic ? (it.relic_affix_name || "") : "",
+          relicAffixDescription: isRelic ? (it.relic_affix_description || "") : "",
 
           // canonical item tooltip fields
           type: isRolled ? "equipment" : (it.static_type || it.static_category || ""),
@@ -168,7 +180,6 @@ router.get("/sell", async (req, res) => {
           slot: isRolled ? (it.base_slot || "") : (it.static_slot || ""),
           armorWeight: isRolled ? (it.base_armor_weight || "") : "",
           weaponClass: isRolled ? (it.base_weapon_class || "") : "",
-          attackSpeedMs: isRolled && it.base_slot === "weapon" ? (Number(it.base_attack_speed_ms) > 0 ? Number(it.base_attack_speed_ms) : 6000) : (!isRolled && it.static_slot === "weapon" ? 6000 : ""),
           itemLevel: isRolled ? Number(it.rolled_item_level || 0) : "",
           baseAttack: isRolled ? Number(scaledBaseStats?.baseAttack || 0) : Number(it.static_attack || 0),
           baseDefense: isRolled ? Number(scaledBaseStats?.baseDefense || 0) : Number(it.static_defense || 0),
@@ -210,12 +221,13 @@ router.get("/sell", async (req, res) => {
            data-slot="${escapeHtml(it.slot || "")}"
            data-armor-weight="${escapeHtml(it.armorWeight || "")}"
            data-weapon-class="${escapeHtml(it.weaponClass || "")}"
-           data-attack-speed-ms="${it.attackSpeedMs}"
            data-item-level="${it.itemLevel !== "" ? escapeHtml(String(it.itemLevel)) : ""}"
            data-base-attack="${escapeHtml(String(it.baseAttack ?? ""))}"
            data-base-defense="${escapeHtml(String(it.baseDefense ?? ""))}"
            data-stats="${escapeHtml(it.stats || "")}"
-           data-roll-json='${escapeHtml(JSON.stringify(it.rollJson || []))}'>
+           data-roll-json='${escapeHtml(JSON.stringify(it.rollJson || []))}'
+           data-relic-affix-name="${escapeHtml(it.relicAffixName)}"
+           data-relic-affix-description="${escapeHtml(it.relicAffixDescription)}">
         <div class="icon-wrap">
           <div class="icon">${
             it.icon
@@ -227,7 +239,7 @@ router.get("/sell", async (req, res) => {
         </div>
 
         <div class="info">
-          <div class="name ${it.rarity}">${it.name}</div>
+          <div class="name ${escapeHtml(it.rarity)}">${escapeHtml(it.name)}</div>
           <div class="sub">
             ${String(it.slotOrType || "ITEM").toUpperCase()}
             <span class="dot">•</span>

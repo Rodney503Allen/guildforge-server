@@ -155,11 +155,11 @@ async function getTradeOffers(
         inv.durability,
         inv.randid,
 
-        COALESCE(pi.name, items.name, ib.name) AS item_name,
+        COALESCE(ir.name, pi.name, items.name, ib.name) AS item_name,
         COALESCE(pi.rarity, items.rarity, 'base') AS rarity,
         COALESCE(ib.description, items.description, '') AS description,
         COALESCE(ib.slot, items.slot) AS slot,
-        COALESCE(ib.icon, items.icon) AS icon,
+        COALESCE(ir.icon, ib.icon, items.icon) AS icon,
         CASE WHEN inv.player_item_id IS NULL THEN items.value ELSE ib.sell_value END AS value,
         CASE WHEN inv.player_item_id IS NULL THEN items.item_type ELSE ib.item_type END AS item_type,
         CASE WHEN inv.player_item_id IS NULL THEN items.type ELSE NULL END AS type,
@@ -174,6 +174,11 @@ async function getTradeOffers(
         CASE WHEN inv.player_item_id IS NULL THEN items.intellect ELSE 0 END AS intellect,
         CASE WHEN inv.player_item_id IS NULL THEN items.crit ELSE 0 END AS crit,
         pi.roll_json,
+        pi.relic_id,
+        ir.affix_key AS relic_affix_key,
+        ir.affix_name AS relic_affix_name,
+        ir.affix_description AS relic_affix_description,
+        ir.affix_params_json AS relic_affix_params_json,
         CASE WHEN inv.player_item_id IS NULL THEN 0 ELSE 1 END AS is_unique
 
       FROM player_trade_items pti
@@ -186,6 +191,9 @@ async function getTradeOffers(
 
       LEFT JOIN items
         ON items.id = inv.item_id
+
+      LEFT JOIN item_relics ir
+        ON ir.id = pi.relic_id
 
       LEFT JOIN item_bases ib
         ON ib.id = pi.item_base_id
@@ -650,11 +658,11 @@ export async function getTradeInventory(
         inv.durability,
         inv.randid,
 
-        COALESCE(pi.name, items.name, ib.name) AS item_name,
+        COALESCE(ir.name, pi.name, items.name, ib.name) AS item_name,
         COALESCE(pi.rarity, items.rarity, 'base') AS rarity,
         COALESCE(ib.description, items.description, '') AS description,
         COALESCE(ib.slot, items.slot) AS slot,
-        COALESCE(ib.icon, items.icon) AS icon,
+        COALESCE(ir.icon, ib.icon, items.icon) AS icon,
         CASE WHEN inv.player_item_id IS NULL THEN items.value ELSE ib.sell_value END AS value,
         CASE WHEN inv.player_item_id IS NULL THEN items.item_type ELSE ib.item_type END AS item_type,
         CASE WHEN inv.player_item_id IS NULL THEN items.type ELSE NULL END AS type,
@@ -669,6 +677,11 @@ export async function getTradeInventory(
         CASE WHEN inv.player_item_id IS NULL THEN items.intellect ELSE 0 END AS intellect,
         CASE WHEN inv.player_item_id IS NULL THEN items.crit ELSE 0 END AS crit,
         pi.roll_json,
+        pi.relic_id,
+        ir.affix_key AS relic_affix_key,
+        ir.affix_name AS relic_affix_name,
+        ir.affix_description AS relic_affix_description,
+        ir.affix_params_json AS relic_affix_params_json,
 
         CASE
           WHEN inv.player_item_id IS NULL THEN 0
@@ -682,6 +695,9 @@ export async function getTradeInventory(
 
       LEFT JOIN items
         ON items.id = inv.item_id
+
+      LEFT JOIN item_relics ir
+        ON ir.id = pi.relic_id
 
       LEFT JOIN item_bases ib
         ON ib.id = pi.item_base_id

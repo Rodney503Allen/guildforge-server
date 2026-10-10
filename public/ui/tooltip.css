@@ -593,3 +593,8 @@
   white-space: nowrap;
   margin-left: auto;
 }
+
+/* RELIC RARITY — Bloody Red */
+.gf-tooltip .t-name.gf-relic,
+.gf-relic { color: #B51F32; }
+.gf-tooltip-item .t-item-header.gf-relic { color: #B51F32; }

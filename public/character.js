@@ -55,6 +55,95 @@ document.addEventListener("dragstart", e => {
   if (el) draggedId = el.dataset.id;
 });
 
+// INVENTORY STACK MERGING
+// Drag an inventory stack onto another inventory stack to combine them.
+// The server verifies item identity, ownership and the stack limit (20).
+let inventoryMergeBusy = false;
+let inventoryDragSource = null;
+
+function inventoryStackElement(target) {
+  if (!(target instanceof Element)) return null;
+  return target.closest(".inv-item[data-id]");
+}
+
+function clearInventoryMergeHighlight() {
+  document.querySelectorAll(".inv-item.gf-stack-drop-target").forEach(el => {
+    el.classList.remove("gf-stack-drop-target");
+    el.style.outline = "";
+    el.style.outlineOffset = "";
+  });
+}
+
+document.addEventListener("dragstart", event => {
+  const item = inventoryStackElement(event.target);
+  inventoryDragSource = item ? Number(item.dataset.id) : null;
+  if (inventoryDragSource && event.dataTransfer) {
+    event.dataTransfer.setData("application/x-guildforge-inventory", String(inventoryDragSource));
+    event.dataTransfer.effectAllowed = "move";
+  }
+});
+
+document.addEventListener("dragover", event => {
+  const target = inventoryStackElement(event.target);
+  clearInventoryMergeHighlight();
+  if (!target || !inventoryDragSource || inventoryMergeBusy ||
+      Number(target.dataset.id) === inventoryDragSource) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  target.classList.add("gf-stack-drop-target");
+  target.style.outline = "2px solid #c9a45b";
+  target.style.outlineOffset = "-2px";
+});
+
+document.addEventListener("drop", async event => {
+  const target = inventoryStackElement(event.target);
+  if (!target || !inventoryDragSource) return;
+  const sourceId = inventoryDragSource;
+  const targetId = Number(target.dataset.id);
+  if (!Number.isSafeInteger(targetId) || sourceId === targetId) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  clearInventoryMergeHighlight();
+  inventoryDragSource = null;
+  draggedId = null;
+  if (inventoryMergeBusy) return;
+  inventoryMergeBusy = true;
+
+  try {
+    const response = await fetch("/api/inventory/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceId, targetId })
+    });
+    const result = await response.json();
+    if (!response.ok || result.error || !result.success) {
+      const messages = {
+        STACKS_INCOMPATIBLE: "Only identical stackable items can be combined.",
+        ITEM_NOT_STACKABLE: "That item cannot be stacked.",
+        INVALID_STACK_QUANTITY: "One of those stacks has an invalid quantity.",
+        STACK_NOT_FOUND: "One of those stacks is no longer in your inventory."
+      };
+      throw new Error(messages[result.error] || result.error || "Could not combine those stacks.");
+    }
+    if (result.moved === 0) {
+      showErrorToast("That stack is already full.", "Stack Full");
+      return;
+    }
+    // Reload keeps server-rendered inventory slots, counts and tooltips in sync.
+    location.reload();
+  } catch (error) {
+    showErrorToast(error.message || "Could not combine those stacks.");
+  } finally {
+    inventoryMergeBusy = false;
+  }
+});
+
+document.addEventListener("dragend", () => {
+  inventoryDragSource = null;
+  clearInventoryMergeHighlight();
+});
+
 async function equipItem(id) {
   const res = await fetch("/character/equip", {
     method: "POST",

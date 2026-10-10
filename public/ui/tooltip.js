@@ -153,6 +153,17 @@
     return lines.join("");
   }
 
+  function buildRelicAffix(d) {
+    if (String(d.rarity || "").toLowerCase() !== "relic") return "";
+    const name = d.relicAffixName || d.affixName || "";
+    const desc = d.relicAffixDescription || d.affixDescription || "";
+    if (!name && !desc) return "";
+    return `<div class="t-relic-affix" style="margin-top:10px;padding-top:9px;border-top:1px solid rgba(181,31,50,.45)">
+      ${name ? `<div style="color:#df4056;font-weight:700">${esc(name)}</div>` : ""}
+      ${desc ? `<div style="margin-top:4px;color:#e8c8cc">${esc(desc)}</div>` : ""}
+    </div>`;
+  }
+
   function buildItem(element) {
     const d = element.dataset;
     const name = d.name || "Unknown Item";
@@ -190,6 +201,7 @@
             </div>
           ` : ""}
           ${equipmentStats ? `<div class="t-equip-stats">${equipmentStats}</div>` : ""}
+          ${buildRelicAffix(d)}
           ${d.desc ? `<div class="t-flavor-divider"></div><div class="t-item-flavor">${esc(d.desc)}</div>` : ""}
           ${utilityRows.length ? `<div class="t-item-utility">${utilityRows.join("")}</div>` : ""}
         </div>
@@ -211,7 +223,8 @@
             <span>${esc(nonEquipmentItemType)}</span>
           </div>
         ` : ""}
-        ${d.desc ? `<div class="t-flavor-divider"></div><div class="t-item-flavor">${esc(d.desc)}</div>` : ""}
+        ${buildRelicAffix(d)}
+          ${d.desc ? `<div class="t-flavor-divider"></div><div class="t-item-flavor">${esc(d.desc)}</div>` : ""}
         ${utilityRows.length ? `<div class="t-item-utility">${utilityRows.join("")}</div>` : ""}
       </div>
     `;

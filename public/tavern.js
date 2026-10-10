@@ -587,6 +587,10 @@ function group(rows) {
     return `/${raw.replace(/^\/+/, "")}`;
   };
 
+  // Relic is a distinct item rarity, not the trade inventory's is_unique flag.
+  const tradeRarityClass = (item) =>
+    String(item?.rarity || "").trim().toLowerCase() === "relic" ? " is-relic" : "";
+
   const itemIconHtml = (item) => {
     const icon = resolveItemIcon(item?.icon);
     const name = escapeHtml(item?.item_name || "Unknown item");
@@ -606,6 +610,8 @@ function group(rows) {
 
 const tooltipAttrs = (item, quantity) => `
   data-tooltip="item"
+  data-relic-affix-name="${escapeHtml(item.relic_affix_name || item.relicAffixName || "")}"
+  data-relic-affix-description="${escapeHtml(item.relic_affix_description || item.relicAffixDescription || "")}"
   data-name="${escapeHtml(item.item_name || "Unknown item")}"
   data-qty="${Number(quantity || 1)}"
   data-durability="${
@@ -1100,7 +1106,7 @@ const tooltipAttrs = (item, quantity) => `
 
     el.offerCount.textContent = `${selectedItems.length} / 12`;
     el.yourItems.innerHTML = selectedItems.map(({ item, inventoryId, quantity }) => `
-      <div class="tradeItemSlot tradeItemSlot--offered" ${tooltipAttrs(item, quantity)}
+      <div class="tradeItemSlot tradeItemSlot--offered${tradeRarityClass(item)}" ${tooltipAttrs(item, quantity)}
         data-offered-item="${Number(inventoryId)}" draggable="${canEdit}" tabindex="0" role="button"
         aria-label="${escapeHtml(item.item_name || "Item")}, ${Number(quantity)} offered. Double-click or press Delete to remove.">
         ${itemIconHtml(item)}
@@ -1116,7 +1122,7 @@ const tooltipAttrs = (item, quantity) => `
       const selectedQty = state.selected.get(id) || 1;
       const qty = Number(item.quantity || 1);
       return `
-        <div class="tradeInventoryItem ${selected ? "is-in-offer" : ""}" ${tooltipAttrs(item, qty)}
+        <div class="tradeInventoryItem ${selected ? "is-in-offer" : ""}${tradeRarityClass(item)}" ${tooltipAttrs(item, qty)}
           data-inventory-item="${id}" draggable="${canEdit && !selected}" tabindex="0" role="button"
           aria-label="${escapeHtml(item.item_name || "Item")}. ${selected ? "Currently offered." : "Double-click or press Enter to offer."}">
           ${itemIconHtml(item)}
@@ -1132,7 +1138,7 @@ const tooltipAttrs = (item, quantity) => `
 
     const theirItems = them.items || [];
     el.otherItems.innerHTML = theirItems.map(item => `
-      <div class="tradeItemSlot tradeItemSlot--offered tradeItemSlot--readonly" ${tooltipAttrs(item, item.quantity)} tabindex="0">
+      <div class="tradeItemSlot tradeItemSlot--offered tradeItemSlot--readonly${tradeRarityClass(item)}" ${tooltipAttrs(item, item.quantity)} tabindex="0">
         ${itemIconHtml(item)}
         <strong>${escapeHtml(item.item_name || "Unknown item")}</strong>
         <span class="tradeItemSlotQty">×${Number(item.quantity)}</span>

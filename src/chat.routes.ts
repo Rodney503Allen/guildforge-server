@@ -23,6 +23,35 @@ function cleanLinkedIds(value: any): number[] {
   ].slice(0, MAX_LINKED_ITEMS);
 }
 
+// Resolve Relic metadata independently of the inventory view so chat always
+// sends the same unique-effect information as the character page.
+async function enrichRelicItems<T extends any>(items: T[]): Promise<T[]> {
+  const ids = [...new Set(items.filter((item: any) =>
+    String(item.rarity || "").toLowerCase() === "relic" &&
+    Number.isInteger(Number(item.player_item_id)) && Number(item.player_item_id) > 0
+  ).map((item: any) => Number(item.player_item_id)))];
+  if (!ids.length) return items;
+  const [rows]: any = await db.query(
+    `SELECT pi.id AS player_item_id, ir.name AS relic_name,
+            ir.icon AS relic_icon, ir.affix_name AS relic_affix_name,
+            ir.affix_description AS relic_affix_description
+       FROM player_items pi
+       JOIN item_relics ir ON ir.id = pi.relic_id
+      WHERE pi.id IN (${ids.map(() => "?").join(",")})`, ids
+  );
+  const byId = new Map((rows || []).map((r: any) => [Number(r.player_item_id), r]));
+  return items.map((item: any) => {
+    const relic: any = byId.get(Number(item.player_item_id));
+    return relic ? {
+      ...item,
+      name: relic.relic_name || item.name,
+      icon: relic.relic_icon || item.icon,
+      relic_affix_name: relic.relic_affix_name || null,
+      relic_affix_description: relic.relic_affix_description || null
+    } : item;
+  });
+}
+
 function buildItemSnapshot(item: any) {
   return {
     inventoryId: Number(item.id),
@@ -64,6 +93,8 @@ function buildItemSnapshot(item: any) {
       item.rarity || "common",
     description:
       item.description || null,
+    relicAffixName: item.relic_affix_name || null,
+    relicAffixDescription: item.relic_affix_description || null,
 
     itemLevel:
       item.item_level != null
@@ -183,6 +214,27 @@ router.get(
         }
       }
 
+      // Repair older saved Relic links that predate affix snapshot fields.
+      const oldRelicIds = [...new Set((linkRows || []).flatMap((link: any) => {
+        try {
+          const snap = typeof link.item_snapshot === "string" ? JSON.parse(link.item_snapshot) : link.item_snapshot;
+          const id = Number(snap?.playerItemId ?? snap?.player_item_id);
+          return String(snap?.rarity || "").toLowerCase() === "relic" &&
+            Number.isInteger(id) && id > 0 ? [id] : [];
+        } catch { return []; }
+      }))];
+      const oldRelicMeta = new Map<number, any>();
+      if (oldRelicIds.length) {
+        const [relicRows]: any = await db.query(
+          `SELECT pi.id AS player_item_id, ir.name AS relic_name,
+                  ir.icon AS relic_icon, ir.affix_name AS relic_affix_name,
+                  ir.affix_description AS relic_affix_description
+             FROM player_items pi JOIN item_relics ir ON ir.id = pi.relic_id
+            WHERE pi.id IN (${oldRelicIds.map(() => "?").join(",")})`, oldRelicIds
+        );
+        for (const r of relicRows || []) oldRelicMeta.set(Number(r.player_item_id), r);
+      }
+
       const linksByMessage =
         new Map<number, any[]>();
 
@@ -216,6 +268,15 @@ router.get(
           ) || null;
         }
 
+        if (String(snapshot.rarity || "").toLowerCase() === "relic") {
+          const meta = oldRelicMeta.get(Number(snapshot.playerItemId ?? snapshot.player_item_id));
+          if (meta) {
+            snapshot.name = meta.relic_name || snapshot.name;
+            snapshot.icon = meta.relic_icon || snapshot.icon;
+            snapshot.relicAffixName = snapshot.relicAffixName || meta.relic_affix_name || null;
+            snapshot.relicAffixDescription = snapshot.relicAffixDescription || meta.relic_affix_description || null;
+          }
+        }
         if (
           !linksByMessage.has(chatId)
         ) {
@@ -284,7 +345,7 @@ router.get(
       }
 
       const inventory =
-        await getInventory(pid);
+        await enrichRelicItems(await getInventory(pid));
 
       return res.json(
         inventory.map(
@@ -375,7 +436,7 @@ router.post(
       }
 
       const inventory =
-        await getInventory(pid);
+        await enrichRelicItems(await getInventory(pid));
 
       const inventoryById =
         new Map(

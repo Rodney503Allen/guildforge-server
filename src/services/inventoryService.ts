@@ -278,6 +278,97 @@ export async function addItemWithConn(
   }
 }
 
+/** Merge one existing stack into another. The target receives as many items as fit. */
+export async function mergeInventoryStacksAtomic(
+  pid: number,
+  sourceId: number,
+  targetId: number
+): Promise<{ moved: number; sourceQuantity: number; targetQuantity: number; sourceDeleted: boolean }> {
+  if (!Number.isSafeInteger(pid) || pid <= 0 ||
+      !Number.isSafeInteger(sourceId) || sourceId <= 0 ||
+      !Number.isSafeInteger(targetId) || targetId <= 0 || sourceId === targetId) {
+    throw new Error("INVALID_STACK_IDS");
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    // Lock both rows in a deterministic order to avoid concurrent merge deadlocks.
+    const [rows]: any = await conn.query(`
+      SELECT inventory_id, item_id, player_item_id, quantity, equipped, durability, randid
+      FROM inventory
+      WHERE player_id = ? AND inventory_id IN (?, ?)
+      ORDER BY inventory_id ASC
+      FOR UPDATE
+    `, [pid, Math.min(sourceId, targetId), Math.max(sourceId, targetId)]);
+
+    if (rows.length !== 2) throw new Error("STACK_NOT_FOUND");
+    const source = rows.find((r: any) => Number(r.inventory_id) === sourceId);
+    const target = rows.find((r: any) => Number(r.inventory_id) === targetId);
+    if (!source || !target || source.item_id == null ||
+        Number(source.item_id) !== Number(target.item_id) ||
+        source.player_item_id != null || target.player_item_id != null ||
+        Number(source.equipped) !== 0 || Number(target.equipped) !== 0 ||
+        source.durability != null || target.durability != null ||
+        source.randid != null || target.randid != null) {
+      throw new Error("STACKS_INCOMPATIBLE");
+    }
+
+    const [[item]]: any = await conn.query(
+      `SELECT category, type, item_type FROM items WHERE id = ? LIMIT 1`,
+      [source.item_id]
+    );
+    if (!item) throw new Error("ITEM_NOT_FOUND");
+    const category = String(item.category || "").toLowerCase();
+    const type = String(item.type || "").toLowerCase();
+    const itemType = String(item.item_type || "").toLowerCase();
+    if (!STACKABLE_CATEGORIES.has(category) || type === "tool" ||
+        itemType === "backpack" ||
+        ["mining_tool", "herbalism_tool", "woodcutting_tool"].includes(itemType)) {
+      throw new Error("ITEM_NOT_STACKABLE");
+    }
+
+    const sourceQty = Number(source.quantity);
+    const targetQty = Number(target.quantity);
+    if (!Number.isSafeInteger(sourceQty) || sourceQty < 1 ||
+        !Number.isSafeInteger(targetQty) || targetQty < 1 ||
+        sourceQty > DEFAULT_MAX_STACK_SIZE || targetQty > DEFAULT_MAX_STACK_SIZE) {
+      throw new Error("INVALID_STACK_QUANTITY");
+    }
+
+    const moved = Math.min(sourceQty, DEFAULT_MAX_STACK_SIZE - targetQty);
+    if (moved === 0) {
+      await conn.commit();
+      return { moved: 0, sourceQuantity: sourceQty, targetQuantity: targetQty, sourceDeleted: false };
+    }
+
+    const [updated]: any = await conn.query(
+      `UPDATE inventory SET quantity = quantity + ? WHERE inventory_id = ? AND player_id = ?`,
+      [moved, targetId, pid]
+    );
+    if (updated.affectedRows !== 1) throw new Error("STACK_UPDATE_FAILED");
+
+    const sourceDeleted = moved === sourceQty;
+    const [changed]: any = sourceDeleted
+      ? await conn.query(`DELETE FROM inventory WHERE inventory_id = ? AND player_id = ?`, [sourceId, pid])
+      : await conn.query(`UPDATE inventory SET quantity = quantity - ? WHERE inventory_id = ? AND player_id = ?`, [moved, sourceId, pid]);
+    if (changed.affectedRows !== 1) throw new Error("STACK_UPDATE_FAILED");
+
+    await conn.commit();
+    return {
+      moved,
+      sourceQuantity: sourceQty - moved,
+      targetQuantity: targetQty + moved,
+      sourceDeleted
+    };
+  } catch (error) {
+    try { await conn.rollback(); } catch {}
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function addPlayerItemToInventoryWithConn(
   conn: any,
   pid: number,

@@ -270,6 +270,8 @@ if (!chatLog || !chatInput) {
       attackSpeedMs:
         item.attackSpeedMs ??
         item.attack_speed_ms ?? "",
+      relicAffixName: item.relicAffixName || item.relic_affix_name || "",
+      relicAffixDescription: item.relicAffixDescription || item.relic_affix_description || "",
       rollJson:
         JSON.stringify(
           item.rollJson || []

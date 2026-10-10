@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
+  <title>Guildforge | World Map</title>
+  <link rel="stylesheet" href="/world.css">
+  <link rel="stylesheet" href="/rest.css">
+  <link rel="stylesheet" href="/ui/tooltip.css">
+  <link rel="stylesheet" href="/hunt-ready-check.css">
+  <link rel="stylesheet" href="/hunt-combat.css">
+  <link rel="stylesheet" href="/dungeon.css">
+
+  <link rel="stylesheet" href="/tutorial.css">
+</head>
+
+<body data-gf-terrain="GFPLACE_TERRAIN_END">
+  <main class="world-screen">
+
+    <!-- LEFT RAIL: player-facing / persistent utility information -->
+    <aside
+      class="world-rail world-rail--left frame-host"
+      aria-label="Adventurer information"
+    >
+      <span class="frame-border panel world-rail-frame" aria-hidden="true"></span>
+
+
+      <section class="field-actions-card world-rail-card">
+        <div class="field-actions-grid field-actions-grid--rail">
+
+          <button
+            id="rest-btn"
+            class="field-action frame-host"
+            type="button"
+            onclick="openRest()"
+          >
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <span class="field-action__icon" aria-hidden="true">
+              🔥
+            </span>
+
+            <span class="field-action__copy">
+              <strong>Rest</strong>
+              <small>Recover health and spirit</small>
+            </span>
+
+            <span class="field-action__arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+
+          <button
+            id="partyQuickBtn"
+            class="field-action frame-host"
+            type="button"
+            onclick="openPartyQuickView()"
+          >
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <span class="field-action__icon" aria-hidden="true">
+              ⚔
+            </span>
+
+            <span class="field-action__copy">
+              <strong>Party</strong>
+              <small id="partyQuickStatus">
+                Checking company...
+              </small>
+            </span>
+
+            <span class="field-action__arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+
+        </div>
+      </section>
+
+      <!-- Tracked Quest -->
+      <aside
+        id="questTracker"
+        class="qtracker qtracker--sidebar world-rail-card frame-host hidden"
+        aria-label="Tracked quest"
+      >
+        <span class="frame-border sub" aria-hidden="true"></span>
+
+        <div class="qtrackerHead">
+          <div class="qtrackerTitle" id="qtTitle">
+            Tracking
+          </div>
+
+          <div class="qtrackerBtns">
+            <button
+              id="qtMinBtn"
+              class="qtrackerBtn"
+              type="button"
+              title="Minimize"
+              aria-label="Minimize quest tracker"
+            >
+              —
+            </button>
+          </div>
+        </div>
+
+        <div class="qtrackerBody" id="qtBody">—</div>
+      </aside>
+
+      <section class="world-rail-card world-state-card frame-host">
+        <span class="frame-border sub" aria-hidden="true"></span>
+
+        <div class="world-rail-kicker">
+          World State
+        </div>
+
+        <div class="world-state-card__body">
+          <div class="world-state-card__row">
+            <span>Region Control</span>
+            <strong>Unclaimed</strong>
+          </div>
+
+          <div class="world-state-card__row">
+            <span>Sanctuary Standing</span>
+            <strong>Neutral</strong>
+          </div>
+        </div>
+      </section>
+
+      <!-- Unclaimed Loot -->
+      <button
+        id="pendingChestBtn"
+        class="pending-chest pending-chest--rail world-rail-card frame-host hidden"
+        type="button"
+        title="You have unclaimed loot"
+        aria-label="Open unclaimed loot"
+      >
+        <span class="frame-border sub" aria-hidden="true"></span>
+
+        <span class="pending-chest__icon" aria-hidden="true">
+          <img src="/images/chest.png" alt="" />
+          <span class="pending-chest-dot"></span>
+        </span>
+
+        <span class="pending-chest__copy">
+          <strong>Unclaimed Loot</strong>
+          <small>Rewards are waiting to be collected</small>
+        </span>
+
+        <span class="pending-chest__arrow" aria-hidden="true">›</span>
+      </button>
+    </aside>
+
+
+    <!-- CENTER: the world itself -->
+    <section
+      class="world-center"
+      aria-label="World map"
+    >
+      <header class="world-head world-head--center">
+        <div class="world-head-copy">
+          <div class="world-center-kicker">
+            Current Region
+          </div>
+
+          <div
+            id="world-title"
+            class="world-title world-title--center"
+          >
+            World Map
+          </div>
+
+          <div class="world-center-meta">
+            <span class="coords">
+              X: GFPLACE_X_END · Y: GFPLACE_Y_END
+            </span>
+          </div>
+        </div>
+
+        <div class="world-actions">
+          <button
+            id="open-world-map-btn"
+            class="world-action-btn"
+            type="button"
+            onclick="openFullWorldMap()"
+          >
+            World Map
+          </button>
+
+          <button
+            id="enter-town-btn"
+            class="world-action-btn"
+            type="button"
+            hidden
+            onclick="enterTown()"
+          >
+            Enter Town
+          </button>
+
+          <button
+            id="enter-dungeon-btn"
+            class="world-action-btn"
+            type="button"
+            hidden
+            onclick="enterDungeonFromWorld()"
+          >
+            Enter Dungeon
+          </button>
+        </div>
+      </header>
+
+      <section class="world-map-panel frame-host">
+        <span class="frame-border main" aria-hidden="true"></span>
+
+        <div class="map-stage">
+          <div class="map-wrapper">
+            <div class="grid-viewport">
+              <div class="grid" id="Grid">
+              GFPLACE_GRID_HTML_END
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="world-center-footer">
+        <span>
+          Move with WASD
+        </span>
+
+        <span aria-hidden="true">◆</span>
+
+        <span>
+          Explore • Gather • Hunt
+        </span>
+      </div>
+    </section>
+
+
+    <!-- RIGHT RAIL: nearby interactables + active trackers -->
+    <aside
+      class="world-rail world-rail--right frame-host"
+      id="nav-hud"
+      aria-label="Nearby interactables and active tracking"
+    >
+      <span class="frame-border panel world-rail-frame" aria-hidden="true"></span>
+
+      <section class="world-nearby-panel">
+        <div class="world-nearby-panel__heading">
+          <span class="world-nearby-panel__icon" aria-hidden="true">✦</span>
+          <span>Nearby</span>
+        </div>
+
+        <!-- Current Resource -->
+        <section
+          id="currentResourcePanel"
+          class="resource-panel world-rail-card"
+          hidden
+        ></section>
+
+        <!-- Interactables -->
+        <section class="nav-card nearby-card world-rail-card world-interactables-card frame-host">
+          <span class="frame-border sub" aria-hidden="true"></span>
+
+          <div class="nav-top">
+            <div class="nav-title">
+              <span class="nav-icon" aria-hidden="true">✦</span>
+              <span class="nav-label">Interactables</span>
+            </div>
+
+            <span class="nav-badge" id="nav-nearby-count">0</span>
+          </div>
+
+          <div class="nearby-interactions">
+            <div
+              class="world-interact__list"
+              id="worldInteractList"
+            >
+              <div class="world-interact__empty">
+                Nothing to interact with nearby.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Trackers live below interactables inside the Nearby panel -->
+        <div class="world-nearby-trackers">
+          <!-- Active Hunt -->
+          <section
+            id="huntTrackerPanel"
+            class="world-tracker-card world-tracker-card--hunt frame-host"
+            aria-live="polite"
+          >
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <button
+              type="button"
+              class="world-tracker-toggle"
+              id="huntTrackerToggle"
+              aria-expanded="true"
+              aria-controls="huntTrackerBody"
+            >
+              <span class="world-tracker-toggle__label">
+                <span class="world-tracker-toggle__kicker">Party Hunt</span>
+                <span id="huntTrackerName" class="world-tracker-toggle__name">
+                  No Active Hunt
+                </span>
+              </span>
+
+              <span class="world-tracker-toggle__chevron" aria-hidden="true">▾</span>
+            </button>
+
+            <div id="huntTrackerBody" class="world-tracker-body">
+              <div id="huntTrackerContent" class="world-tracker-empty">
+                Join or begin a Hunt to track its progress here.
+              </div>
+            </div>
+          </section>
+
+          <!-- Active Regional World Event -->
+          <section
+            id="worldEventPanel"
+            class="world-event-panel world-tracker-card world-tracker-card--event frame-host"
+            hidden
+            aria-live="polite"
+          >
+            <span class="frame-border sub" aria-hidden="true"></span>
+
+            <button
+              type="button"
+              class="world-tracker-toggle world-event-tracker-toggle"
+              id="worldEventTrackerToggle"
+              aria-expanded="true"
+              aria-controls="worldEventTrackerBody"
+            >
+              <span class="world-tracker-toggle__label">
+                <span class="world-event-panel__kicker">Regional Event</span>
+                <span
+                  id="worldEventName"
+                  class="world-event-panel__name world-tracker-toggle__name"
+                >
+                  World Event
+                </span>
+              </span>
+
+              <span class="world-event-tracker-toggle__right">
+                <span
+                  id="worldEventTimer"
+                  class="world-event-panel__timer"
+                  aria-label="World event time remaining"
+                >
+                  --:--
+                </span>
+                <span class="world-tracker-toggle__chevron" aria-hidden="true">▾</span>
+              </span>
+            </button>
+
+            <div id="worldEventTrackerBody" class="world-tracker-body">
+              <div
+                id="worldEventPhase"
+                class="world-event-panel__phase"
+              ></div>
+
+              <div
+                id="worldEventDescription"
+                class="world-event-panel__description"
+              ></div>
+
+              <div
+                id="worldEventObjectives"
+                class="world-event-panel__objectives"
+              ></div>
+
+              <div
+                id="worldEventState"
+                class="world-event-panel__state"
+                hidden
+              ></div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </aside>
+
+  </main>
+
+  <!-- Keep these outside the world frame -->
+  <div class="world-right">
+    <div id="statpanel-root"></div>
+  </div>
+
+  <!-- Party Quick View -->
+<div
+  id="partyQuickModal"
+  class="party-quick-modal hidden"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="partyQuickTitle"
+>
+  <div
+    class="party-quick-backdrop"
+    onclick="closePartyQuickView()"
+  ></div>
+
+  <section class="party-quick-card frame-host">
+    <span class="frame-border panel" aria-hidden="true"></span>
+
+    <header class="party-quick-header">
+
+      <div>
+        <div class="party-quick-kicker">
+          Adventuring Company
+        </div>
+
+        <h2 id="partyQuickTitle">
+          Your Party
+        </h2>
+      </div>
+
+      <button
+        class="party-quick-close"
+        type="button"
+        onclick="closePartyQuickView()"
+        aria-label="Close party view"
+      >
+        ✕
+      </button>
+
+    </header>
+
+
+    <div
+      id="partyQuickBody"
+      class="party-quick-body"
+    >
+      <div class="party-quick-loading">
+        Gathering your company...
+      </div>
+    </div>
+
+
+    <footer class="party-quick-footer">
+
+      <a
+        href="/party.html"
+        class="party-quick-manage"
+      >
+        Manage Party
+      </a>
+
+      <button
+        class="party-quick-dismiss"
+        type="button"
+        onclick="closePartyQuickView()"
+      >
+        Close
+      </button>
+
+    </footer>
+
+  </section>
+</div>
+
+  <!-- Hunt Ready Check -->
+<div
+  id="huntReadyModal"
+  class="hunt-ready-modal hidden"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="huntReadyTitle"
+  aria-describedby="huntReadyStatus"
+>
+  <div
+    class="hunt-ready-backdrop"
+    aria-hidden="true"
+  ></div>
+
+  <section class="hunt-ready-card frame-host">
+    <span
+      class="frame-border panel"
+      aria-hidden="true"
+    ></span>
+
+    <header class="hunt-ready-header">
+      <div>
+        <div class="hunt-ready-kicker">
+          Party Hunt
+        </div>
+
+        <h2 id="huntReadyTitle">
+          Prepare for Battle
+        </h2>
+      </div>
+
+      <div
+        id="huntReadyCountdown"
+        class="hunt-ready-countdown"
+        aria-label="Time remaining"
+      >
+        --:--
+      </div>
+    </header>
+
+    <div class="hunt-ready-content">
+      <p
+        id="huntReadyStatus"
+        class="hunt-ready-status"
+        aria-live="polite"
+      >
+        Waiting for the party...
+      </p>
+
+      <div
+        id="huntReadyParticipants"
+        class="hunt-ready-participants"
+        aria-label="Hunt participants"
+      >
+        <div class="hunt-ready-loading">
+          Gathering your company...
+        </div>
+      </div>
+
+      <div
+        id="huntReadyError"
+        class="hunt-ready-error"
+        role="alert"
+        hidden
+      ></div>
+    </div>
+
+    <footer class="hunt-ready-footer">
+      <button
+        id="huntReadyCancelBtn"
+        class="hunt-ready-btn hunt-ready-btn--cancel"
+        type="button"
+        hidden
+      >
+        Cancel
+      </button>
+
+      <button
+        id="huntReadyToggleBtn"
+        class="hunt-ready-btn hunt-ready-btn--ready"
+        type="button"
+        disabled
+      >
+        Ready
+      </button>
+    </footer>
+  </section>
+</div>
+
+<div id="combat-root"></div>
+  <!-- Shared Party Hunt Combat -->
+  <div id="hunt-combat-root"></div>
+
+  <!-- Dungeon Expedition Modal -->
+  <div
+    id="dungeonModal"
+    class="dungeon-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="dungeonTitle"
+  >
+    <div
+      class="dungeon-modal-backdrop"
+      aria-hidden="true"
+    ></div>
+
+    <div class="dungeon-modal-scroll">
+      <main class="dungeon-shell frame-host">
+        <span
+          class="frame-border main"
+          aria-hidden="true"
+        ></span>
+
+        <header class="dungeon-header">
+          <div>
+            <div class="dungeon-kicker">
+              Dungeon Expedition
+            </div>
+
+            <h1 id="dungeonTitle">
+              Dungeon
+            </h1>
+
+            <div
+              id="dungeonSubtitle"
+              class="dungeon-subtitle"
+            >
+              Preparing expedition...
+            </div>
+          </div>
+
+          <div class="dungeon-header-actions">
+            <div
+              id="dungeonPhaseBadge"
+              class="dungeon-phase-badge"
+            >
+              Loading
+            </div>
+
+            <button
+              id="dungeonLeaveBtn"
+              class="dungeon-btn dungeon-btn--ghost button-frame"
+              type="button"
+            >
+              Abandon Dungeon
+            </button>
+          </div>
+        </header>
+
+        <section class="dungeon-progress-card frame-host">
+          <span
+            class="frame-border panel"
+            aria-hidden="true"
+          ></span>
+
+          <div class="dungeon-progress-copy">
+            <div class="dungeon-section-label">
+              Expedition Progress
+            </div>
+
+            <div
+              id="dungeonRoomTitle"
+              class="dungeon-room-title"
+            >
+              Room —
+            </div>
+
+            <div
+              id="dungeonWaveText"
+              class="dungeon-wave-text"
+            >
+              Wave —
+            </div>
+          </div>
+
+          <div
+            id="dungeonRoomSteps"
+            class="dungeon-room-steps"
+            aria-label="Dungeon rooms"
+          ></div>
+        </section>
+
+        <section
+          id="dungeonEnemyCast"
+          class="dungeon-cast-warning frame-host hidden"
+          aria-live="assertive"
+        >
+          <span
+            class="frame-border panel"
+            aria-hidden="true"
+          ></span>
+
+          <div class="dungeon-cast-warning__icon">
+            ⚠
+          </div>
+
+          <div class="dungeon-cast-warning__body">
+            <div class="dungeon-cast-warning__eyebrow">
+              Enemy Ability Incoming
+            </div>
+
+            <div class="dungeon-cast-warning__top">
+              <strong id="dungeonCastName">
+                Incoming Attack
+              </strong>
+
+              <span id="dungeonCastTime">
+                0.0s
+              </span>
+            </div>
+
+            <div class="dungeon-cast-track">
+              <div
+                id="dungeonCastBar"
+                class="dungeon-cast-fill"
+              ></div>
+            </div>
+
+            <div class="dungeon-cast-warning__bottom">
+              <span id="dungeonCastTargets">
+                Prepare to react
+              </span>
+
+              <span
+                id="dungeonCastInterrupt"
+                class="dungeon-cast-interrupt"
+              >
+                Interruptible
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <div class="dungeon-layout">
+
+          <section class="dungeon-panel dungeon-enemy-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div class="dungeon-section-label">
+                Active Enemies
+              </div>
+            </div>
+
+            <div class="dungeon-loading">
+              Preparing enemies...
+            </div>
+          </section>
+
+          <section class="dungeon-panel dungeon-party-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div class="dungeon-section-label">
+                Adventuring Company
+              </div>
+            </div>
+
+            <div
+              id="dungeonPartyList"
+              class="dungeon-party-list"
+            >
+              <div class="dungeon-loading">
+                Gathering party...
+              </div>
+            </div>
+          </section>
+
+          <section class="dungeon-panel dungeon-log-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div class="dungeon-section-label">
+                Encounter
+              </div>
+            </div>
+
+            <div
+              id="dungeonCombatLog"
+              class="dungeon-combat-log"
+            >
+              <div>
+                The expedition prepares to move.
+              </div>
+            </div>
+          </section>
+
+          <section class="dungeon-panel dungeon-action-panel frame-host">
+            <span class="frame-border panel" aria-hidden="true"></span>
+
+            <div class="dungeon-panel-header">
+              <div>
+                <div class="dungeon-section-label">
+                  Your Actions
+                </div>
+
+                <div
+                  id="dungeonActionStatus"
+                  class="dungeon-action-status"
+                >
+                  Preparing...
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="dungeonSpellHotbar"
+              class="dungeon-spell-hotbar"
+            >
+              <div class="dungeon-loading">
+                Loading abilities...
+              </div>
+            </div>
+
+            <div
+              id="dungeonTargetPrompt"
+              class="dungeon-target-prompt hidden"
+            >
+              <span>
+                Choose a party member.
+              </span>
+
+              <button
+                id="dungeonCancelTargetBtn"
+                class="dungeon-btn dungeon-btn--ghost button-frame"
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+
+          <section
+            id="dungeonPhasePanel"
+            class="dungeon-panel dungeon-phase-panel frame-host hidden"
+          >
+            <span class="frame-border panel" aria-hidden="true"></span>
+          </section>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="rest-root"></div>
+
+
+  <!-- Gathering Modal -->
+  <div
+    id="gatheringModal"
+    class="gathering-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="gatheringModalTitle"
+  >
+    <div class="gathering-modal__card">
+      <div
+        class="gathering-modal__icon"
+        id="gatheringModalIcon"
+        aria-hidden="true"
+      >
+        ⛏️
+      </div>
+
+      <div
+        class="gathering-modal__title"
+        id="gatheringModalTitle"
+      >
+        Mining...
+      </div>
+
+      <div
+        class="gathering-modal__sub"
+        id="gatheringModalSub"
+      >
+        Gathering resources
+      </div>
+
+      <div
+        class="gathering-progress"
+        role="progressbar"
+        aria-label="Gathering progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div
+          id="gatheringProgressFill"
+          class="gathering-progress__fill"
+        ></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loot Chest Modal -->
+  <div
+    id="lootChestModal"
+    class="loot-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Loot chest"
+  >
+    <div class="loot-panel">
+      <div id="lootChestSealed" class="loot-sealed">
+        <img
+          src="/images/chest.png"
+          id="lootChestIcon"
+          alt="Sealed loot chest"
+        />
+
+        <p>Click the chest to open</p>
+      </div>
+
+      <div id="lootChestOpened" class="loot-opened hidden">
+        <h3>Loot</h3>
+
+        <div id="lootItems"></div>
+
+        <div class="loot-actions">
+          <button
+            id="lootClaimBtn"
+            class="loot-btn primary"
+            type="button"
+          >
+            Collect
+          </button>
+
+          <button
+            id="lootCloseBtn"
+            class="loot-btn secondary"
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lore Modal -->
+  <div
+    id="loreModal"
+    class="lore-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="loreTitle"
+  >
+    <div class="lore-backdrop"></div>
+
+    <div class="lore-card">
+      <div class="lore-header">
+        <div id="loreTitle" class="lore-title">
+          Discovery
+        </div>
+
+        <button
+          id="loreCloseBtn"
+          class="lore-close-btn"
+          type="button"
+          aria-label="Close discovery"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div id="loreBody" class="lore-body"></div>
+
+      <div class="lore-footer">
+        <button
+          id="loreOkBtn"
+          class="lore-ok-btn"
+          type="button"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="fullWorldMapModal" class="full-world-map-modal hidden" aria-hidden="true">
+    <div class="full-world-map-dialog frame-host" role="dialog" aria-modal="true" aria-labelledby="fullWorldMapTitle">
+      <span class="frame-border main" aria-hidden="true"></span>
+      <div class="full-world-map-head">
+        <div>
+          <div class="full-world-map-kicker">VALEWYNN</div>
+          <h2 id="fullWorldMapTitle">World Map</h2>
+        </div>
+        <div class="full-world-map-head-actions">
+          <button id="worldMapCenterBtn" class="world-map-tool-btn" type="button">Center on Me</button>
+          <button id="worldMapCloseBtn" class="world-map-close-btn" type="button" aria-label="Close world map">×</button>
+        </div>
+      </div>
+
+      <div id="fullWorldMapViewport" class="full-world-map-viewport frame-host">
+        <span class="frame-border panel" aria-hidden="true"></span>
+        <canvas id="fullWorldMapCanvas"></canvas>
+        <div id="worldMapHoverCard" class="world-map-hover-card" hidden></div>
+      </div>
+
+      <div class="full-world-map-foot">
+        <div class="world-map-legend" aria-label="Map legend">
+          <span class="world-map-legend-title">Legend</span>
+          <span><b class="world-map-legend-dot is-you"></b>You</span>
+          <span><b class="world-map-legend-dot is-party"></b>Party</span>
+          <span><b class="world-map-legend-icon is-haven">⌂</b>Haven</span>
+          <span><b class="world-map-legend-icon is-dungeon">◆</b>Dungeon</span>
+          <span><b class="world-map-legend-dot is-location"></b>Location</span>
+        </div>
+        <span class="full-world-map-help">Hover for region • Drag to pan • Wheel to zoom • M to toggle</span>
+      </div>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="/statpanel.css" />
+  <link rel="stylesheet" href="/ui/toast.css" />
+
+  <script src="/ui/tooltip.js"></script>
+  <script src="/lootChest.js"></script>
+
+<script>
+  window.__PLAYER_ID__ =
+    GFPLACE_PLAYER_ID_END;
+
+  window.__RESOURCE_NODES__ =
+    GFPLACE_RESOURCE_NODES_END;
+
+  window.__HUNT_TARGETS__ =
+    GFPLACE_HUNT_TARGETS_END;
+
+  window.__WORLD_EVENT_INTERACTS__ =
+    GFPLACE_EVENT_INTERACTS_END;
+
+  window.__WORLD_EVENT_MAP_SPAWNS__ =
+    GFPLACE_EVENT_MAP_SPAWNS_END;
+</script>
+<script src="/ui/toast.js"></script>
+
+<!-- Global realtime connection -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/guildforgeSocket.js"></script>
+
+<script src="/statpanel.js"></script>
+<script src="/world.page.js" defer></script>
+<script src="/world-quests.js"></script>
+<script src="/world-combat.js"></script>
+<script src="/tutorial.js?v=8"></script>
+<script src="/world-events.js"></script>
+<script src="/world.js"></script>
+
+<script src="/hunt-ready-check.js"></script>
+<script src="/hunt-combat.js"></script>
+<script src="/rest.js" defer></script>
+<script src="/dungeon.js"></script>
+</body>
+
+
+</html>

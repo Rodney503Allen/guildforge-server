@@ -3,6 +3,7 @@ import { db } from "../db";
 import type { DerivedStats } from "./statEngine";
 import { getFinalPlayerStats } from "./playerService";
 import { resolveAttack } from "./combatEngine";
+import { ActiveCreatureEffect, CreatureEffectType, CREATURE_EFFECTS, applyCreatureEffect, hasDeepFreeze, isStunned, parseCreatureEffect, snapshotCreatureEffects } from "./creatureEffectService";
 import {
   COMBAT_TIMING,
   advanceCombatActorGauge,
@@ -81,6 +82,7 @@ export type CombatActor = {
 
   atbRateMult: number; // 0.0 - 2.0
 
+  effectType?: CreatureEffectType | null;
   cooldowns: Record<string, number>; // spell:12 => timestamp, item:health => timestamp
 };
 
@@ -142,6 +144,7 @@ export type CombatSession = {
     enemy: CombatEnemyEffect[];
     playerHots: CombatPlayerHotEffect[];
     playerBuffs: Array<{ stat: string; value: number; source: string | null; spellName: string | null; remainingMs: number; icon: string | null }>;
+    playerDebuffs: ActiveCreatureEffect[];
   };
 
   rewards?: {
@@ -221,7 +224,7 @@ async function refreshSessionPlayer(session: CombatSession) {
   session.player.maxHp = Number(player.maxhp ?? 1);
   session.player.sp = Number(player.spoints ?? 0);
   session.player.maxSp = Number(player.maxspoints ?? 0);
-  session.player.atbRateMult = Number(player.atbRateMult ?? 1);
+  session.player.atbRateMult = Number(player.atbRateMult ?? 1) * (hasDeepFreeze(session.effects.playerDebuffs) ? 0.5 : 1);
 
   return player;
 }
@@ -244,6 +247,7 @@ async function refreshSessionEnemy(session: CombatSession) {
       c.level,
       c.description,
       c.creatureimage,
+      c.effect_type,
 
       ca.name AS affix_name,
       ca.description AS affix_description,
@@ -358,6 +362,7 @@ async function refreshSessionEnemy(session: CombatSession) {
   };
 
   session.enemy.img = enemyRow.creatureimage ? String(enemyRow.creatureimage) : null;
+  session.enemy.effectType = parseCreatureEffect(enemyRow.effect_type);
 
   session.enemy.name = enemyDisplayName;
   session.enemy.hp = Number(enemyRow.hp ?? 0);
@@ -744,6 +749,50 @@ async function processEnemyDots(session: CombatSession) {
   }
 }
 
+/** Creature DOTs use the existing player mitigation path to preserve defensive talents. */
+async function processPlayerCreatureEffects(session: CombatSession, now: number) {
+  const effects = session.effects.playerDebuffs;
+  for (const effect of effects) {
+    const definition = CREATURE_EFFECTS[effect.type];
+    if (!definition.tickIntervalMs || effect.nextTickAt == null) continue;
+    // Tick at scheduled times only, never after the effect expires.
+    while (effect.nextTickAt <= now && effect.nextTickAt <= effect.expiresAt && session.player.hp > 0) {
+      // Bleed is based on the damage the initiating hit actually dealt, not max HP.
+      // Its damage was already mitigated by the original attack, so do not mitigate it twice.
+      const isBleed = effect.type === 'bleed';
+      const ticksLeft = Math.max(1, effect.bleedTicksRemaining ?? 1);
+      const bleedDamage = Math.ceil(Math.max(0, effect.bleedRemainingDamage ?? 0) / ticksLeft);
+      const damage = isBleed ? bleedDamage : Math.max(1, Math.min(200, Math.floor(session.player.maxHp * definition.tickMaxHpPercent * effect.stacks)));
+      const mitigation = isBleed ? null : await mitigateIncomingPlayerDamage(session.playerId, session.player.hp, damage, session.player.maxHp);
+      const actual = isBleed ? damage : Math.max(0, Number(mitigation?.finalDamage || 0));
+      const healing = Number(mitigation?.aegisHealing || 0) + Number(mitigation?.shieldBreakHealing || 0) + Number(mitigation?.thornsHealing || 0) + Math.floor(session.player.maxHp * Number(mitigation?.shieldBreakPartyHealPercent || 0) / 100);
+      if (isBleed) {
+        effect.bleedRemainingDamage = Math.max(0, (effect.bleedRemainingDamage ?? 0) - actual);
+        effect.bleedTicksRemaining = Math.max(0, ticksLeft - 1);
+      }
+      session.player.hp = Math.min(session.player.maxHp, Math.max(0, session.player.hp - actual + healing));
+      session.player.stats.hpoints = session.player.hp;
+      await db.query('UPDATE players SET hpoints = ? WHERE id = ?', [session.player.hp, session.playerId]);
+      publishPlayerStatePatch(session.playerId, { hpoints: session.player.hp, maxhp: session.player.maxHp });
+      if (actual > 0) pushDamageEvent(session, { target: 'player', amount: actual, crit: false, kind: 'dot' });
+      pushLog(session, `${definition.icon} ${definition.label} deals ${actual} damage.`);
+      effect.nextTickAt += definition.tickIntervalMs;
+      if (session.player.hp <= 0) {
+        await db.query('DELETE FROM player_creatures WHERE player_id = ?', [session.playerId]);
+        session.state = 'defeat';
+        pushLog(session, '☠ You were slain!');
+        return;
+      }
+    }
+  }
+  session.effects.playerDebuffs = effects.filter(effect => Math.max(effect.expiresAt, effect.immunityUntil ?? 0) > now);
+}
+
+export function isPlayerCombatStunned(playerId: number): boolean {
+  const session = combatSessions.get(playerId);
+  return !!session && session.state === 'active' && isStunned(session.effects.playerDebuffs);
+}
+
 async function processPlayerHots(session: CombatSession) {
   if (session.state !== "active") return;
   const ticks = await processDuePlayerHots(session.playerId);
@@ -777,7 +826,7 @@ async function processPlayerAutoAttack(session: CombatSession) {
   if (session.state !== "active") return;
 
   const now = Date.now();
-  if (now < session.nextPlayerAutoAttackAt) return;
+  if (now < session.nextPlayerAutoAttackAt || isStunned(session.effects.playerDebuffs, now)) return;
 
   const player = await refreshSessionPlayer(session);
   const enemyStats = await refreshSessionEnemy(session);
@@ -1195,6 +1244,29 @@ async function processEnemyAction(session: CombatSession) {
       );
     }
   }
+  // Status effects apply only when the attack actually connects and the player survives.
+  // Shield-absorbed hits still count as a hit; dodged attacks do not.
+  if (!result.dodged && newHP > 0 && session.enemy.effectType) {
+    const outcome = applyCreatureEffect(session.effects.playerDebuffs, session.enemy.effectType);
+    if (outcome.applied && outcome.effect) {
+      // Only HP damage from the connecting hit becomes Bleed damage.
+      // A reapplication replaces (rather than adds to) the existing bleed pool.
+      if (session.enemy.effectType === 'bleed') {
+        if (hpDamage <= 0) {
+          session.effects.playerDebuffs = session.effects.playerDebuffs.filter(e => e !== outcome.effect);
+        } else {
+          outcome.effect.bleedRemainingDamage = Math.max(0, Math.floor(hpDamage));
+          outcome.effect.bleedTicksRemaining = 3;
+        }
+      }
+      if (session.enemy.effectType !== 'bleed' || hpDamage > 0) {
+      const kind = session.enemy.effectType;
+      const label = kind === 'frost' && outcome.effect.stacks >= 2 ? 'Frozen' : CREATURE_EFFECTS[kind].label;
+      pushLog(session, `${CREATURE_EFFECTS[kind].icon} ${label} affects you${kind === 'frost' ? ` (${outcome.effect.stacks}/2)` : ''}!`);
+      if (kind === 'frost') session.player.atbRateMult = Number(player.atbRateMult ?? 1) * (hasDeepFreeze(session.effects.playerDebuffs) ? 0.5 : 1);
+      }
+    }
+  }
   consumeActorTurn(session.enemy, 450);
 
   if (newHP <= 0) {
@@ -1257,8 +1329,9 @@ export async function createCombatSession(
     c.level,
     c.description,
     c.creatureimage,
-    c.attack_speed,
-    ca.name AS affix_name,
+      c.attack_speed,
+      c.effect_type,
+      ca.name AS affix_name,
     ca.description AS affix_description,
     ca.hp_mult,
     ca.attack_mult,
@@ -1340,6 +1413,7 @@ export async function createCombatSession(
       enemy: [],
       playerHots: [],
       playerBuffs: [],
+      playerDebuffs: [],
     },
     playerAutoAttackMs: getPlayerAutoAttackMs(player),
     nextPlayerAutoAttackAt: now + getPlayerAutoAttackMs(player),
@@ -1366,6 +1440,7 @@ export async function createCombatSession(
       img: enemyRow.creatureimage ? String(enemyRow.creatureimage) : null,
       level: Number(enemyRow.level ?? 1),
       description: enemyDescription,
+      effectType: parseCreatureEffect(enemyRow.effect_type),
       hp: Number(enemyRow.hp ?? 0),
       maxHp: modifiedMaxHp,
       sp: 0,
@@ -1409,11 +1484,43 @@ export async function advanceCombatSession(session: CombatSession) {
 
   const now = Date.now();
   const elapsedMs = Math.max(0, now - session.updatedAt);
+  // Account for the portion of this tick spent chilled, frozen or lightning-stunned.
+  // Capture these windows BEFORE expiring effects are pruned below.
+  const tickStart = session.updatedAt;
+  const activeDuringTick = session.effects.playerDebuffs.filter(e => e.expiresAt > tickStart);
+  const boundaries = [tickStart, now];
+  for (const effect of activeDuringTick) {
+    if (effect.appliedAt > tickStart && effect.appliedAt < now) boundaries.push(effect.appliedAt);
+    if (effect.expiresAt > tickStart && effect.expiresAt < now) boundaries.push(effect.expiresAt);
+  }
+  boundaries.sort((a, b) => a - b);
+  let lostAutoMs = 0;
+  const atbSegments: Array<{ start: number; end: number; paused: boolean }> = [];
+  for (let i = 1; i < boundaries.length; i++) {
+    const start = boundaries[i - 1];
+    const end = boundaries[i];
+    if (end <= start) continue;
+    const midpoint = (start + end) / 2;
+    const frost = activeDuringTick.find(e => e.type === 'frost' && e.appliedAt <= midpoint && e.expiresAt > midpoint);
+    const lightning = activeDuringTick.some(e => e.type === 'lightning' && e.appliedAt <= midpoint && e.expiresAt > midpoint);
+    const paused = lightning || !!(frost && frost.stacks >= 2);
+    const rate = paused ? 0 : frost ? 0.5 : 1;
+    lostAutoMs += (end - start) * (1 - rate);
+    atbSegments.push({ start, end, paused });
+  }
+  session.nextPlayerAutoAttackAt += lostAutoMs;
+  // Process player-facing effects before advancing ATB, so expiry restores speed.
+  await processPlayerCreatureEffects(session, now);
+  if (session.state !== 'active') return session;
+  session.player.atbRateMult = Number(playerExists.atbRateMult ?? 1) * (hasDeepFreeze(session.effects.playerDebuffs, now) ? 0.5 : 1);
   const elapsedSec = elapsedMs / 1000;
 
-  for (const actor of [session.player, session.enemy]) {
-    advanceCombatActorGauge(actor, session.updatedAt, now);
+  // Pause ATB only for the actual stunned portion of each tick, including
+  // when a short Lightning stun expires between two server updates.
+  for (const segment of atbSegments) {
+    if (!segment.paused) advanceCombatActorGauge(session.player, segment.start, segment.end);
   }
+  advanceCombatActorGauge(session.enemy, session.updatedAt, now);
 
   session.updatedAt = now;
 
@@ -1510,10 +1617,14 @@ export function buildCombatSnapshot(session: CombatSession) {
       sp: session.player.sp,
       maxSp: session.player.maxSp,
       gauge: session.player.gauge,
-      ready: session.player.ready,
+      ready: session.player.ready && !isStunned(session.effects.playerDebuffs, now),
+      stunned: isStunned(session.effects.playerDebuffs, now),
+      atbRateMult: session.player.atbRateMult,
       recoveryMs: Math.max(0, session.player.recoveryUntil - now),
-      readyInMs: getActorReadyInMs(session.player),
+      readyInMs: getActorReadyInMs(session.player), // Remaining ATB time only; frozen countdown stays visually paused
       autoAttackMs: Math.max(0, session.nextPlayerAutoAttackAt - now),
+      lightningStunned: session.effects.playerDebuffs.some(e => e.type === 'lightning' && e.expiresAt > now),
+      frostState: session.effects.playerDebuffs.some(e => e.type === 'frost' && e.expiresAt > now && e.stacks >= 2) ? 'frozen' : session.effects.playerDebuffs.some(e => e.type === 'frost' && e.expiresAt > now) ? 'chilled' : 'none',
       autoAttackTotalMs: session.playerAutoAttackMs,
       cooldowns: session.player.cooldowns,
     },
@@ -1532,6 +1643,7 @@ export function buildCombatSnapshot(session: CombatSession) {
     effects: {
       playerHots: session.effects.playerHots.map((effect) => ({ ...effect })),
       playerBuffs: session.effects.playerBuffs.map((effect) => ({ ...effect })),
+       playerDebuffs: snapshotCreatureEffects(session.effects.playerDebuffs, now),
       enemy: session.effects.enemy.map((effect) => ({
         ...effect,
         remainingMs: Math.max(0, Number(effect.remainingMs || 0)),
