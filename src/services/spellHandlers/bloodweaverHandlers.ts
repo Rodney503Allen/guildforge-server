@@ -268,6 +268,10 @@ SpellHandlerDefinition = {
       ]
     );
 
+    // Synchronize the handler's caster stats with the persisted HP.
+    // The combat route also needs to apply result.playerHP to its session.
+    player.hpoints = playerHP;
+    player.hp = playerHP;
 
     // =================================================
     // LOG

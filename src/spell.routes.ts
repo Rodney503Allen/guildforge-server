@@ -820,6 +820,17 @@ const spellEnemy =
       TutorialStep.USE_FIRST_POTION
     );
 
+    // Apply handler-owned HP changes before generic lifesteal or other post-cast effects.
+    // Life Siphon has already persisted its heal; keep the session and stats in sync.
+    if (result.playerHP !== undefined) {
+      const healedHP = Math.max(0, Math.min(session.player.maxHp, Number(result.playerHP)));
+      if (Number.isFinite(healedHP)) {
+        session.player.hp = healedHP;
+        session.player.stats.hpoints = healedHP;
+        player.hpoints = healedHP;
+      }
+    }
+
     const berserkerCriticalGauge = await processBerserkerCriticalGauge(pid, Boolean(result.crit));
     if (berserkerCriticalGauge > 0 && Number(result.damage) > 0) {
       result.casterGaugeGain = (Number(result.casterGaugeGain) || 0) + berserkerCriticalGauge;
@@ -832,6 +843,8 @@ const spellEnemy =
       if (actual > 0) {
         session.player.hp += actual;
         result.playerHP = session.player.hp;
+        session.player.stats.hpoints = session.player.hp;
+        player.hpoints = session.player.hp;
         result.healing = (Number(result.healing) || 0) + actual;
         await db.query(`UPDATE players SET hpoints=? WHERE id=?`, [session.player.hp, pid]);
       }
