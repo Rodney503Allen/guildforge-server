@@ -2,7 +2,7 @@ const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
 
-const inputDir = path.resolve(__dirname, "public/images/avatars");
+const inputDir = path.resolve(__dirname, "public/images/map_tiles/poi/whisper");
 
 async function convertDirectory(currentDir) {
   const entries = fs.readdirSync(currentDir, { withFileTypes: true });
